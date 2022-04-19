@@ -1259,6 +1259,69 @@ static void test_set_getsockopt(void)
     ok(err == SOCKET_ERROR && WSAGetLastError() == WSAEFAULT,
        "got %d with %d (expected SOCKET_ERROR with WSAEFAULT)\n", err, WSAGetLastError());
 
+    /* TCP_NODELAY: optlen doesn't matter on windows, it should work with any positive value */
+    size = sizeof(value);
+
+    value = 1;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, 1);
+    ok (!err, "setsockopt TCP_NODELAY failed with optlen == 1\n");
+    value = 0xff;
+    err = getsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, &size);
+    ok(!err, "getsockopt TCP_NODELAY failed\n");
+    ok(value == 1, "TCP_NODELAY should be 1\n");
+    value = 0;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, sizeof(value));
+    ok(!err, "Failed to reset TCP_NODELAY to 0\n");
+
+    value = 1;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, 4);
+    ok (!err, "setsockopt TCP_NODELAY failed with optlen == 4\n");
+    value = 0xff;
+    err = getsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, &size);
+    ok(!err, "getsockopt TCP_NODELAY failed\n");
+    ok(value == 1, "TCP_NODELAY should be 1\n");
+    value = 0;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, sizeof(value));
+    ok(!err, "Failed to reset TCP_NODELAY to 0\n");
+
+    value = 1;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, 42);
+    ok (!err, "setsockopt TCP_NODELAY failed with optlen == 42\n");
+    value = 0xff;
+    err = getsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, &size);
+    ok(!err, "getsockopt TCP_NODELAY failed\n");
+    ok(value == 1, "TCP_NODELAY should be 1\n");
+    value = 0;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, sizeof(value));
+    ok(!err, "Failed to reset TCP_NODELAY to 0\n");
+
+    value = 1;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, 0);
+    ok(err == SOCKET_ERROR && WSAGetLastError() == WSAEFAULT,
+       "got %d with %d (expected SOCKET_ERROR with WSAEFAULT)\n", err, WSAGetLastError());
+    value = 0xff;
+    err = getsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, &size);
+    ok(!err, "getsockopt TCP_NODELAY failed\n");
+    ok(!value, "TCP_NODELAY should be 0\n");
+
+    value = 1;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, -1);
+    /* On win 10 pro, this sets the error to WSAENOBUFS instead of WSAEFAULT */
+    ok(err == SOCKET_ERROR && (WSAGetLastError() == WSAEFAULT || WSAGetLastError() == WSAENOBUFS),
+       "got %d with %d (expected SOCKET_ERROR with either WSAEFAULT or WSAENOBUFS)\n", err, WSAGetLastError());
+    value = 0xff;
+    err = getsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, &size);
+    ok(!err, "getsockopt TCP_NODELAY failed\n");
+    ok(!value, "TCP_NODELAY should be 0\n");
+
+    value = 0x100;
+    err = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, 4);
+    ok (!err, "setsockopt TCP_NODELAY failed with optlen == 4 and optvalue = 0x100\n");
+    value = 0xff;
+    err = getsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)&value, &size);
+    ok(!err, "getsockopt TCP_NODELAY failed\n");
+    ok(!value, "TCP_NODELAY should be 0\n");
+
     /* Test for erroneously passing a value instead of a pointer as optval */
     size = sizeof(char);
     err = setsockopt(s, SOL_SOCKET, SO_DONTROUTE, (char *)1, size);
@@ -1289,7 +1352,7 @@ static void test_set_getsockopt(void)
     SetLastError(0xdeadbeef);
     i = 1234;
     err = setsockopt(s, SOL_SOCKET, SO_ERROR, (char *) &i, size);
-todo_wine
+    todo_wine
     ok( !err && !WSAGetLastError(),
         "got %d with %d (expected 0 with 0)\n",
         err, WSAGetLastError());
@@ -1300,7 +1363,7 @@ todo_wine
     ok( !err && !WSAGetLastError(),
         "got %d with %d (expected 0 with 0)\n",
         err, WSAGetLastError());
-todo_wine
+    todo_wine
     ok (i == 1234, "got %d (expected 1234)\n", i);
 
     /* Test invalid optlen */
@@ -6054,7 +6117,7 @@ todo_wine {
     ret = pWSASendMsg(sock, &msg, 0, &bytesSent, NULL, NULL);
     ok(ret == SOCKET_ERROR, "WSASendMsg should have failed\n");
     err = WSAGetLastError();
-todo_wine
+    todo_wine
     ok(err == WSAEINVAL, "expected 10014, got %d instead\n", err);
     closesocket(sock);
 }
@@ -7195,7 +7258,7 @@ static void test_AcceptEx(void)
     bret = pAcceptEx(listener, acceptor, buffer, sizeof(buffer) - 2*(sizeof(struct sockaddr_in) + 16),
         sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
         &bytesReturned, &overlapped);
-todo_wine
+    todo_wine
     ok(bret == FALSE && WSAGetLastError() == WSAEINVAL, "AcceptEx on a non-listening socket "
         "returned %d + errno %d\n", bret, WSAGetLastError());
     ok(overlapped.Internal == STATUS_PENDING, "got %08x\n", (ULONG)overlapped.Internal);
@@ -7761,8 +7824,8 @@ static void test_shutdown(void)
 
     WSASetLastError(0xdeadbeef);
     ret = recv(server, buffer, sizeof(buffer), 0);
-    todo_wine ok(ret == -1, "got %d\n", ret);
-    todo_wine ok(WSAGetLastError() == WSAESHUTDOWN, "got error %u\n", WSAGetLastError());
+    ok(ret == -1, "got %d\n", ret);
+    ok(WSAGetLastError() == WSAESHUTDOWN, "got error %u\n", WSAGetLastError());
 
     ret = send(server, "test", 5, 0);
     ok(ret == 5, "got %d\n", ret);
@@ -7856,8 +7919,8 @@ static void test_shutdown(void)
 
     WSASetLastError(0xdeadbeef);
     ret = recv(server, buffer, sizeof(buffer), 0);
-    todo_wine ok(ret == -1, "got %d\n", ret);
-    todo_wine ok(WSAGetLastError() == WSAESHUTDOWN, "got error %u\n", WSAGetLastError());
+    ok(ret == -1, "got %d\n", ret);
+    ok(WSAGetLastError() == WSAESHUTDOWN, "got error %u\n", WSAGetLastError());
 
     WSASetLastError(0xdeadbeef);
     ret = send(server, "test", 5, 0);
@@ -8779,7 +8842,7 @@ static void test_sioAddressListChange(void)
     ok(ret == WAIT_OBJECT_0, "failed to get overlapped event %u\n", ret);
 
     ret = WaitForSingleObject(event2, 500);
-todo_wine
+    todo_wine
     ok(ret == WAIT_OBJECT_0, "failed to get change event %u\n", ret);
 
     ret = WaitForSingleObject(event3, 500);
@@ -10340,7 +10403,7 @@ todo_wine
     SetLastError(0xdeadbeef);
     ret = GetQueuedCompletionStatus(port, &bytes, &key, &ovl_iocp, 100);
     ok(!ret, "got %d\n", ret);
-todo_wine
+    todo_wine
     ok(GetLastError() == ERROR_CONNECTION_ABORTED || GetLastError() == ERROR_NETNAME_DELETED /* XP */, "got %u\n", GetLastError());
     ok(!bytes, "got bytes %u\n", bytes);
     ok(key == 0x12345678, "got key %#lx\n", key);
@@ -10348,7 +10411,7 @@ todo_wine
     if (ovl_iocp)
     {
         ok(!ovl_iocp->InternalHigh, "got %#lx\n", ovl_iocp->InternalHigh);
-todo_wine
+    todo_wine
         ok(ovl_iocp->Internal == (ULONG)STATUS_CONNECTION_ABORTED || ovl_iocp->Internal == (ULONG)STATUS_LOCAL_DISCONNECT /* XP */, "got %#lx\n", ovl_iocp->Internal);
     }
 
@@ -10579,7 +10642,7 @@ static void iocp_async_read_thread_closesocket(SOCKET src)
     SetLastError(0xdeadbeef);
     ret = GetQueuedCompletionStatus(port, &bytes, &key, &ovl_iocp, 100);
     ok(!ret, "got %d\n", ret);
-todo_wine
+    todo_wine
     ok(GetLastError() == ERROR_CONNECTION_ABORTED || GetLastError() == ERROR_NETNAME_DELETED /* XP */, "got %u\n", GetLastError());
     ok(!bytes, "got bytes %u\n", bytes);
     ok(key == 0x12345678, "got key %#lx\n", key);
@@ -10587,7 +10650,7 @@ todo_wine
     if (ovl_iocp)
     {
         ok(!ovl_iocp->InternalHigh, "got %#lx\n", ovl_iocp->InternalHigh);
-todo_wine
+    todo_wine
         ok(ovl_iocp->Internal == (ULONG)STATUS_CONNECTION_ABORTED || ovl_iocp->Internal == (ULONG)STATUS_LOCAL_DISCONNECT /* XP */, "got %#lx\n", ovl_iocp->Internal);
     }
 
@@ -11735,10 +11798,10 @@ static void do_sockopt_validity_tests(const char *type, SOCKET sock, int level,
         WSASetLastError(0);
         rc = getsockopt(sock, level, tests[i].opt, value, &count);
         expected_rc = tests[i].get_error ? SOCKET_ERROR : 0;
-todo_wine_if(!tests[i].get_error && tests[i].todo)
+        todo_wine_if(!tests[i].get_error && tests[i].todo)
         ok(rc == expected_rc || broken(rc == SOCKET_ERROR && WSAGetLastError() == WSAENOPROTOOPT),
            "expected getsockopt to return %i, got %i\n", expected_rc, rc);
-todo_wine_if(tests[i].todo)
+        todo_wine_if(tests[i].todo)
         ok(WSAGetLastError() == tests[i].get_error || broken(rc == SOCKET_ERROR && WSAGetLastError() == WSAENOPROTOOPT),
            "expected getsockopt to set error %i, got %i\n", tests[i].get_error, WSAGetLastError());
 
@@ -11751,10 +11814,10 @@ todo_wine_if(tests[i].todo)
         WSASetLastError(0);
         rc = setsockopt(sock, level, tests[i].opt, value, count);
         expected_rc = tests[i].set_error ? SOCKET_ERROR : 0;
-todo_wine_if(!tests[i].set_error && tests[i].todo)
+        todo_wine_if(!tests[i].set_error && tests[i].todo)
         ok(rc == expected_rc || broken(rc == SOCKET_ERROR && WSAGetLastError() == WSAENOPROTOOPT),
            "expected setsockopt to return %i, got %i\n", expected_rc, rc);
-todo_wine_if(tests[i].todo)
+        todo_wine_if(tests[i].todo)
         ok(WSAGetLastError() == tests[i].set_error || broken(rc == SOCKET_ERROR && WSAGetLastError() == WSAENOPROTOOPT),
            "expected setsockopt to set error %i, got %i\n", tests[i].set_error, WSAGetLastError());
 

@@ -25,8 +25,6 @@
 
 typedef SSIZE_T streamoff;
 typedef SSIZE_T streamsize;
-#define STREAMOFF_BITS 32
-#define STREAMSIZE_BITS 32
 
 void __cdecl _invalid_parameter(const wchar_t*, const wchar_t*,
         const wchar_t*, unsigned int, uintptr_t);
@@ -266,7 +264,7 @@ typedef enum {
 typedef struct _iosarray {
     struct _iosarray *next;
     int index;
-    int long_val;
+    LONG long_val;
     void *ptr_val;
 } IOS_BASE_iosarray;
 

@@ -297,8 +297,8 @@ sub generate_spec_entry($$)
 }
 
 my %core_functions;
-my %cl_enums;
-my (%cl_types, @cl_types);  # also use an array to preserve declaration order
+my %header_enums;
+my (%header_types, @header_types);  # also use an array to preserve declaration order
 
 # some functions need a hand-written wrapper
 sub needs_pe_wrapper($)
@@ -315,6 +315,17 @@ sub needs_pe_wrapper($)
 
             # deprecated and absent from headers
             "clSetCommandQueueProperty" => 1,
+
+            # needs GL object unwrapping
+            "clCreateFromGLBuffer" => 1,
+            "clCreateFromGLRenderbuffer" => 1,
+            "clCreateFromGLTexture" => 1,
+            "clCreateFromGLTexture2D" => 1,
+            "clCreateFromGLTexture3D" => 1,
+            "clEnqueueAcquireGLObjects" => 1,
+            "clEnqueueReleaseGLObjects" => 1,
+            "clGetGLObjectInfo" => 1,
+            "clGetGLTextureInfo" => 1,
         );
     my $name = shift;
 
@@ -349,6 +360,17 @@ sub needs_unix_function($)
             "clGetExtensionFunctionAddress" => 1,
             "clGetExtensionFunctionAddressForPlatform" => 1,
             "clSetCommandQueueProperty" => 1,
+
+            # not yet implemented
+            "clCreateFromGLBuffer" => 1,
+            "clCreateFromGLRenderbuffer" => 1,
+            "clCreateFromGLTexture" => 1,
+            "clCreateFromGLTexture2D" => 1,
+            "clCreateFromGLTexture3D" => 1,
+            "clEnqueueAcquireGLObjects" => 1,
+            "clEnqueueReleaseGLObjects" => 1,
+            "clGetGLObjectInfo" => 1,
+            "clGetGLTextureInfo" => 1,
         );
     my $name = shift;
 
@@ -369,13 +391,51 @@ sub generate_struct($)
     return $ret;
 }
 
+my %all_functions;
+my %all_enums;
+my %all_types;
+
+sub parse_feature($$)
+{
+    my ($feature, $is_core) = @_;
+
+    my %extra_core_functions =
+        (
+            # these are not core, but exported from the loader anyway
+            "clCreateFromGLBuffer" => 1,
+            "clCreateFromGLRenderbuffer" => 1,
+            "clCreateFromGLTexture" => 1,
+            "clCreateFromGLTexture2D" => 1,
+            "clCreateFromGLTexture3D" => 1,
+            "clEnqueueAcquireGLObjects" => 1,
+            "clEnqueueReleaseGLObjects" => 1,
+            "clGetGLObjectInfo" => 1,
+            "clGetGLTextureInfo" => 1,
+        );
+
+    foreach my $cmd ($feature->findnodes("./require/command"))
+    {
+        # TODO: store these in a separate list
+        next unless $is_core or defined $extra_core_functions{$cmd->{name}};
+
+        $core_functions{$cmd->{name}} = $all_functions{$cmd->{name}};
+    }
+    foreach my $enum ($feature->findnodes("./require/enum"))
+    {
+        $header_enums{$enum->{name}} = $all_enums{$enum->{name}};
+    }
+    foreach my $type ($feature->findnodes("./require/type"))
+    {
+        next unless $all_types{$type->{name}};
+        push @header_types, $type->{name} unless $header_types{$type->{name}};
+        $header_types{$type->{name}} = $all_types{$type->{name}};
+    }
+}
+
 sub parse_file($)
 {
     my $file = shift;
     my $xml = XML::LibXML->load_xml( location => $file );
-    my %functions;
-    my %enums;
-    my %types;
 
     # save all functions
     foreach my $command ($xml->findnodes("/registry/commands/command"))
@@ -384,7 +444,7 @@ sub parse_file($)
         my $name = @{$command->findnodes("./proto/name")}[0];
         $proto->removeChild( $name );
         my @params = $command->findnodes("./param");
-        $functions{$name->textContent()} = [ $proto, \@params ];
+        $all_functions{$name->textContent()} = [ $proto, \@params ];
     }
 
     # save all enums
@@ -392,11 +452,11 @@ sub parse_file($)
     {
         if (defined $enum->{value})
         {
-            $enums{$enum->{name}} = $enum->{value};
+            $all_enums{$enum->{name}} = $enum->{value};
         }
         else
         {
-            $enums{$enum->{name}} = "(1 << " . $enum->{bitpos} . ")";
+            $all_enums{$enum->{name}} = "(1 << " . $enum->{bitpos} . ")";
         }
     }
 
@@ -407,7 +467,7 @@ sub parse_file($)
         {
             my $name = @{$type->findnodes("./name")}[0];
             $name = $name->textContent;
-            $types{$name} = $type;
+            $all_types{$name} = $type;
 
             my $basetype = @{$type->findnodes("./type")}[0];
             if ($type->textContent() =~ /[[*]/)
@@ -426,31 +486,17 @@ sub parse_file($)
         elsif ($type->{category} eq "struct")
         {
             my $name = $type->{name};
-            $types{$name} = $type;
+            $all_types{$name} = $type;
         }
     }
 
     # generate core functions
     foreach my $feature ($xml->findnodes("/registry/feature"))
     {
-        next unless defined $core_categories{$feature->{name}};
-        foreach my $cmd ($feature->findnodes("./require/command"))
-        {
-            $core_functions{$cmd->{name}} = $functions{$cmd->{name}};
-        }
-        foreach my $enum ($feature->findnodes("./require/enum"))
-        {
-            $cl_enums{$enum->{name}} = $enums{$enum->{name}};
-        }
-        foreach my $type ($feature->findnodes("./require/type"))
-        {
-            next unless $types{$type->{name}};
-            push @cl_types, $type->{name} unless $cl_types{$type->{name}};
-            $cl_types{$type->{name}} = $types{$type->{name}};
-        }
+        parse_feature($feature, 1) if defined $core_categories{$feature->{name}};
     }
 
-    # generate extension list
+    # generate extension list and functions
     foreach my $ext ($xml->findnodes("/registry/extensions/extension"))
     {
         # we currently don't support clGetExtensionFunctionAddress, and
@@ -458,6 +504,11 @@ sub parse_file($)
         # we need to generate a table of thunks per platform and retrieve the
         # platform from the called object
         $unsupported_extensions{lc($ext->{name})} = 1 if $ext->findnodes("./require/command");
+
+        # FIXME: Parse all supported extensions. Note that we don't actually
+        # support KHR_gl_sharing yet, but we need to export the functions anyway
+        # (some applications expect them to be present).
+        parse_feature($ext, 0) if lc($ext->{name}) eq "cl_khr_gl_sharing";
     }
 }
 
@@ -588,9 +639,9 @@ typedef uint64_t DECLSPEC_ALIGN(8) cl_ulong;
 END
 ;
 
-foreach (@cl_types)
+foreach (@header_types)
 {
-    my $type = $cl_types{$_};
+    my $type = $header_types{$_};
     if ($type->{category} eq "define")
     {
         print TYPES $type->textContent() . "\n";
@@ -603,9 +654,9 @@ foreach (@cl_types)
 
 print TYPES "\n";
 
-foreach (sort keys %cl_enums)
+foreach (sort keys %header_enums)
 {
-    printf TYPES "#define %s %s\n", $_, $cl_enums{$_};
+    printf TYPES "#define %s %s\n", $_, $header_enums{$_};
 }
 
 close(TYPES);

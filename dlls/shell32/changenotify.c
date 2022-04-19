@@ -26,6 +26,8 @@
 #include "wine/list.h"
 #include "wine/debug.h"
 #include "shell32_main.h"
+#include "pidl.h"
+#include "shlwapi.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 

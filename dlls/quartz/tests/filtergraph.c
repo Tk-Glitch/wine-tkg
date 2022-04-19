@@ -98,23 +98,30 @@ static void test_interfaces(void)
     IFilterGraph2 *graph = create_graph();
 
     check_interface(graph, &IID_IBasicAudio, TRUE);
+    check_interface(graph, &IID_IBasicVideo, TRUE);
     check_interface(graph, &IID_IBasicVideo2, TRUE);
+    check_interface(graph, &IID_IFilterGraph, TRUE);
     check_interface(graph, &IID_IFilterGraph2, TRUE);
     check_interface(graph, &IID_IFilterMapper, TRUE);
+    check_interface(graph, &IID_IFilterMapper2, TRUE);
     check_interface(graph, &IID_IFilterMapper3, TRUE);
+    check_interface(graph, &IID_IGraphBuilder, TRUE);
     check_interface(graph, &IID_IGraphConfig, TRUE);
     check_interface(graph, &IID_IGraphVersion, TRUE);
     check_interface(graph, &IID_IMediaControl, TRUE);
     check_interface(graph, &IID_IMediaEvent, TRUE);
-    check_interface(graph, &IID_IMediaFilter, TRUE);
+    check_interface(graph, &IID_IMediaEventEx, TRUE);
     check_interface(graph, &IID_IMediaEventSink, TRUE);
+    check_interface(graph, &IID_IMediaFilter, TRUE);
     check_interface(graph, &IID_IMediaPosition, TRUE);
     check_interface(graph, &IID_IMediaSeeking, TRUE);
     check_interface(graph, &IID_IObjectWithSite, TRUE);
     check_interface(graph, &IID_IVideoFrameStep, TRUE);
     check_interface(graph, &IID_IVideoWindow, TRUE);
+    check_interface(graph, &IID_IUnknown, TRUE);
 
     check_interface(graph, &IID_IBaseFilter, FALSE);
+    check_interface(graph, &IID_IDispatch, FALSE);
 
     IFilterGraph2_Release(graph);
 }
@@ -2474,8 +2481,7 @@ static void test_graph_builder_connect(void)
     IFilterGraph2_AddFilter(graph, &sink2.IBaseFilter_iface, NULL);
 
     hr = IFilterGraph2_Connect(graph, &source_pin.IPin_iface, &sink_pin.IPin_iface);
-todo_wine
-    ok(hr == VFW_S_PARTIAL_RENDER, "Got hr %#x.\n", hr);
+    todo_wine ok(hr == VFW_S_PARTIAL_RENDER, "Got hr %#x.\n", hr);
     ok(source_pin.peer == &parser1_pins[0].IPin_iface, "Got peer %p.\n", source_pin.peer);
     ok(sink_pin.peer == &parser1_pins[1].IPin_iface, "Got peer %p.\n", sink_pin.peer);
     ok(!parser1_pins[2].peer, "Got peer %p.\n", parser1_pins[2].peer);
@@ -3105,32 +3111,24 @@ static void test_connect_direct(void)
     /* Swap the pins when connecting. */
     hr = IFilterGraph2_ConnectDirect(graph, &sink_pin.IPin_iface, &source_pin.IPin_iface, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-todo_wine
-    ok(sink_pin.peer == &source_pin.IPin_iface, "Got peer %p.\n", sink_pin.peer);
+    todo_wine ok(sink_pin.peer == &source_pin.IPin_iface, "Got peer %p.\n", sink_pin.peer);
     ok(!sink_pin.mt, "Got mt %p.\n", sink_pin.mt);
-todo_wine
-    ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
+    todo_wine ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
 
     hr = IFilterGraph2_Disconnect(graph, &sink_pin.IPin_iface);
-todo_wine
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-todo_wine
-    ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
     ok(!sink_pin.peer, "Got peer %p.\n", sink_pin.peer);
 
     hr = IFilterGraph2_Connect(graph, &sink_pin.IPin_iface, &source_pin.IPin_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-todo_wine
-    ok(sink_pin.peer == &source_pin.IPin_iface, "Got peer %p.\n", sink_pin.peer);
+    todo_wine ok(sink_pin.peer == &source_pin.IPin_iface, "Got peer %p.\n", sink_pin.peer);
     ok(!sink_pin.mt, "Got mt %p.\n", sink_pin.mt);
-todo_wine
-    ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
+    todo_wine ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
 
     hr = IFilterGraph2_Disconnect(graph, &sink_pin.IPin_iface);
-todo_wine
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-todo_wine
-    ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
     ok(!sink_pin.peer, "Got peer %p.\n", sink_pin.peer);
 
     /* Disconnect() does not disconnect the peer. */
@@ -3304,8 +3302,7 @@ todo_wine
     ok(source.ref == 1, "Got outstanding refcount %d.\n", source.ref);
     ok(sink.ref == 1, "Got outstanding refcount %d.\n", sink.ref);
     ok(source_pin.ref == 1, "Got outstanding refcount %d.\n", source_pin.ref);
-todo_wine
-    ok(sink_pin.ref == 1, "Got outstanding refcount %d.\n", sink_pin.ref);
+    todo_wine ok(sink_pin.ref == 1, "Got outstanding refcount %d.\n", sink_pin.ref);
     ok(!source_pin.peer, "Got peer %p.\n", source_pin.peer);
     ok(!sink_pin.peer, "Got peer %p.\n", sink_pin.peer);
 }
@@ -3350,8 +3347,7 @@ static void test_sync_source(void)
     ok(!filter2.clock, "Got clock %p.\n", filter2.clock);
 
     hr = IMediaFilter_GetSyncSource(filter, &clock);
-todo_wine
-    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     ok(!clock, "Got clock %p.\n", clock);
 
     IReferenceClock_Release(systemclock);
@@ -3647,9 +3643,8 @@ static void test_filter_state(void)
     hr = IMediaControl_Run(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     check_filter_state(graph, State_Running);
-todo_wine
-    ok(source.start_time > 0 && source.start_time < 500 * 10000,
-        "Got time %s.\n", wine_dbgstr_longlong(source.start_time));
+    todo_wine ok(source.start_time > 0 && source.start_time < 500 * 10000,
+            "Got time %s.\n", wine_dbgstr_longlong(source.start_time));
     ok(sink.start_time == source.start_time, "Expected time %s, got %s.\n",
         wine_dbgstr_longlong(source.start_time), wine_dbgstr_longlong(sink.start_time));
 
@@ -5675,6 +5670,40 @@ static void test_events(void)
     SysFreeString(status);
 }
 
+static void test_event_dispatch(void)
+{
+    IFilterGraph2 *graph = create_graph();
+    IMediaEventEx *event_ex;
+    ITypeInfo *typeinfo;
+    IMediaEvent *event;
+    TYPEATTR *typeattr;
+    unsigned int count;
+    HRESULT hr;
+    ULONG ref;
+
+    IFilterGraph2_QueryInterface(graph, &IID_IMediaEvent, (void **)&event);
+    IFilterGraph2_QueryInterface(graph, &IID_IMediaEventEx, (void **)&event_ex);
+    ok((void *)event == event_ex, "Interface pointers didn't match.\n");
+    IMediaEventEx_Release(event_ex);
+
+    hr = IMediaEvent_GetTypeInfoCount(event, &count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count == 1, "Got count %u.\n", count);
+
+    hr = IMediaEvent_GetTypeInfo(event, 0, 0, &typeinfo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = ITypeInfo_GetTypeAttr(typeinfo, &typeattr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(typeattr->typekind == TKIND_DISPATCH, "Got kind %u.\n", typeattr->typekind);
+    ok(IsEqualGUID(&typeattr->guid, &IID_IMediaEvent), "Got IID %s.\n", debugstr_guid(&typeattr->guid));
+    ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
+    ITypeInfo_Release(typeinfo);
+
+    IMediaEvent_Release(event);
+    ref = IFilterGraph2_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 START_TEST(filtergraph)
 {
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -5702,6 +5731,7 @@ START_TEST(filtergraph)
     test_autoplug_uyvy();
     test_set_notify_flags();
     test_events();
+    test_event_dispatch();
 
     CoUninitialize();
     test_render_with_multithread();

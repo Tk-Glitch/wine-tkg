@@ -1020,21 +1020,6 @@ static ULONG_PTR find_named_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY
     return 0;
 }
 
-static ULONG_PTR find_pe_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
-                                 const IMAGE_IMPORT_BY_NAME *name )
-{
-    const WORD *ordinals = (const WORD *)((BYTE *)module + exports->AddressOfNameOrdinals);
-    const DWORD *names = (const DWORD *)((BYTE *)module + exports->AddressOfNames);
-
-    if (name->Hint < exports->NumberOfNames)
-    {
-        char *ename = (char *)module + names[name->Hint];
-        if (!strcmp( ename, (char *)name->Name ))
-            return find_ordinal_export( module, exports, ordinals[name->Hint] );
-    }
-    return find_named_export( module, exports, (char *)name->Name );
-}
-
 static inline void *get_rva( void *module, ULONG_PTR addr )
 {
     return (BYTE *)module + addr;
@@ -1054,49 +1039,6 @@ static const void *get_module_data_dir( HMODULE module, ULONG dir, ULONG *size )
     if (!data->VirtualAddress || !data->Size) return NULL;
     if (size) *size = data->Size;
     return get_rva( module, data->VirtualAddress );
-}
-
-static NTSTATUS fixup_ntdll_imports( const char *name, HMODULE module )
-{
-    const IMAGE_IMPORT_DESCRIPTOR *descr;
-    const IMAGE_THUNK_DATA *import_list;
-    IMAGE_THUNK_DATA *thunk_list;
-
-    if (!(descr = get_module_data_dir( module, IMAGE_FILE_IMPORT_DIRECTORY, NULL ))) return STATUS_SUCCESS;
-    for (; descr->Name && descr->FirstThunk; descr++)
-    {
-        thunk_list = get_rva( module, descr->FirstThunk );
-
-        /* ntdll must be the only import */
-        if (strcmp( get_rva( module, descr->Name ), "ntdll.dll" ))
-        {
-            ERR( "module %s is importing %s\n", debugstr_a(name), (char *)get_rva( module, descr->Name ));
-            return STATUS_PROCEDURE_NOT_FOUND;
-        }
-        if (descr->u.OriginalFirstThunk)
-            import_list = get_rva( module, descr->u.OriginalFirstThunk );
-        else
-            import_list = thunk_list;
-
-        while (import_list->u1.Ordinal)
-        {
-            if (IMAGE_SNAP_BY_ORDINAL( import_list->u1.Ordinal ))
-            {
-                int ordinal = IMAGE_ORDINAL( import_list->u1.Ordinal ) - ntdll_exports->Base;
-                thunk_list->u1.Function = find_ordinal_export( ntdll_module, ntdll_exports, ordinal );
-                if (!thunk_list->u1.Function) ERR( "%s: ntdll.%u not found\n", debugstr_a(name), ordinal );
-            }
-            else  /* import by name */
-            {
-                IMAGE_IMPORT_BY_NAME *pe_name = get_rva( module, import_list->u1.AddressOfData );
-                thunk_list->u1.Function = find_pe_export( ntdll_module, ntdll_exports, pe_name );
-                if (!thunk_list->u1.Function) ERR( "%s: ntdll.%s not found\n", debugstr_a(name), pe_name->Name );
-            }
-            import_list++;
-            thunk_list++;
-        }
-    }
-    return STATUS_SUCCESS;
 }
 
 static void load_ntdll_functions( HMODULE module )
@@ -1383,38 +1325,6 @@ already_loaded:
     *ret_module = module;
     dlclose( handle );
     return STATUS_SUCCESS;
-}
-
-
-/***********************************************************************
- *           init_unix_lib
- */
-static NTSTATUS CDECL init_unix_lib( void *module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    NTSTATUS (CDECL *init_func)( HMODULE, DWORD, const void *, void * );
-    const IMAGE_NT_HEADERS *nt;
-    const char *name;
-    void *handle, *entry, *unix_module;
-    NTSTATUS status;
-
-    if ((status = get_builtin_unix_info( module, &name, &handle, &entry ))) return status;
-
-    if (!entry)
-    {
-        if (!name || !handle) return STATUS_DLL_NOT_FOUND;
-
-        if (!(nt = dlsym( handle, "__wine_spec_nt_header" )) ||
-            !(entry = dlsym( handle, "__wine_init_unix_lib" )))
-            return STATUS_INVALID_IMAGE_FORMAT;
-
-        TRACE( "loaded %s for %p\n", debugstr_a(name), module );
-        unix_module = (void *)((nt->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-        map_so_dll( nt, unix_module );
-        fixup_ntdll_imports( name, unix_module );
-        set_builtin_unix_entry( module, entry );
-    }
-    init_func = entry;
-    return init_func( module, reason, ptr_in, ptr_out );
 }
 
 
@@ -1718,13 +1628,8 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, void **module, SIZE_T
 done:
     if (status >= 0 && ext)
     {
-        void *handle;
-
         strcpy( ext, ".so" );
-        if ((handle = dlopen( ptr, RTLD_NOW )))
-        {
-            if (set_builtin_unix_handle( *module, ptr, handle )) dlclose( handle );
-        }
+        load_builtin_unixlib( *module, ptr );
     }
     free( file );
     return status;
@@ -2160,7 +2065,6 @@ static struct unix_funcs unix_funcs =
 {
     load_so_dll,
     init_builtin_dll,
-    init_unix_lib,
     unwind_builtin_dll,
     RtlGetSystemTimePrecise,
 #ifdef __aarch64__
@@ -2169,24 +2073,31 @@ static struct unix_funcs unix_funcs =
 };
 
 BOOL ac_odyssey;
+BOOL fsync_simulate_sched_quantum;
 
 static void hacks_init(void)
 {
+    static const char upc_exe[] = "Ubisoft Game Launcher\\upc.exe";
     static const char ac_odyssey_exe[] = "ACOdyssey.exe";
-    char cur_exe[MAX_PATH];
-    DWORD cur_exe_len;
-    int fd;
+    const char *env_str;
 
-    fd = open("/proc/self/comm", O_RDONLY);
-    cur_exe_len = read(fd, cur_exe, sizeof(cur_exe));
-    close(fd);
-    cur_exe[cur_exe_len - 1] = 0;
-
-    if (!strcasecmp(cur_exe, ac_odyssey_exe))
+    if (main_argc > 1 && strstr(main_argv[1], ac_odyssey_exe))
     {
         ERR("HACK: AC Odyssey sync tweak on.\n");
         ac_odyssey = TRUE;
+        return;
     }
+    env_str = getenv("WINE_FSYNC_SIMULATE_SCHED_QUANTUM");
+    if (env_str)
+        fsync_simulate_sched_quantum = !!atoi(env_str);
+    else if (main_argc > 1)
+        fsync_simulate_sched_quantum = !!strstr(main_argv[1], upc_exe);
+    if (fsync_simulate_sched_quantum)
+        ERR("HACK: Simulating sched quantum in fsync.\n");
+
+    env_str = getenv("SteamGameId");
+    if (env_str && !strcmp(env_str, "50130"))
+        setenv("WINESTEAMNOEXEC", "1", 0);
 }
 
 /***********************************************************************

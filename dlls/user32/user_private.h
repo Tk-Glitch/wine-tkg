@@ -44,24 +44,6 @@
 
 struct window_surface;
 
-/* internal messages codes */
-enum wine_internal_message
-{
-    WM_WINE_DESTROYWINDOW = 0x80000000,
-    WM_WINE_SETWINDOWPOS,
-    WM_WINE_SHOWWINDOW,
-    WM_WINE_SETPARENT,
-    WM_WINE_SETWINDOWLONG,
-    WM_WINE_SETSTYLE,
-    WM_WINE_SETACTIVEWINDOW,
-    WM_WINE_KEYBOARD_LL_HOOK,
-    WM_WINE_MOUSE_LL_HOOK,
-    WM_WINE_CLIPCURSOR,
-    WM_WINE_UPDATEWINDOWSTATE,
-    WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
-    WM_WINE_LAST_DRIVER_MSG = 0x80001fff
-};
-
 extern const struct user_driver_funcs *USER_Driver DECLSPEC_HIDDEN;
 
 extern void USER_unload_driver(void) DECLSPEC_HIDDEN;
@@ -120,7 +102,7 @@ struct rawinput_thread_data
     RAWINPUT buffer[1]; /* rawinput message data buffer */
 };
 
-extern INT global_key_state_counter DECLSPEC_HIDDEN;
+extern LONG global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
 #define WM_IME_INTERNAL 0x287
@@ -296,12 +278,6 @@ typedef struct
 
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;
-
-/* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
-#ifdef __MINGW32__
-#undef assert
-#define assert(expr) ((void)0)
-#endif
 
 extern struct user_api_hook *user_api DECLSPEC_HIDDEN;
 LRESULT WINAPI USER_DefDlgProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;

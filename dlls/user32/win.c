@@ -1185,7 +1185,6 @@ static WND *next_thread_window( HWND *hwnd )
     WND *win;
     WORD index = *hwnd ? USER_HANDLE_TO_INDEX( *hwnd ) + 1 : 0;
 
-    USER_Lock();
     while (index < NB_USER_HANDLES)
     {
         if (!(ptr = user_handles[index++])) continue;
@@ -1195,7 +1194,6 @@ static WND *next_thread_window( HWND *hwnd )
         *hwnd = ptr->handle;
         return win;
     }
-    USER_Unlock();
     return NULL;
 }
 
@@ -1207,39 +1205,42 @@ static WND *next_thread_window( HWND *hwnd )
  */
 void destroy_thread_windows(void)
 {
-    WND *wndPtr;
-    HWND hwnd = 0, *list;
-    HMENU menu, sys_menu;
-    struct window_surface *surface;
-    int i;
+    WND *win, *free_list = NULL, **free_list_ptr = &free_list;
+    HWND hwnd = 0;
 
-    while ((wndPtr = next_thread_window( &hwnd )))
+    USER_Lock();
+    while ((win = next_thread_window( &hwnd )))
     {
-        /* destroy the client-side storage */
-
-        list = WIN_ListChildren( hwnd );
-        menu = ((wndPtr->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD) ? (HMENU)wndPtr->wIDmenu : 0;
-        sys_menu = wndPtr->hSysMenu;
-        free_dce( wndPtr->dce, hwnd );
-        surface = wndPtr->surface;
-        InterlockedCompareExchangePointer( &user_handles[USER_HANDLE_TO_INDEX(hwnd)], NULL, wndPtr );
-        WIN_ReleasePtr( wndPtr );
-        HeapFree( GetProcessHeap(), 0, wndPtr );
-        if (menu) DestroyMenu( menu );
-        if (sys_menu) DestroyMenu( sys_menu );
-        if (surface)
+        free_dce( win->dce, win->obj.handle );
+        InterlockedCompareExchangePointer( &user_handles[USER_HANDLE_TO_INDEX(hwnd)], NULL, win );
+        win->obj.handle = *free_list_ptr;
+        free_list_ptr = (WND **)&win->obj.handle;
+    }
+    if (free_list)
+    {
+        SERVER_START_REQ( destroy_window )
         {
-            register_window_surface( surface, NULL );
-            window_surface_release( surface );
+            req->handle = 0; /* destroy all thread windows */
+            wine_server_call( req );
         }
+        SERVER_END_REQ;
+    }
+    USER_Unlock();
 
-        /* free child windows */
+    while ((win = free_list))
+    {
+        free_list = win->obj.handle;
+        TRACE( "destroying %p\n", win );
 
-        if (!list) continue;
-        for (i = 0; list[i]; i++)
-            if (!WIN_IsCurrentThread( list[i] ))
-                SendNotifyMessageW( list[i], WM_WINE_DESTROYWINDOW, 0, 0 );
-        HeapFree( GetProcessHeap(), 0, list );
+        if ((win->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD && win->wIDmenu)
+            DestroyMenu( UlongToHandle(win->wIDmenu) );
+        if (win->hSysMenu) DestroyMenu( win->hSysMenu );
+        if (win->surface)
+        {
+            register_window_surface( win->surface, NULL );
+            window_surface_release( win->surface );
+        }
+        HeapFree( GetProcessHeap(), 0, win );
     }
 }
 
@@ -2714,7 +2715,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
             break;
         case GWLP_ID:
             req->flags = SET_WIN_ID;
-            req->id = newval;
+            req->extra_value = newval;
             break;
         case GWLP_HINSTANCE:
             req->flags = SET_WIN_INSTANCE;
@@ -3384,7 +3385,7 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     {
         req->handle = wine_server_user_handle( hwnd );
         req->parent = wine_server_user_handle( parent );
-        if ((ret = !wine_server_call( req )))
+        if ((ret = !wine_server_call_err( req )))
         {
             old_parent = wine_server_ptr_handle( reply->old_parent );
             wndPtr->parent = parent = wine_server_ptr_handle( reply->full_parent );
@@ -4191,7 +4192,8 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
     if (process_layout == ~0u)
     {
         WCHAR *str, buffer[MAX_PATH];
-        DWORD i, len, version_layout = 0;
+        DWORD i, version_layout = 0;
+        UINT len;
         DWORD user_lang = GetUserDefaultLangID();
         DWORD *languages;
         void *data = NULL;

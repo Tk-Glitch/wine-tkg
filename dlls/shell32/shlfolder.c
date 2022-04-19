@@ -40,13 +40,16 @@
 #include "shlguid.h"
 
 #include "pidl.h"
-#include "undocshell.h"
 #include "shell32_main.h"
 #include "shlwapi.h"
 #include "wine/debug.h"
 #include "shfldr.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL (shell);
+
+/* SHCreateLinks flags */
+#define SHCLF_PREFIXNAME        0x01
+#define SHCLF_CREATEONDESKTOP   0x02
 
 /***************************************************************************
  *  SHELL32_GetCustomFolderAttribute (internal function)

@@ -2052,14 +2052,14 @@ static void dump_recv_socket_request( const struct recv_socket_request *req )
 {
     fprintf( stderr, " oob=%d", req->oob );
     dump_async_data( ", async=", &req->async );
-    fprintf( stderr, ", status=%08x", req->status );
-    fprintf( stderr, ", total=%08x", req->total );
+    fprintf( stderr, ", force_async=%d", req->force_async );
 }
 
 static void dump_recv_socket_reply( const struct recv_socket_reply *req )
 {
     fprintf( stderr, " wait=%04x", req->wait );
     fprintf( stderr, ", options=%08x", req->options );
+    fprintf( stderr, ", nonblocking=%d", req->nonblocking );
 }
 
 static void dump_send_socket_request( const struct send_socket_request *req )
@@ -2778,6 +2778,18 @@ static void dump_get_async_result_reply( const struct get_async_result_reply *re
     dump_varargs_bytes( " out_data=", cur_size );
 }
 
+static void dump_set_async_direct_result_request( const struct set_async_direct_result_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", information=", &req->information );
+    fprintf( stderr, ", status=%08x", req->status );
+}
+
+static void dump_set_async_direct_result_reply( const struct set_async_direct_result_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 static void dump_read_request( const struct read_request *req )
 {
     dump_async_data( " async=", &req->async );
@@ -2927,12 +2939,11 @@ static void dump_set_window_info_request( const struct set_window_info_request *
     fprintf( stderr, ", handle=%08x", req->handle );
     fprintf( stderr, ", style=%08x", req->style );
     fprintf( stderr, ", ex_style=%08x", req->ex_style );
-    fprintf( stderr, ", id=%08x", req->id );
+    fprintf( stderr, ", extra_size=%u", req->extra_size );
     dump_uint64( ", instance=", &req->instance );
     dump_uint64( ", user_data=", &req->user_data );
-    fprintf( stderr, ", extra_offset=%d", req->extra_offset );
-    fprintf( stderr, ", extra_size=%u", req->extra_size );
     dump_uint64( ", extra_value=", &req->extra_value );
+    fprintf( stderr, ", extra_offset=%d", req->extra_offset );
 }
 
 static void dump_set_window_info_reply( const struct set_window_info_reply *req )
@@ -2942,7 +2953,7 @@ static void dump_set_window_info_reply( const struct set_window_info_reply *req 
     dump_uint64( ", old_instance=", &req->old_instance );
     dump_uint64( ", old_user_data=", &req->old_user_data );
     dump_uint64( ", old_extra_value=", &req->old_extra_value );
-    fprintf( stderr, ", old_id=%08x", req->old_id );
+    dump_uint64( ", old_id=", &req->old_id );
 }
 
 static void dump_set_parent_request( const struct set_parent_request *req )
@@ -4731,6 +4742,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_register_async_request,
     (dump_func)dump_cancel_async_request,
     (dump_func)dump_get_async_result_request,
+    (dump_func)dump_set_async_direct_result_request,
     (dump_func)dump_read_request,
     (dump_func)dump_write_request,
     (dump_func)dump_ioctl_request,
@@ -5019,6 +5031,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     (dump_func)dump_get_async_result_reply,
+    (dump_func)dump_set_async_direct_result_reply,
     (dump_func)dump_read_reply,
     (dump_func)dump_write_reply,
     (dump_func)dump_ioctl_reply,
@@ -5307,6 +5320,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "register_async",
     "cancel_async",
     "get_async_result",
+    "set_async_direct_result",
     "read",
     "write",
     "ioctl",

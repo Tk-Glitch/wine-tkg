@@ -138,7 +138,7 @@ static ULONG WINAPI downloadcb_AddRef(IBindStatusCallback *iface)
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("(%p) ref = %ld\n", This, ref);
 
     return ref;
 }
@@ -148,7 +148,7 @@ static ULONG WINAPI downloadcb_Release(IBindStatusCallback *iface)
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("(%p) ref = %ld\n", This, ref);
 
     if (!ref)
     {
@@ -166,7 +166,7 @@ static HRESULT WINAPI downloadcb_OnStartBinding(IBindStatusCallback *iface, DWOR
 {
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
 
-    TRACE("(%p)->(%u %p)\n", This, reserved, pbind);
+    TRACE("(%p)->(%lu %p)\n", This, reserved, pbind);
 
     return S_OK;
 }
@@ -184,7 +184,7 @@ static HRESULT WINAPI downloadcb_OnLowResource(IBindStatusCallback *iface, DWORD
 {
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
 
-    FIXME("(%p)->(%u): stub\n", This, reserved);
+    FIXME("(%p)->(%lu): stub\n", This, reserved);
 
     return E_NOTIMPL;
 }
@@ -195,7 +195,7 @@ static HRESULT WINAPI downloadcb_OnProgress(IBindStatusCallback *iface, ULONG pr
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
     HRESULT hr = S_OK;
 
-    TRACE("%p)->(%u %u %u %s)\n", This, progress, progress_max, status, debugstr_w(status_text));
+    TRACE("%p)->(%lu %lu %lu %s)\n", This, progress, progress_max, status, debugstr_w(status_text));
 
     switch(status)
     {
@@ -229,7 +229,7 @@ static HRESULT WINAPI downloadcb_OnProgress(IBindStatusCallback *iface, ULONG pr
             break;
 
         default:
-            FIXME("Unsupported status %u\n", status);
+            FIXME("Unsupported status %lu\n", status);
     }
 
     return hr;
@@ -239,7 +239,7 @@ static HRESULT WINAPI downloadcb_OnStopBinding(IBindStatusCallback *iface, HRESU
 {
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
 
-    TRACE("(%p)->(%08x %s)\n", This, hresult, debugstr_w(szError));
+    TRACE("(%p)->(%#lx %s)\n", This, hresult, debugstr_w(szError));
 
     if (FAILED(hresult))
     {
@@ -282,7 +282,7 @@ static HRESULT WINAPI downloadcb_OnDataAvailable(IBindStatusCallback *iface,
 {
     struct downloadcb *This = impl_from_IBindStatusCallback(iface);
 
-    TRACE("(%p)->(%08x %u %p %p)\n", This, grfBSCF, dwSize, pformatetc, pstgmed);
+    TRACE("(%p)->(%#lx %lu %p %p)\n", This, grfBSCF, dwSize, pformatetc, pstgmed);
 
     return S_OK;
 }
@@ -373,7 +373,7 @@ static ULONG WINAPI InstallEngine_AddRef(IInstallEngine2 *iface)
     InstallEngine *This = impl_from_IInstallEngine2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -383,7 +383,7 @@ static ULONG WINAPI InstallEngine_Release(IInstallEngine2 *iface)
     InstallEngine *This = impl_from_IInstallEngine2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref)
     {
@@ -824,7 +824,7 @@ static HRESULT WINAPI InstallEngine_DownloadComponents(IInstallEngine2 *iface, D
 {
     InstallEngine *This = impl_from_IInstallEngine2(iface);
 
-    TRACE("(%p)->(%x)\n", This, flags);
+    TRACE("(%p)->(%#lx)\n", This, flags);
 
     /* The interface is not really threadsafe on windows, but we can at least prevent multiple installations */
     if (InterlockedCompareExchange((LONG *)&This->status, ENGINESTATUS_INSTALLING, ENGINESTATUS_READY) != ENGINESTATUS_READY)
@@ -840,7 +840,7 @@ static HRESULT WINAPI InstallEngine_InstallComponents(IInstallEngine2 *iface, DW
 {
     InstallEngine *This = impl_from_IInstallEngine2(iface);
 
-    FIXME("(%p)->(%x): stub\n", This, flags);
+    FIXME("(%p)->(%#lx): stub\n", This, flags);
 
     return E_NOTIMPL;
 }
@@ -849,7 +849,7 @@ static HRESULT WINAPI InstallEngine_EnumInstallIDs(IInstallEngine2 *iface, UINT 
 {
     InstallEngine *This = impl_from_IInstallEngine2(iface);
 
-    FIXME("(%p)->(%u %p): stub\n", This, index, id);
+    FIXME("(%p)->(%lu %p): stub\n", This, index, id);
 
     return E_NOTIMPL;
 }
@@ -861,7 +861,7 @@ static HRESULT WINAPI InstallEngine_EnumDownloadIDs(IInstallEngine2 *iface, UINT
     ICifComponent *comp;
     HRESULT hr;
 
-    TRACE("(%p)->(%u %p)\n", This, index, id);
+    TRACE("(%p)->(%lu %p)\n", This, index, id);
 
     if (!This->icif || !id)
         return E_FAIL;
@@ -935,7 +935,7 @@ static HRESULT WINAPI InstallEngine_SetAction(IInstallEngine2 *iface, const char
     ICifComponent *comp;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %u %u)\n", This, debugstr_a(id), action, priority);
+    TRACE("(%p)->(%s %lu %lu)\n", This, debugstr_a(id), action, priority);
 
     if (!This->icif)
         return E_FAIL; /* FIXME: check error code */
@@ -1016,7 +1016,7 @@ static HRESULT WINAPI InstallEngine_SetInstallOptions(IInstallEngine2 *iface, DW
 {
     InstallEngine *This = impl_from_IInstallEngine2(iface);
 
-    FIXME("(%p)->(%x): stub\n", This, flags);
+    FIXME("(%p)->(%#lx): stub\n", This, flags);
 
     return E_NOTIMPL;
 }
@@ -1043,7 +1043,7 @@ static HRESULT WINAPI InstallEngine_Abort(IInstallEngine2 *iface, DWORD flags)
 {
     InstallEngine *This = impl_from_IInstallEngine2(iface);
 
-    FIXME("(%p)->(%x): stub\n", This, flags);
+    FIXME("(%p)->(%#lx): stub\n", This, flags);
 
     return E_NOTIMPL;
 }

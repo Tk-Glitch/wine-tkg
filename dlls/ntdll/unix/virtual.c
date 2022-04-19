@@ -98,9 +98,7 @@ struct builtin_module
     unsigned int refcount;
     void        *handle;
     void        *module;
-    char        *unix_name;
     void        *unix_handle;
-    void        *unix_entry;
 };
 
 static struct list builtin_modules = LIST_INIT( builtin_modules );
@@ -608,9 +606,7 @@ static void add_builtin_module( void *module, void *handle )
     builtin->handle      = handle;
     builtin->module      = module;
     builtin->refcount    = 1;
-    builtin->unix_name   = NULL;
     builtin->unix_handle = NULL;
-    builtin->unix_entry  = NULL;
     list_add_tail( &builtin_modules, &builtin->entry );
 }
 
@@ -630,7 +626,6 @@ void release_builtin_module( void *module )
             list_remove( &builtin->entry );
             if (builtin->handle) dlclose( builtin->handle );
             if (builtin->unix_handle) dlclose( builtin->unix_handle );
-            free( builtin->unix_name );
             free( builtin );
         }
         break;
@@ -687,45 +682,22 @@ static NTSTATUS get_builtin_unix_funcs( void *module, BOOL wow, void **funcs )
 
 
 /***********************************************************************
- *           get_builtin_unix_info
+ *           load_builtin_unixlib
  */
-NTSTATUS get_builtin_unix_info( void *module, const char **name, void **handle, void **entry )
+NTSTATUS load_builtin_unixlib( void *module, const char *name )
 {
+    void *handle;
     sigset_t sigset;
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     struct builtin_module *builtin;
 
-    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
-    {
-        if (builtin->module != module) continue;
-        *name   = builtin->unix_name;
-        *handle = builtin->unix_handle;
-        *entry  = builtin->unix_entry;
-        status = STATUS_SUCCESS;
-        break;
-    }
-    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
-    return status;
-}
-
-
-/***********************************************************************
- *           set_builtin_unix_handle
- */
-NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle )
-{
-    sigset_t sigset;
-    NTSTATUS status = STATUS_DLL_NOT_FOUND;
-    struct builtin_module *builtin;
-
+    if (!(handle = dlopen( name, RTLD_NOW ))) return status;
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
     LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
     {
         if (builtin->module != module) continue;
         if (!builtin->unix_handle)
         {
-            builtin->unix_name = strdup( name );
             builtin->unix_handle = handle;
             status = STATUS_SUCCESS;
         }
@@ -733,31 +705,7 @@ NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle )
         break;
     }
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
-    return status;
-}
-
-
-/***********************************************************************
- *           set_builtin_unix_entry
- */
-NTSTATUS set_builtin_unix_entry( void *module, void *entry )
-{
-    sigset_t sigset;
-    NTSTATUS status = STATUS_DLL_NOT_FOUND;
-    struct builtin_module *builtin;
-
-    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
-    {
-        if (builtin->module != module) continue;
-        if (builtin->unix_handle)
-        {
-            builtin->unix_entry = entry;
-            status = STATUS_SUCCESS;
-        }
-        break;
-    }
-    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    if (status) dlclose( handle );
     return status;
 }
 
@@ -3427,19 +3375,6 @@ static NTSTATUS grow_thread_stack( char *page, struct thread_stack_info *stack_i
     return ret;
 }
 
-BOOL CDECL __wine_needs_override_large_address_aware(void)
-{
-    static int needs_override = -1;
-
-    if (needs_override == -1)
-    {
-        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
-
-        needs_override = !str || atoi(str) == 1;
-    }
-    return needs_override;
-}
-
 
 /***********************************************************************
  *           virtual_handle_fault
@@ -3509,6 +3444,19 @@ NTSTATUS virtual_handle_fault( void *addr, DWORD err, void *stack )
     }
     mutex_unlock( &virtual_mutex );
     return ret;
+}
+
+BOOL CDECL __wine_needs_override_large_address_aware(void)
+{
+    static int needs_override = -1;
+
+    if (needs_override == -1)
+    {
+        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
+
+        needs_override = !str || atoi(str) == 1;
+    }
+    return needs_override;
 }
 
 

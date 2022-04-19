@@ -862,7 +862,8 @@ skip_read_sample:
     hr = IMFSourceReader_Flush(reader, MF_SOURCE_READER_ALL_STREAMS);
     ok(hr == S_OK, "Failed to flush all streams, hr %#x.\n", hr);
 
-    IMFSourceReader_Release(reader);
+    refcount = IMFSourceReader_Release(reader);
+    ok(!refcount, "Unexpected refcount %u.\n", refcount);
 
     /* Async mode. */
     callback = create_async_callback();
@@ -877,13 +878,10 @@ skip_read_sample:
 
     refcount = get_refcount(attributes);
     hr = MFCreateSourceReaderFromByteStream(stream, attributes, &reader);
-todo_wine {
     ok(hr == S_OK, "Failed to create source reader, hr %#x.\n", hr);
     ok(get_refcount(attributes) > refcount, "Unexpected refcount.\n");
-}
     IMFAttributes_Release(attributes);
-    if (hr == S_OK)
-        IMFSourceReader_Release(reader);
+    IMFSourceReader_Release(reader);
 
     IMFByteStream_Release(stream);
 }

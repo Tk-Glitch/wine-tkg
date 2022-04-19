@@ -85,7 +85,7 @@ static BOOL output_text_field(HANDLE hFile, const char *field_name, DWORD field_
 
     assert(total_len <= sizeof(output_buffer));
 
-    sprintf(sprintf_fmt, "%%%us: ", field_width);
+    sprintf(sprintf_fmt, "%%%lus: ", field_width);
     ptr += sprintf(ptr, sprintf_fmt, field_name);
 
     ptr += WideCharToMultiByte(CP_ACP, 0, value, value_lenW, ptr, value_lenA, NULL, NULL);
@@ -157,7 +157,7 @@ static BOOL output_text_information(struct dxdiag_information *dxdiag_info, cons
 
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        WINE_ERR("File creation failed, last error %u\n", GetLastError());
+        WINE_ERR("File creation failed, last error %lu\n", GetLastError());
         return FALSE;
     }
 
@@ -281,7 +281,7 @@ static BOOL output_xml_information(struct dxdiag_information *dxdiag_info, const
                           &IID_IXMLDOMDocument, (void **)&xmldoc);
     if (FAILED(hr))
     {
-        WINE_ERR("IXMLDOMDocument instance creation failed with 0x%08x\n", hr);
+        WINE_ERR("IXMLDOMDocument instance creation failed with 0x%08lx\n", hr);
         goto error;
     }
 

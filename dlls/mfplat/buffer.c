@@ -26,8 +26,6 @@
 #include "d3d9.h"
 #include "evr.h"
 
-#include "wine/debug.h"
-
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
 #define ALIGN_SIZE(size, alignment) (((size) + (alignment)) & ~((alignment)))
@@ -49,7 +47,7 @@ struct buffer
     struct
     {
         BYTE *linear_buffer;
-        unsigned int plane_size;
+        DWORD plane_size;
 
         BYTE *scanline0;
         unsigned int width;
@@ -1306,9 +1304,10 @@ static p_copy_image_func get_2d_buffer_copy_func(DWORD fourcc)
 
 static HRESULT create_2d_buffer(DWORD width, DWORD height, DWORD fourcc, BOOL bottom_up, IMFMediaBuffer **buffer)
 {
-    unsigned int stride, max_length, plane_size;
-    struct buffer *object;
+    unsigned int stride, max_length;
     unsigned int row_alignment;
+    struct buffer *object;
+    DWORD plane_size;
     GUID subtype;
     BOOL is_yuv;
     HRESULT hr;

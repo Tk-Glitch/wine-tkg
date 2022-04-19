@@ -1103,7 +1103,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
     FACTWaveBankEntry fact_wavebank;
     UINT ret;
 
-    TRACE("(%p)->(0x%08x, %p, %p, %p, %d, %d, %p)\n", This, dwFlags, &entry, pdwSeekTable,
+    TRACE("(%p)->(0x%08lx, %p, %p, %p, %ld, %d, %p)\n", This, dwFlags, &entry, pdwSeekTable,
           pbWaveData, dwPlayOffset, nLoopCount, ppWave);
 
     fact_wavebank.dwFlagsAndDuration = entry.dwFlagsAndDuration;
@@ -1114,7 +1114,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
     fact_wavebank.LoopRegion.dwTotalSamples = entry.LoopRegion.dwTotalSamples;
 
     ret = FACTAudioEngine_PrepareInMemoryWave(This->fact_engine, dwFlags, fact_wavebank,
-            pdwSeekTable, pbWaveData, dwPlayOffset, nLoopCount, &fwave);
+            (uint32_t *)pdwSeekTable, pbWaveData, dwPlayOffset, nLoopCount, &fwave);
     if(ret != 0 || !fwave)
     {
         ERR("Failed to CreateWave: %d (%p)\n", ret, fwave);
@@ -1152,7 +1152,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
     FACTWaveBankEntry fact_wavebank;
     UINT ret;
 
-    TRACE("(%p)->(0x%08x, %p, %p, %d, %p, %d, %d, %p)\n", This, dwFlags, &entry, &streamingParams,
+    TRACE("(%p)->(0x%08lx, %p, %p, %ld, %p, %ld, %d, %p)\n", This, dwFlags, &entry, &streamingParams,
             dwAlignment, pdwSeekTable, dwPlayOffset, nLoopCount, ppWave);
 
     fake = (wrap_readfile_struct*) CoTaskMemAlloc(
@@ -1175,7 +1175,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
      *   passing through NULL to ensure it's not used.
      */
     ret = FACTAudioEngine_PrepareStreamingWave(This->fact_engine, dwFlags, fact_wavebank, fakeParms,
-            dwAlignment, pdwSeekTable, NULL, dwPlayOffset, nLoopCount, &fwave);
+            dwAlignment, (uint32_t *)pdwSeekTable, NULL, dwPlayOffset, nLoopCount, &fwave);
 
     if(ret != 0 || !fwave)
     {

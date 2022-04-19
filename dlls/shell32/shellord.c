@@ -41,7 +41,6 @@
 #include "winuser.h"
 #include "shlobj.h"
 #include "shell32_main.h"
-#include "undocshell.h"
 #include "pidl.h"
 #include "shlwapi.h"
 #include "commdlg.h"
@@ -49,6 +48,17 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 WINE_DECLARE_DEBUG_CHANNEL(pidl);
+
+/* SHWaitForFileToOpen flags */
+#define SHWFF_ADD       0x01
+#define SHWFF_REMOVE    0x02
+#define SHWFF_WAIT      0x04
+
+/* RegisterShellHook types */
+#define RSH_DEREGISTER          0
+#define RSH_REGISTER            1
+#define RSH_REGISTER_PROGMAN    2
+#define RSH_REGISTER_TASKMAN    3
 
 /* FIXME: !!! move CREATEMRULIST and flags to header file !!! */
 /*        !!! it is in both here and comctl32undoc.c      !!! */
@@ -1342,7 +1352,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
  *
  * See shlwapi.SHAllocShared
  */
-HANDLE WINAPI SHAllocShared(LPVOID lpvData, DWORD dwSize, DWORD dwProcId)
+HANDLE WINAPI SHAllocShared(const void *lpvData, DWORD dwSize, DWORD dwProcId)
 {
     GET_FUNC(pSHAllocShared, shlwapi, (char*)7, NULL);
     return pSHAllocShared(lpvData, dwSize, dwProcId);

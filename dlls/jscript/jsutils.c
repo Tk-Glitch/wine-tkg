@@ -706,6 +706,11 @@ HRESULT to_int32(script_ctx_t *ctx, jsval_t v, INT *ret)
     return S_OK;
 }
 
+HRESULT to_long(script_ctx_t *ctx, jsval_t v, LONG *ret)
+{
+    return to_int32(ctx, v, (INT*)ret);
+}
+
 /* ECMA-262 3rd Edition    9.6 */
 HRESULT to_uint32(script_ctx_t *ctx, jsval_t val, UINT32 *ret)
 {
@@ -995,7 +1000,7 @@ static ULONG WINAPI JSCaller_AddRef(IServiceProvider *iface)
     JSCaller *This = impl_from_IServiceProvider(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -1005,7 +1010,7 @@ static ULONG WINAPI JSCaller_Release(IServiceProvider *iface)
     JSCaller *This = impl_from_IServiceProvider(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         assert(!This->ctx);

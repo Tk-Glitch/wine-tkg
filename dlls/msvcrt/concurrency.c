@@ -34,8 +34,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 typedef exception cexception;
 CREATE_EXCEPTION_OBJECT(cexception)
 
-static int context_id = -1;
-static int scheduler_id = -1;
+static LONG context_id = -1;
+static LONG scheduler_id = -1;
 
 typedef enum {
     SchedulerKind,
@@ -169,7 +169,7 @@ typedef struct cs_queue
 {
     struct cs_queue *next;
 #if _MSVCR_VER >= 110
-    BOOL free;
+    LONG free;
     int unknown;
 #endif
 } cs_queue;
@@ -249,7 +249,7 @@ typedef struct thread_wait_entry
 typedef struct thread_wait
 {
     void *signaled;
-    int pending_waits;
+    LONG pending_waits;
     thread_wait_entry entries[1];
 } thread_wait;
 
@@ -263,7 +263,7 @@ typedef struct
 #if _MSVCR_VER >= 110
 typedef struct cv_queue {
     struct cv_queue *next;
-    BOOL expired;
+    LONG expired;
 } cv_queue;
 
 typedef struct {
@@ -345,7 +345,7 @@ enum ConcRT_EventType
     CONCRT_EVENT_DETACH
 };
 
-static int context_tls_index = TLS_OUT_OF_INDEXES;
+static DWORD context_tls_index = TLS_OUT_OF_INDEXES;
 
 static CRITICAL_SECTION default_scheduler_cs;
 static CRITICAL_SECTION_DEBUG default_scheduler_cs_debug =
@@ -527,7 +527,7 @@ DEFINE_THISCALL_WRAPPER(scheduler_resource_allocation_error_ctor_name, 12)
 scheduler_resource_allocation_error* __thiscall scheduler_resource_allocation_error_ctor_name(
         scheduler_resource_allocation_error *this, const char *name, HRESULT hr)
 {
-    TRACE("(%p %s %x)\n", this, wine_dbgstr_a(name), hr);
+    TRACE("(%p %s %lx)\n", this, wine_dbgstr_a(name), hr);
     __exception_ctor(&this->e, name, &scheduler_resource_allocation_error_vtable);
     this->hr = hr;
     return this;
@@ -620,21 +620,23 @@ static Context* try_get_current_context(void)
     return TlsGetValue(context_tls_index);
 }
 
+static BOOL WINAPI init_context_tls_index(INIT_ONCE *once, void *param, void **context)
+{
+    context_tls_index = TlsAlloc();
+    return context_tls_index != TLS_OUT_OF_INDEXES;
+}
+
 static Context* get_current_context(void)
 {
+    static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
     Context *ret;
 
-    if (context_tls_index == TLS_OUT_OF_INDEXES) {
-        int tls_index = TlsAlloc();
-        if (tls_index == TLS_OUT_OF_INDEXES) {
-            scheduler_resource_allocation_error e;
-            scheduler_resource_allocation_error_ctor_name(&e, NULL,
-                    HRESULT_FROM_WIN32(GetLastError()));
-            _CxxThrowException(&e, &scheduler_resource_allocation_error_exception_type);
-        }
-
-        if(InterlockedCompareExchange(&context_tls_index, tls_index, TLS_OUT_OF_INDEXES) != TLS_OUT_OF_INDEXES)
-            TlsFree(tls_index);
+    if(!InitOnceExecuteOnce(&init_once, init_context_tls_index, NULL, NULL))
+    {
+        scheduler_resource_allocation_error e;
+        scheduler_resource_allocation_error_ctor_name(&e, NULL,
+                HRESULT_FROM_WIN32(GetLastError()));
+        _CxxThrowException(&e, &scheduler_resource_allocation_error_exception_type);
     }
 
     ret = TlsGetValue(context_tls_index);
@@ -1099,7 +1101,7 @@ static void ThreadScheduler_dtor(ThreadScheduler *this)
 {
     int i;
 
-    if(this->ref != 0) WARN("ref = %d\n", this->ref);
+    if(this->ref != 0) WARN("ref = %ld\n", this->ref);
     SchedulerPolicy_dtor(&this->policy);
 
     for(i=0; i<this->shutdown_count; i++)
@@ -2729,7 +2731,7 @@ void __cdecl Concurrency_wait(unsigned int time)
 /* ?_Trace_agents@Concurrency@@YAXW4Agents_EventType@1@_JZZ */
 void WINAPIV _Trace_agents(/*enum Concurrency::Agents_EventType*/int type, __int64 id, ...)
 {
-    FIXME("(%d %s)\n", type, wine_dbgstr_longlong(id));
+    FIXME("(%d %#I64x)\n", type, id);
 }
 #endif
 

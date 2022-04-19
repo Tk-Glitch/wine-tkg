@@ -1716,15 +1716,11 @@ end:
 
 #define CHARS_IN_GUID 39
 
-HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
+HRESULT create_monodata(REFCLSID clsid, LPVOID *ppObj)
 {
-    static const WCHAR wszAssembly[] = {'A','s','s','e','m','b','l','y',0};
-    static const WCHAR wszCodebase[] = {'C','o','d','e','B','a','s','e',0};
-    static const WCHAR wszClass[] = {'C','l','a','s','s',0};
-    static const WCHAR wszFileSlash[] = {'f','i','l','e',':','/','/','/',0};
-    static const WCHAR wszCLSIDSlash[] = {'C','L','S','I','D','\\',0};
-    static const WCHAR wszInprocServer32[] = {'\\','I','n','p','r','o','c','S','e','r','v','e','r','3','2',0};
-    static const WCHAR wszDLL[] = {'.','d','l','l',0};
+    static const WCHAR wszFileSlash[] = L"file:///";
+    static const WCHAR wszCLSIDSlash[] = L"CLSID\\";
+    static const WCHAR wszInprocServer32[] = L"\\InprocServer32";
     WCHAR path[CHARS_IN_GUID + ARRAY_SIZE(wszCLSIDSlash) + ARRAY_SIZE(wszInprocServer32) - 1];
     MonoDomain *domain;
     MonoAssembly *assembly;
@@ -1743,7 +1739,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
     DWORD dwBufLen = 350;
 
     lstrcpyW(path, wszCLSIDSlash);
-    StringFromGUID2(riid, path + lstrlenW(wszCLSIDSlash), CHARS_IN_GUID);
+    StringFromGUID2(clsid, path + lstrlenW(wszCLSIDSlash), CHARS_IN_GUID);
     lstrcatW(path, wszInprocServer32);
 
     TRACE("Registry key: %s\n", debugstr_w(path));
@@ -1751,7 +1747,53 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
     res = RegOpenKeyExW(HKEY_CLASSES_ROOT, path, 0, KEY_READ, &key);
     if (res != ERROR_FILE_NOT_FOUND)
     {
-        res = RegGetValueW( key, NULL, wszClass, RRF_RT_REG_SZ, NULL, classname, &dwBufLen);
+        res = RegOpenKeyExW( key, L"Server", 0, KEY_READ, &subkey );
+        if (res == ERROR_SUCCESS)
+        {
+            /* Not a managed class, just chain through LoadLibraryShim */
+            HMODULE module;
+            HRESULT (WINAPI *pDllGetClassObject)(REFCLSID,REFIID,LPVOID*);
+            IClassFactory *classfactory;
+
+            dwBufLen = ARRAY_SIZE( filename );
+            res = RegGetValueW( subkey, NULL, NULL, RRF_RT_REG_SZ, NULL, filename, &dwBufLen );
+
+            RegCloseKey( subkey );
+
+            if (res != ERROR_SUCCESS)
+            {
+                WARN("Can't read default value from Server subkey.\n");
+                hr = CLASS_E_CLASSNOTAVAILABLE;
+                goto cleanup;
+            }
+
+            hr = LoadLibraryShim( filename, L"v4.0.30319", NULL, &module);
+            if (FAILED(hr))
+            {
+                WARN("Can't load %s.\n", debugstr_w(filename));
+                goto cleanup;
+            }
+
+            pDllGetClassObject = (void*)GetProcAddress( module, "DllGetClassObject" );
+            if (!pDllGetClassObject)
+            {
+                WARN("Can't get DllGetClassObject from %s.\n", debugstr_w(filename));
+                hr = CLASS_E_CLASSNOTAVAILABLE;
+                goto cleanup;
+            }
+
+            hr = pDllGetClassObject( clsid, &IID_IClassFactory, (void**)&classfactory );
+            if (SUCCEEDED(hr))
+            {
+                hr = IClassFactory_CreateInstance( classfactory, NULL, &IID_IUnknown, ppObj );
+
+                IClassFactory_Release( classfactory );
+            }
+
+            goto cleanup;
+        }
+
+        res = RegGetValueW( key, NULL, L"Class", RRF_RT_REG_SZ, NULL, classname, &dwBufLen);
         if(res != ERROR_SUCCESS)
         {
             WARN("Class value cannot be found.\n");
@@ -1762,7 +1804,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
         TRACE("classname (%s)\n", debugstr_w(classname));
 
         dwBufLen = MAX_PATH + 8;
-        res = RegGetValueW( key, NULL, wszCodebase, RRF_RT_REG_SZ, NULL, codebase, &dwBufLen);
+        res = RegGetValueW( key, NULL, L"CodeBase", RRF_RT_REG_SZ, NULL, codebase, &dwBufLen);
         if(res == ERROR_SUCCESS)
         {
             /* Strip file:/// */
@@ -1797,7 +1839,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
                 if (res != ERROR_SUCCESS)
                     goto cleanup;
                 dwBufLen = MAX_PATH + 8;
-                res = RegGetValueW(subkey, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
+                res = RegGetValueW(subkey, NULL, L"Assembly", RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
                 RegCloseKey(subkey);
                 if (res != ERROR_SUCCESS)
                     goto cleanup;
@@ -1805,7 +1847,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
             else
             {
                 dwBufLen = MAX_PATH + 8;
-                res = RegGetValueW(key, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
+                res = RegGetValueW(key, NULL, L"Assembly", RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
                 if (res != ERROR_SUCCESS)
                     goto cleanup;
             }
@@ -1830,13 +1872,13 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
                 *(ns) = '\0';
                 lstrcatW(filename, assemblyname);
                 *(ns) = '.';
-                lstrcatW(filename, wszDLL);
+                lstrcatW(filename, L".dll");
             }
         }
     }
     else
     {
-        if (!try_create_registration_free_com(riid, classname, ARRAY_SIZE(classname), filename, ARRAY_SIZE(filename)))
+        if (!try_create_registration_free_com(clsid, classname, ARRAY_SIZE(classname), filename, ARRAY_SIZE(filename)))
             return CLASS_E_CLASSNOTAVAILABLE;
 
         TRACE("classname (%s)\n", debugstr_w(classname));

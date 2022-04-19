@@ -1313,10 +1313,15 @@ static void *record_parameter(struct d3dx_effect *effect, struct d3dx_parameter 
 
 static void set_dirty(struct d3dx_parameter *param)
 {
-    struct d3dx_shared_data *shared_data;
     struct d3dx_top_level_parameter *top_param = param->top_level_param;
-    ULONG64 new_update_version = next_update_version(top_param->version_counter);
+    struct d3dx_shared_data *shared_data;
+    ULONG64 new_update_version;
 
+    /* This is true for annotations. */
+    if (!top_param)
+        return;
+
+    new_update_version = next_update_version(top_param->version_counter);
     if ((shared_data = top_param->shared_data))
         shared_data->update_version = new_update_version;
     else
@@ -4001,6 +4006,12 @@ static HRESULT WINAPI d3dx_effect_BeginPass(ID3DXEffect *iface, UINT pass)
 
     TRACE("iface %p, pass %u\n", effect, pass);
 
+    if (!effect->started)
+    {
+        WARN("Effect is not started, returning D3DERR_INVALIDCALL.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
     if (technique && pass < technique->pass_count && !effect->active_pass)
     {
         HRESULT hr;
@@ -6389,7 +6400,7 @@ static const char **parse_skip_constants_string(char *skip_constants_string, uns
 
 static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDevice9 *device,
         const char *data, SIZE_T data_size, const D3D_SHADER_MACRO *defines, ID3DInclude *include,
-        UINT eflags, ID3DBlob **errors, struct ID3DXEffectPool *pool, const char *skip_constants_string)
+        UINT flags, ID3DBlob **errors, struct ID3DXEffectPool *pool, const char *skip_constants_string)
 {
 #if D3DX_SDK_VERSION <= 36
     UINT compile_flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
@@ -6405,9 +6416,9 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
     unsigned int i, j;
     HRESULT hr;
 
-    TRACE("effect %p, device %p, data %p, data_size %lu, defines %p, include %p, eflags %#x, errors %p, "
+    TRACE("effect %p, device %p, data %p, data_size %lu, defines %p, include %p, flags %#x, errors %p, "
             "pool %p, skip_constants %s.\n",
-            effect, device, data, data_size, defines, include, eflags, errors, pool,
+            effect, device, data, data_size, defines, include, flags, errors, pool,
             debugstr_a(skip_constants_string));
 
     effect->ID3DXEffect_iface.lpVtbl = &ID3DXEffect_Vtbl;
@@ -6422,7 +6433,7 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
     IDirect3DDevice9_AddRef(device);
     effect->device = device;
 
-    effect->flags = eflags;
+    effect->flags = flags;
 
     list_init(&effect->parameter_block_list);
 
@@ -6432,8 +6443,9 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
     if (tag != d3dx9_effect_version(9, 1))
     {
         TRACE("HLSL ASCII effect, trying to compile it.\n");
+        compile_flags |= flags & ~(D3DXFX_NOT_CLONEABLE | D3DXFX_LARGEADDRESSAWARE);
         hr = D3DCompile(data, data_size, NULL, defines, include,
-                NULL, "fx_2_0", compile_flags, eflags, &bytecode, &temp_errors);
+                NULL, "fx_2_0", compile_flags, 0, &bytecode, &temp_errors);
         if (FAILED(hr))
         {
             WARN("Failed to compile ASCII effect.\n");

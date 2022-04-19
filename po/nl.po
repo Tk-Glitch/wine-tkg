@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-12-22 10:00+0100\n"
+"PO-Revision-Date: 2022-02-05 10:30+0100\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -4030,11 +4030,11 @@ msgstr "Bestand niet gevonden.\n"
 msgid "Path not found.\n"
 msgstr "Locatie niet gevonden.\n"
 
-#: dlls/kernel32/winerror.mc:48
+#: dlls/kernel32/winerror.mc:48 dlls/kernel32/winerror.mc:3773
 msgid "Too many open files.\n"
 msgstr "Te veel open bestanden.\n"
 
-#: dlls/kernel32/winerror.mc:53
+#: dlls/kernel32/winerror.mc:53 dlls/kernel32/winerror.mc:3758
 msgid "Access denied.\n"
 msgstr "Toegang geweigerd.\n"
 
@@ -5386,7 +5386,7 @@ msgstr "Operatie geannuleerd door gebruiker.\n"
 msgid "File has a user-mapped section.\n"
 msgstr "Bestand heeft een gebruiker-ingedeelde sectie.\n"
 
-#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3753
+#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3783
 msgid "Connection refused.\n"
 msgstr "Verbinding geweigerd.\n"
 
@@ -6972,26 +6972,58 @@ msgid "This network connection does not exist.\n"
 msgstr "Deze netwerkverbinding bestaat niet.\n"
 
 #: dlls/kernel32/winerror.mc:3748
+msgid "Call interrupted.\n"
+msgstr "Oproep onderbroken.\n"
+
+#: dlls/kernel32/winerror.mc:3753
+msgid "Invalid file handle.\n"
+msgstr "Ongeldige bestandsingang.\n"
+
+#: dlls/kernel32/winerror.mc:3763
+msgid "Invalid pointer address.\n"
+msgstr "Ongeldig pointeradres.\n"
+
+#: dlls/kernel32/winerror.mc:3768
+msgid "Invalid argument.\n"
+msgstr "Ongeldig argument.\n"
+
+#: dlls/kernel32/winerror.mc:3778
 msgid "Connection reset by peer.\n"
 msgstr "Verbinding opnieuw ingesteld door gelijkwaardige computer.\n"
 
-#: dlls/kernel32/winerror.mc:3767
+#: dlls/kernel32/winerror.mc:3788
+msgid "Host not found.\n"
+msgstr "Host niet gevonden.\n"
+
+#: dlls/kernel32/winerror.mc:3793
+msgid "Nonauthoritative host not found.\n"
+msgstr "Niet-gemachtigde host niet gevonden.\n"
+
+#: dlls/kernel32/winerror.mc:3798
+msgid "Nonrecoverable error.\n"
+msgstr "Onherstelbare fout.\n"
+
+#: dlls/kernel32/winerror.mc:3803
+msgid "Name valid, no data record.\n"
+msgstr "Geldige naam, geen gegevensrecord.\n"
+
+#: dlls/kernel32/winerror.mc:3817
 msgid "Not implemented.\n"
 msgstr "Niet geïmplementeerd.\n"
 
-#: dlls/kernel32/winerror.mc:3788
+#: dlls/kernel32/winerror.mc:3838
 msgid "Call failed.\n"
 msgstr "Oproep mislukt.\n"
 
-#: dlls/kernel32/winerror.mc:3760
+#: dlls/kernel32/winerror.mc:3810
 msgid "No Signature found in file.\n"
 msgstr "Geen handtekening gevonden in bestand.\n"
 
-#: dlls/kernel32/winerror.mc:3774
+#: dlls/kernel32/winerror.mc:3824
 msgid "Invalid call.\n"
 msgstr "Ongeldige oproep.\n"
 
-#: dlls/kernel32/winerror.mc:3781
+#: dlls/kernel32/winerror.mc:3831
 msgid "Resource is not currently available.\n"
 msgstr "Bron is tijdelijk niet beschikbaar.\n"
 

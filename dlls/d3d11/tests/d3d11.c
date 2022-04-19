@@ -3788,9 +3788,11 @@ static void test_create_depthstencil_view(void)
         hr = ID3D11Device_CreateTexture2D(device, &texture_desc, NULL, &texture);
         ok(SUCCEEDED(hr), "Test %u: Failed to create 2d texture, hr %#x.\n", i, hr);
 
+        dsview = (void *)0xdeadbeef;
         get_dsv_desc(&dsv_desc, &invalid_desc_tests[i].dsv_desc);
         hr = ID3D11Device_CreateDepthStencilView(device, (ID3D11Resource *)texture, &dsv_desc, &dsview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!dsview, "Unexpected pointer %p.\n", dsview);
 
         ID3D11Texture2D_Release(texture);
     }
@@ -4371,16 +4373,20 @@ static void test_create_shader_resource_view(void)
 
     buffer = create_buffer(device, D3D11_BIND_SHADER_RESOURCE, 1024, NULL);
 
+    srview = (void *)0xdeadbeef;
     hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)buffer, NULL, &srview);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(!srview, "Unexpected pointer %p.\n", srview);
 
     srv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     srv_desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
     U1(U(srv_desc).Buffer).ElementOffset = 0;
     U2(U(srv_desc).Buffer).ElementWidth = 64;
 
+    srview = (void *)0xdeadbeef;
     hr = ID3D11Device_CreateShaderResourceView(device, NULL, &srv_desc, &srview);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(!srview, "Unexpected pointer %p.\n", srview);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)buffer, &srv_desc, &srview);
@@ -4405,8 +4411,10 @@ static void test_create_shader_resource_view(void)
     /* Without D3D11_BIND_SHADER_RESOURCE. */
     buffer = create_buffer(device, 0, 1024, NULL);
 
+    srview = (void *)0xdeadbeef;
     hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)buffer, &srv_desc, &srview);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(!srview, "Unexpected pointer %p.\n", srview);
 
     ID3D11Buffer_Release(buffer);
 
@@ -4564,9 +4572,11 @@ static void test_create_shader_resource_view(void)
             texture = (ID3D11Resource *)texture3d;
         }
 
+        srview = (void *)0xdeadbeef;
         get_srv_desc(&srv_desc, &invalid_desc_tests[i].srv_desc);
         hr = ID3D11Device_CreateShaderResourceView(device, texture, &srv_desc, &srview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!srview, "Unexpected pointer %p.\n", srview);
 
         ID3D11Resource_Release(texture);
     }
@@ -19425,8 +19435,10 @@ static void test_create_unordered_access_view(void)
     U(uav_desc).Buffer.NumElements = 64;
     U(uav_desc).Buffer.Flags = 0;
 
+    uav = (void *)0xdeadbeef;
     hr = ID3D11Device_CreateUnorderedAccessView(device, (ID3D11Resource *)buffer, NULL, &uav);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(!uav, "Unexpected pointer %p.\n", uav);
 
     expected_refcount = get_refcount(device) + 1;
     hr = ID3D11Device_CreateUnorderedAccessView(device, (ID3D11Resource *)buffer, &uav_desc, &uav);
@@ -19475,8 +19487,10 @@ static void test_create_unordered_access_view(void)
     U(uav_desc).Buffer.NumElements = 64;
     U(uav_desc).Buffer.Flags = 0;
 
+    uav = (void *)0xdeadbeef;
     hr = ID3D11Device_CreateUnorderedAccessView(device, (ID3D11Resource *)buffer, &uav_desc, &uav);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(!uav, "Unexpected pointer %p.\n", uav);
 
     ID3D11Buffer_Release(buffer);
 
@@ -19571,9 +19585,11 @@ static void test_create_unordered_access_view(void)
             texture = (ID3D11Resource *)texture3d;
         }
 
+        uav = (void *)0xdeadbeef;
         get_uav_desc(&uav_desc, &invalid_desc_tests[i].uav_desc);
         hr = ID3D11Device_CreateUnorderedAccessView(device, texture, &uav_desc, &uav);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!uav, "Unexpected pointer %p.\n", uav);
 
         ID3D11Resource_Release(texture);
     }
@@ -34039,6 +34055,11 @@ START_TEST(d3d11)
     char **argv;
 
     use_mt = !getenv("WINETEST_NO_MT_D3D");
+    /* Some host drivers (MacOS, Mesa radeonsi) never unmap memory even when
+     * requested. When using the chunk allocator, running the tests with more
+     * than one thread can exceed the 32-bit virtual address space. */
+    if (sizeof(void *) == 4 && !strcmp(winetest_platform, "wine"))
+        use_mt = FALSE;
 
     argc = winetest_get_mainargs(&argv);
     for (i = 2; i < argc; ++i)

@@ -421,7 +421,7 @@ static void make_explorer_window(parameters_struct *params)
         V_VT(&empty_var) = VT_EMPTY;
         if (IShellWindows_FindWindowSW(sw, &var, &empty_var, SWC_EXPLORER, &hwnd, 0, &dispatch) == S_OK)
         {
-            TRACE("Found window %#x already browsing path %s.\n", hwnd, debugstr_w(path));
+            TRACE("Found window %#lx already browsing path %s.\n", hwnd, debugstr_w(path));
             SetForegroundWindow((HWND)(LONG_PTR)hwnd);
             IShellWindows_Release(sw);
             return;
@@ -665,14 +665,17 @@ static LRESULT CALLBACK explorer_wnd_proc(HWND hwnd, UINT uMsg, WPARAM wParam, L
         = (explorer_info*)GetWindowLongPtrW(hwnd,EXPLORER_INFO_INDEX);
     IExplorerBrowser *browser = NULL;
 
-    WINE_TRACE("(hwnd=%p,uMsg=%u,wParam=%lx,lParam=%lx)\n",hwnd,uMsg,wParam,lParam);
+    WINE_TRACE("(hwnd=%p,uMsg=%u,wParam=%Ix,lParam=%Ix)\n",hwnd,uMsg,wParam,lParam);
     if(info)
         browser = info->browser;
     switch(uMsg)
     {
     case WM_DESTROY:
-        IShellWindows_Revoke(info->sw, info->sw_cookie);
-        IShellWindows_Release(info->sw);
+        if(info->sw)
+        {
+            IShellWindows_Revoke(info->sw, info->sw_cookie);
+            IShellWindows_Release(info->sw);
+        }
 
         IExplorerBrowser_Unadvise(browser,info->advise_cookie);
         IExplorerBrowser_Destroy(browser);

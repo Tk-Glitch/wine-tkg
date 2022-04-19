@@ -1065,9 +1065,13 @@ static void test_install_files_queue(void)
 {
     static const char inf_data[] = "[Version]\n"
             "Signature=\"$Chicago$\"\n"
+
             "[DefaultInstall]\n"
-            "CopyFiles=files_section\n"
-            "[files_section]\n"
+            "CopyFiles=copy_section\n"
+            "DelFiles=delete_section\n"
+            "RenFiles=rename_section\n"
+
+            "[copy_section]\n"
             "one.txt\n"
             "two.txt\n"
             "three.txt\n"
@@ -1076,11 +1080,19 @@ static void test_install_files_queue(void)
             "six.txt\n"
             "seven.txt\n"
             "eight.txt\n"
+
+            "[delete_section]\n"
+            "nine.txt\n"
+
+            "[rename_section]\n"
+            "eleven.txt,ten.txt\n"
+
             "[SourceDisksNames]\n"
             "1=heis\n"
             "2=duo,,,alpha\n"
             "3=treis,treis.cab\n"
             "4=tessares,tessares.cab,,alpha\n"
+
             "[SourceDisksFiles]\n"
             "one.txt=1\n"
             "two.txt=1,beta\n"
@@ -1090,8 +1102,11 @@ static void test_install_files_queue(void)
             "six.txt=3,beta\n"
             "seven.txt=4\n"
             "eight.txt=4,beta\n"
+
             "[DestinationDirs]\n"
-            "files_section=40000,dst\n";
+            "copy_section=40000,dst\n"
+            "delete_section=40000,dst\n"
+            "rename_section=40000,dst\n";
 
     char path[MAX_PATH + 9];
     HSPFILEQ queue;
@@ -1116,12 +1131,17 @@ static void test_install_files_queue(void)
     ret = SetupSetDirectoryIdA(hinf, 40000, CURR_DIR);
     ok(ret, "Failed to set directory ID, error %u.\n", GetLastError());
 
+    ret = CreateDirectoryA("dst", NULL);
+    ok(ret, "Failed to create test directory, error %u.\n", GetLastError());
+
     create_file("src/one.txt");
     create_file("src/beta/two.txt");
     create_file("src/alpha/three.txt");
     create_file("src/alpha/beta/four.txt");
     create_cab_file("src/treis.cab", "src\\beta\\five.txt\0six.txt\0");
     create_cab_file("src/alpha/tessares.cab", "seven.txt\0eight.txt\0");
+    create_file("dst/nine.txt");
+    create_file("dst/ten.txt");
 
     queue = SetupOpenFileQueue();
     ok(queue != INVALID_HANDLE_VALUE, "Failed to open queue, error %#x.\n", GetLastError());
@@ -1147,6 +1167,9 @@ static void test_install_files_queue(void)
     ok(delete_file("dst/six.txt"), "Destination file should exist.\n");
     ok(delete_file("dst/seven.txt"), "Destination file should exist.\n");
     ok(delete_file("dst/eight.txt"), "Destination file should exist.\n");
+    ok(!delete_file("dst/nine.txt"), "Destination file should not exist.\n");
+    ok(!delete_file("dst/ten.txt"), "Destination file should not exist.\n");
+    ok(delete_file("dst/eleven.txt"), "Destination file should exist.\n");
 
     SetupTermDefaultQueueCallback(context);
     ret = SetupCloseFileQueue(queue);
@@ -2054,12 +2077,14 @@ static void test_start_copy(void)
     ok(queue != INVALID_HANDLE_VALUE, "Failed to open queue, error %#x.\n", GetLastError());
     ret = SetupQueueCopyA(queue, "src", NULL, "one.txt", NULL, NULL, "dst", NULL, 0);
     ok(ret, "Failed to queue copy, error %#x.\n", GetLastError());
+    ret = SetupQueueCopyA(queue, "src", NULL, "one.txt", NULL, NULL, "dst", NULL, 0);
+    ok(ret, "Failed to queue copy, error %#x.\n", GetLastError());
     ret = SetupQueueCopyA(queue, "src", NULL, "two.txt", NULL, NULL, "dst", NULL, 0);
     ok(ret, "Failed to queue copy, error %#x.\n", GetLastError());
     ret = SetupQueueCopyA(queue, "src", NULL, "three.txt", NULL, NULL, "dst", NULL, 0);
     ok(ret, "Failed to queue copy, error %#x.\n", GetLastError());
     run_queue(queue, start_copy_cb);
-    ok(got_start_copy == 3, "Got %u callbacks.\n", got_start_copy);
+    todo_wine ok(got_start_copy == 3, "Got %u callbacks.\n", got_start_copy);
     ok(delete_file("dst/one.txt"), "Destination file should exist.\n");
     ok(delete_file("dst/two.txt"), "Destination file should exist.\n");
     ok(delete_file("dst/three.txt"), "Destination file should exist.\n");
@@ -2180,6 +2205,96 @@ static void test_register_dlls(void)
     ok(ret, "Failed to delete test DLL, error %u.\n", GetLastError());
 }
 
+static unsigned int start_rename_ret, got_start_rename;
+
+static UINT WINAPI start_rename_cb(void *context, UINT message, UINT_PTR param1, UINT_PTR param2)
+{
+    if (winetest_debug > 1) trace("%p, %#x, %#Ix, %#Ix\n", context, message, param1, param2);
+
+    if (message == SPFILENOTIFY_STARTRENAME)
+    {
+        const FILEPATHS_A *paths = (const FILEPATHS_A *)param1;
+
+        ++got_start_rename;
+
+        if (strstr(paths->Source, "three.txt"))
+        {
+            SetLastError(0xdeadf00d);
+            return start_rename_ret;
+        }
+    }
+
+    return SetupDefaultQueueCallbackA(context, message, param1, param2);
+}
+
+static void test_rename(void)
+{
+    HSPFILEQ queue;
+    BOOL ret;
+
+    ret = CreateDirectoryA("a", NULL);
+    ok(ret, "Failed to create test directory, error %u.\n", GetLastError());
+    ret = CreateDirectoryA("b", NULL);
+    ok(ret, "Failed to create test directory, error %u.\n", GetLastError());
+
+    create_file("a/one.txt");
+    create_file("b/three.txt");
+    create_file("a/five.txt");
+    create_file("b/six.txt");
+    start_rename_ret = FILEOP_DOIT;
+    got_start_rename = 0;
+    queue = SetupOpenFileQueue();
+    ok(queue != INVALID_HANDLE_VALUE, "Failed to open queue, error %#x.\n", GetLastError());
+    ret = SetupQueueCopyA(queue, "b", NULL, "one.txt", NULL, NULL, "b", "two.txt", 0);
+    ok(ret, "Failed to queue copy, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "a", "one.txt", "b", "one.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "b", "three.txt", NULL, "four.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "b", "six.txt", "b", "seven.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "a", "five.txt", "b", "six.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    run_queue(queue, start_rename_cb);
+    ok(got_start_rename == 4, "Got %u callbacks.\n", got_start_rename);
+    ok(!delete_file("a/one.txt"), "File should not exist.\n");
+    ok(!delete_file("a/five.txt"), "File should not exist.\n");
+    ok(delete_file("b/one.txt"), "File should exist.\n");
+    ok(delete_file("b/two.txt"), "File should exist.\n");
+    ok(!delete_file("b/three.txt"), "File should not exist.\n");
+    ok(delete_file("b/four.txt"), "File should exist.\n");
+    ok(!delete_file("b/five.txt"), "File should not exist.\n");
+    ok(delete_file("b/six.txt"), "File should exist.\n");
+    ok(delete_file("b/seven.txt"), "File should exist.\n");
+    SetupCloseFileQueue(queue);
+
+    create_file("a/one.txt");
+    create_file("a/three.txt");
+    create_file("a/five.txt");
+    start_rename_ret = FILEOP_SKIP;
+    got_start_rename = 0;
+    queue = SetupOpenFileQueue();
+    ok(queue != INVALID_HANDLE_VALUE, "Failed to open queue, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "a", "one.txt", "a", "two.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "a", "three.txt", "a", "four.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    ret = SetupQueueRenameA(queue, "a", "five.txt", "a", "six.txt");
+    ok(ret, "Failed to queue rename, error %#x.\n", GetLastError());
+    run_queue(queue, start_rename_cb);
+    ok(got_start_rename == 3, "Got %u callbacks.\n", got_start_rename);
+    ok(!delete_file("a/one.txt"), "File should not exist.\n");
+    ok(delete_file("a/two.txt"), "File should exist.\n");
+    ok(delete_file("a/three.txt"), "File should exist.\n");
+    ok(!delete_file("a/four.txt"), "File should not exist.\n");
+    ok(!delete_file("a/five.txt"), "File should not exist.\n");
+    ok(delete_file("a/six.txt"), "File should exist.\n");
+    SetupCloseFileQueue(queue);
+
+    ok(delete_file("a/"), "Failed to delete directory, error %u.\n", GetLastError());
+    ok(delete_file("b/"), "Failed to delete directory, error %u.\n", GetLastError());
+}
+
 static WCHAR service_name[] = L"Wine Test Service";
 static SERVICE_STATUS_HANDLE service_handle;
 static HANDLE stop_event;
@@ -2288,6 +2403,7 @@ START_TEST(install)
     test_install_file();
     test_start_copy();
     test_register_dlls();
+    test_rename();
 
     UnhookWindowsHookEx(hhook);
 

@@ -49,6 +49,7 @@ struct wined3d_command_list
     SIZE_T data_size;
     void *data;
 
+    HANDLE upload_heap;
     SIZE_T resource_count;
     struct wined3d_resource **resources;
 
@@ -3105,39 +3106,49 @@ static bool wined3d_cs_map_upload_bo(struct wined3d_device_context *context, str
 {
     /* Limit NOOVERWRITE maps to buffers for now; there are too many ways that
      * a texture can be invalidated to even count. */
-    if (wined3d_map_persistent() && resource->type == WINED3D_RTYPE_BUFFER
-            && (flags & (WINED3D_MAP_DISCARD | WINED3D_MAP_NOOVERWRITE)))
+    if (resource->type == WINED3D_RTYPE_BUFFER && (flags & (WINED3D_MAP_DISCARD | WINED3D_MAP_NOOVERWRITE)))
     {
         struct wined3d_client_resource *client = &resource->client;
         struct wined3d_device *device = context->device;
+        struct wined3d_bo_address addr;
         const struct wined3d_bo *bo;
         uint8_t *map_ptr;
 
         if (flags & WINED3D_MAP_DISCARD)
         {
-            if (!device->adapter->adapter_ops->adapter_alloc_bo(device, resource, sub_resource_idx, &client->addr))
+            if (!device->adapter->adapter_ops->adapter_alloc_bo(device, resource, sub_resource_idx, &addr))
                 return false;
+
+            if (wined3d_map_persistent())
+                client->addr = addr;
+        }
+        else
+        {
+            addr = client->addr;
         }
 
-        bo = client->addr.buffer_object;
+        bo = addr.buffer_object;
         map_ptr = bo ? bo->map_ptr : NULL;
-        map_ptr += (uintptr_t)client->addr.addr;
+        map_ptr += (uintptr_t)addr.addr;
 
         if (!map_ptr)
         {
-            TRACE("Sub-resource is not persistently mapped.\n");
+            TRACE("Sub-resource is not mapped.\n");
             return false;
         }
 
         wined3d_resource_get_sub_resource_map_pitch(resource, sub_resource_idx,
                 &map_desc->row_pitch, &map_desc->slice_pitch);
 
-        client->mapped_upload.addr = *wined3d_const_bo_address(&client->addr);
+        client->mapped_upload.addr = *wined3d_const_bo_address(&addr);
         client->mapped_upload.flags = 0;
         if (bo)
         {
             map_ptr += bo->memory_offset;
-            if (!bo->coherent)
+            /* If we are not mapping all buffers persistently, use
+             * UPDATE_SUB_RESOURCE as a means of telling the CS thread to try
+             * to unmap the resource, so that we can free VA space. */
+            if (!bo->coherent || !wined3d_map_persistent())
                 client->mapped_upload.flags |= UPLOAD_BO_UPLOAD_ON_UNMAP;
         }
         map_desc->data = resource_offset_map_pointer(resource, sub_resource_idx, map_ptr, box);
@@ -4004,6 +4015,7 @@ static void wined3d_cs_packet_incref_objects(struct wined3d_cs_packet *packet)
 struct wined3d_deferred_context
 {
     struct wined3d_device_context c;
+    HANDLE upload_heap;
 
     SIZE_T data_size, data_capacity;
     void *data;
@@ -4133,7 +4145,15 @@ static bool wined3d_deferred_context_map_upload_bo(struct wined3d_device_context
             deferred->upload_count + 1, sizeof(*deferred->uploads)))
         return false;
 
-    if (!(sysmem = heap_alloc(size + RESOURCE_ALIGNMENT - 1)))
+    if (!deferred->upload_heap)
+        deferred->upload_heap = HeapCreate(HEAP_NO_SERIALIZE, 0, 0);
+    if (!deferred->upload_heap)
+    {
+        ERR("Failed to create upload heap.\n");
+        return false;
+    }
+
+    if (!(sysmem = HeapAlloc(deferred->upload_heap, 0, size + RESOURCE_ALIGNMENT - 1)))
         return false;
 
     upload = &deferred->uploads[deferred->upload_count++];
@@ -4278,10 +4298,9 @@ void CDECL wined3d_deferred_context_destroy(struct wined3d_device_context *conte
     heap_free(deferred->resources);
 
     for (i = 0; i < deferred->upload_count; ++i)
-    {
         wined3d_resource_decref(deferred->uploads[i].resource);
-        heap_free(deferred->uploads[i].sysmem);
-    }
+    if (deferred->upload_heap)
+        HeapDestroy(deferred->upload_heap);
     heap_free(deferred->uploads);
 
     for (i = 0; i < deferred->command_list_count; ++i)
@@ -4366,6 +4385,9 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
     deferred->command_list_count = 0;
     deferred->query_count = 0;
 
+    object->upload_heap = deferred->upload_heap;
+    deferred->upload_heap = 0;
+
     /* This is in fact recorded into a subsequent command list. */
     if (restore)
         wined3d_device_context_set_state(&deferred->c, deferred->c.state);
@@ -4382,13 +4404,11 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
 static void wined3d_command_list_destroy_object(void *object)
 {
     struct wined3d_command_list *list = object;
-    SIZE_T i;
 
     TRACE("list %p.\n", list);
 
-    for (i = 0; i < list->upload_count; ++i)
-        heap_free(list->uploads[i].sysmem);
-
+    if (list->upload_heap)
+        HeapDestroy(list->upload_heap);
     heap_free(list);
 }
 

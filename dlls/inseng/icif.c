@@ -258,7 +258,7 @@ static HRESULT WINAPI group_GetID(ICifGroup *iface, char *id, DWORD size)
 {
     struct cifgroup *This = impl_from_ICifGroup(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, id, size);
+    TRACE("(%p)->(%p, %lu)\n", This, id, size);
 
     return copy_substring_null(id, size, This->id);
 }
@@ -267,7 +267,7 @@ static HRESULT WINAPI group_GetDescription(ICifGroup *iface, char *desc, DWORD s
 {
     struct cifgroup *This = impl_from_ICifGroup(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, desc, size);
+    TRACE("(%p)->(%p, %lu)\n", This, desc, size);
 
     return copy_substring_null(desc, size, This->description);
 }
@@ -286,10 +286,10 @@ static HRESULT WINAPI group_EnumComponents(ICifGroup *iface, IEnumCifComponents 
     struct cifgroup *This = impl_from_ICifGroup(iface);
     struct ciffile *file;
 
-    TRACE("(%p)->(%p, %u, %p)\n", This, enum_components, filter, pv);
+    TRACE("(%p)->(%p, %#lx, %p)\n", This, enum_components, filter, pv);
 
     if (filter)
-        FIXME("filter (%x) not supported\n", filter);
+        FIXME("filter (%#lx) not supported\n", filter);
     if (pv)
         FIXME("how to handle pv (%p)?\n", pv);
 
@@ -347,7 +347,7 @@ static HRESULT WINAPI component_GetID(ICifComponent *iface, char *id, DWORD size
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, id, size);
+    TRACE("(%p)->(%p, %lu)\n", This, id, size);
 
     return copy_substring_null(id, size, This->id);
 }
@@ -356,7 +356,7 @@ static HRESULT WINAPI component_GetGUID(ICifComponent *iface, char *guid, DWORD 
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, guid, size);
+    TRACE("(%p)->(%p, %lu)\n", This, guid, size);
 
     return copy_substring_null(guid, size, This->guid);
 }
@@ -365,7 +365,7 @@ static HRESULT WINAPI component_GetDescription(ICifComponent *iface, char *desc,
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, desc, size);
+    TRACE("(%p)->(%p, %lu)\n", This, desc, size);
 
     return copy_substring_null(desc, size, This->description);
 }
@@ -374,7 +374,7 @@ static HRESULT WINAPI component_GetDetails(ICifComponent *iface, char *details, 
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, details, size);
+    TRACE("(%p)->(%p, %lu)\n", This, details, size);
 
     return copy_substring_null(details, size, This->details);
 }
@@ -384,7 +384,7 @@ static HRESULT WINAPI component_GetUrl(ICifComponent *iface, UINT index, char *u
     struct cifcomponent *This = impl_from_ICifComponent(iface);
     struct url_info *entry;
 
-    TRACE("(%p)->(%u, %p, %u, %p)\n", This, index, url, size, flags);
+    TRACE("(%p)->(%u, %p, %lu, %p)\n", This, index, url, size, flags);
 
     /* FIXME: check how functions behaves for url == NULL */
 
@@ -407,7 +407,7 @@ static HRESULT WINAPI component_GetFileExtractList(ICifComponent *iface, UINT in
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%u, %p, %u): stub\n", This, index, list, size);
+    FIXME("(%p)->(%u, %p, %lu): stub\n", This, index, list, size);
 
     return E_NOTIMPL;
 }
@@ -425,7 +425,7 @@ static HRESULT WINAPI component_GetCommand(ICifComponent *iface, UINT index, cha
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%u, %p, %u, %p, %u, %p): stub\n", This, index, cmd, cmd_size, switches, switch_size, type);
+    FIXME("(%p)->(%u, %p, %lu, %p, %lu, %p): stub\n", This, index, cmd, cmd_size, switches, switch_size, type);
 
     return E_NOTIMPL;
 }
@@ -449,7 +449,7 @@ static HRESULT WINAPI component_GetLocale(ICifComponent *iface, char *locale, DW
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, locale, size);
+    TRACE("(%p)->(%p, %lu)\n", This, locale, size);
 
     return copy_substring_null(locale, size, This->locale);
 }
@@ -458,7 +458,7 @@ static HRESULT WINAPI component_GetUninstallKey(ICifComponent *iface, char *key,
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, key, size);
+    TRACE("(%p)->(%p, %lu)\n", This, key, size);
 
     return copy_substring_null(key, size, This->key_uninstall);
 }
@@ -500,7 +500,7 @@ static HRESULT WINAPI component_GetSuccessKey(ICifComponent *iface, char *key, D
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, key, size);
+    TRACE("(%p)->(%p, %lu)\n", This, key, size);
 
     return copy_substring_null(key, size, This->key_success);
 }
@@ -511,7 +511,7 @@ static HRESULT WINAPI component_GetProgressKeys(ICifComponent *iface, char *prog
     struct cifcomponent *This = impl_from_ICifComponent(iface);
     HRESULT hr;
 
-    TRACE("(%p)->(%p, %u, %p, %u): semi-stub\n", This, progress, progress_size, cancel, cancel_size);
+    TRACE("(%p)->(%p, %lu, %p, %lu): semi-stub\n", This, progress, progress_size, cancel, cancel_size);
 
     hr = copy_substring_null(progress, progress_size, This->key_progress);
     if (hr != S_OK) return hr;
@@ -565,7 +565,7 @@ static HRESULT WINAPI component_GetDependency(ICifComponent *iface, UINT index, 
     ICifComponent *dependency;
     int pos = 0;
 
-    TRACE("(%p)->(%u, %p, %u, %p, %p, %p)\n", This, index, id, id_size, type, ver, build);
+    TRACE("(%p)->(%u, %p, %lu, %p, %p, %p)\n", This, index, id, id_size, type, ver, build);
 
     if (!id || !ver || !build)
         return E_FAIL;
@@ -609,7 +609,7 @@ static HRESULT WINAPI component_GetMode(ICifComponent *iface, UINT index, char *
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%u, %p, %u): stub\n", This, index, mode, size);
+    FIXME("(%p)->(%u, %p, %lu): stub\n", This, index, mode, size);
 
     return E_NOTIMPL;
 }
@@ -618,7 +618,7 @@ static HRESULT WINAPI component_GetGroup(ICifComponent *iface, char *id, DWORD s
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, id, size);
+    TRACE("(%p)->(%p, %lu)\n", This, id, size);
 
     return copy_substring_null(id, size, This->group);
 }
@@ -636,7 +636,7 @@ static HRESULT WINAPI component_GetPatchID(ICifComponent *iface, char *id, DWORD
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, id, size);
+    TRACE("(%p)->(%p, %lu)\n", This, id, size);
 
     return copy_substring_null(id, size, This->patchid);
 }
@@ -645,7 +645,7 @@ static HRESULT WINAPI component_GetDetVersion(ICifComponent *iface, char *dll, D
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%p, %u, %p, %u): stub\n", This, dll, dll_size, entry, entry_size);
+    FIXME("(%p)->(%p, %lu, %p, %lu): stub\n", This, dll, dll_size, entry, entry_size);
 
     return E_NOTIMPL;
 }
@@ -654,7 +654,7 @@ static HRESULT WINAPI component_GetTreatAsOneComponents(ICifComponent *iface, UI
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%u, %p, %u): stub\n", This, index, id, size);
+    FIXME("(%p)->(%u, %p, %lu): stub\n", This, index, id, size);
 
     return E_NOTIMPL;
 }
@@ -663,7 +663,7 @@ static HRESULT WINAPI component_GetCustomData(ICifComponent *iface, char *key, c
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%s, %p, %u): stub\n", This, debugstr_a(key), data, size);
+    FIXME("(%p)->(%s, %p, %lu): stub\n", This, debugstr_a(key), data, size);
 
     return E_NOTIMPL;
 }
@@ -690,7 +690,7 @@ static DWORD WINAPI component_IsThisVersionInstalled(ICifComponent *iface, DWORD
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    FIXME("(%p)->(%u, %u, %p, %p): stub\n", This, version, build, ret_version, ret_build);
+    FIXME("(%p)->(%lu, %lu, %p, %p): stub\n", This, version, build, ret_version, ret_build);
 
     return 0;
 }
@@ -708,7 +708,7 @@ static HRESULT WINAPI component_SetInstallQueueState(ICifComponent *iface, DWORD
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%u)\n", This, state);
+    TRACE("(%p)->(%lu)\n", This, state);
 
     This->queue_state = state;
     return S_OK;
@@ -737,7 +737,7 @@ static HRESULT WINAPI component_SetCurrentPriority(ICifComponent *iface, DWORD p
 {
     struct cifcomponent *This = impl_from_ICifComponent(iface);
 
-    TRACE("(%p)->(%u)\n", This, priority);
+    TRACE("(%p)->(%lu)\n", This, priority);
 
     This->current_priority = priority;
     return S_OK;
@@ -816,7 +816,7 @@ static ULONG WINAPI enum_components_AddRef(IEnumCifComponents *iface)
     struct ciffenum_components *This = impl_from_IEnumCifComponents(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -826,7 +826,7 @@ static ULONG WINAPI enum_components_Release(IEnumCifComponents *iface)
     struct ciffenum_components *This = impl_from_IEnumCifComponents(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
     {
@@ -940,7 +940,7 @@ static ULONG WINAPI enum_groups_AddRef(IEnumCifGroups *iface)
     struct ciffenum_groups *This = impl_from_IEnumCifGroups(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -950,7 +950,7 @@ static ULONG WINAPI enum_groups_Release(IEnumCifGroups *iface)
     struct ciffenum_groups *This = impl_from_IEnumCifGroups(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
     {
@@ -1049,7 +1049,7 @@ static ULONG WINAPI ciffile_AddRef(ICifFile *iface)
     struct ciffile *This = impl_from_ICiffile(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -1059,7 +1059,7 @@ static ULONG WINAPI ciffile_Release(ICifFile *iface)
     struct ciffile *This = impl_from_ICiffile(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
     {
@@ -1090,10 +1090,10 @@ static HRESULT WINAPI ciffile_EnumComponents(ICifFile *iface, IEnumCifComponents
 {
     struct ciffile *This = impl_from_ICiffile(iface);
 
-    TRACE("(%p)->(%p, %u, %p)\n", This, enum_components, filter, pv);
+    TRACE("(%p)->(%p, %#lx, %p)\n", This, enum_components, filter, pv);
 
     if (filter)
-        FIXME("filter (%x) not supported\n", filter);
+        FIXME("filter (%#lx) not supported\n", filter);
     if (pv)
         FIXME("how to handle pv (%p)?\n", pv);
 
@@ -1123,10 +1123,10 @@ static HRESULT WINAPI ciffile_EnumGroups(ICifFile *iface, IEnumCifGroups **enum_
 {
     struct ciffile *This = impl_from_ICiffile(iface);
 
-    TRACE("(%p)->(%p, %u, %p)\n", This, enum_groups, filter, pv);
+    TRACE("(%p)->(%p, %#lx, %p)\n", This, enum_groups, filter, pv);
 
     if (filter)
-        FIXME("filter (%x) not supported\n", filter);
+        FIXME("filter (%#lx) not supported\n", filter);
     if (pv)
         FIXME("how to handle pv (%p)?\n", pv);
 
@@ -1156,7 +1156,7 @@ static HRESULT WINAPI ciffile_EnumModes(ICifFile *iface, IEnumCifModes **cuf_mod
 {
     struct ciffile *This = impl_from_ICiffile(iface);
 
-    FIXME("(%p)->(%p, %u, %p): stub\n", This, cuf_modes, filter, pv);
+    FIXME("(%p)->(%p, %lu, %p): stub\n", This, cuf_modes, filter, pv);
 
     return E_NOTIMPL;
 }
@@ -1174,7 +1174,7 @@ static HRESULT WINAPI ciffile_GetDescription(ICifFile *iface, char *desc, DWORD 
 {
     struct ciffile *This = impl_from_ICiffile(iface);
 
-    TRACE("(%p)->(%p, %u)\n", This, desc, size);
+    TRACE("(%p)->(%p, %lu)\n", This, desc, size);
 
     return copy_substring_null(desc, size, This->name);
 }
@@ -1183,7 +1183,7 @@ static HRESULT WINAPI ciffile_GetDetDlls(ICifFile *iface, char *dlls, DWORD size
 {
     struct ciffile *This = impl_from_ICiffile(iface);
 
-    FIXME("(%p)->(%p, %u): stub\n", This, dlls, size);
+    FIXME("(%p)->(%p, %lu): stub\n", This, dlls, size);
 
     return E_NOTIMPL;
 }
@@ -1685,7 +1685,7 @@ static HRESULT process_inf(struct ciffile *file, struct inf_file *inf)
         else
             hr = process_section(file, section, section_name);
 
-        TRACE("finished processing section %s (%x)\n", debugstr_a(section_name), hr);
+        TRACE("Finished processing section %s, hr %#lx.\n", debugstr_a(section_name), hr);
         heap_free(section_name);
     }
 

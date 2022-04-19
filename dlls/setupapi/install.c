@@ -826,7 +826,7 @@ static BOOL profile_items_callback( HINF hinf, PCWSTR field, void *arg )
 {
     WCHAR lnkpath[MAX_PATH];
     LPWSTR cmdline=NULL, lnkpath_end;
-    unsigned int name_size;
+    DWORD name_size;
     INFCONTEXT name_context, context;
     int attrs=0;
 
@@ -846,7 +846,7 @@ static BOOL profile_items_callback( HINF hinf, PCWSTR field, void *arg )
 
     if (!(attrs & FLG_PROFITEM_GROUP) && SetupFindFirstLineW( hinf, field, L"SubDir", &context ))
     {
-        unsigned int subdir_size;
+        DWORD subdir_size;
 
         if (!SetupGetStringFieldW( &context, 1, lnkpath_end, (lnkpath+MAX_PATH)-lnkpath_end, &subdir_size ))
             return TRUE;
@@ -878,7 +878,8 @@ static BOOL profile_items_callback( HINF hinf, PCWSTR field, void *arg )
         /* calculate command line */
         if (SetupFindFirstLineW( hinf, field, L"CmdLine", &context ))
         {
-            unsigned int dir_len=0, subdir_size=0, filename_size=0;
+            unsigned int dir_len=0;
+            DWORD subdir_size=0, filename_size=0;
             int dirid=0;
             LPCWSTR dir;
             LPWSTR cmdline_end;
@@ -1026,7 +1027,9 @@ BOOL WINAPI SetupInstallFilesFromInfSectionW( HINF hinf, HINF hlayout, HSPFILEQ 
     info.src_root   = src_root;
     info.copy_flags = flags;
     info.layout     = hlayout;
-    return iterate_section_fields( hinf, section, L"CopyFiles", copy_files_callback, &info );
+    return iterate_section_fields( hinf, section, L"CopyFiles", copy_files_callback, &info ) &&
+           iterate_section_fields( hinf, section, L"DelFiles", delete_files_callback, &info ) &&
+           iterate_section_fields( hinf, section, L"RenFiles", rename_files_callback, &info );
 }
 
 
@@ -1085,17 +1088,10 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
     }
     if (flags & SPINST_FILES)
     {
-        struct files_callback_info info;
         HSPFILEQ queue;
 
         if (!(queue = SetupOpenFileQueue())) return FALSE;
-        info.queue      = queue;
-        info.src_root   = src_root;
-        info.copy_flags = copy_flags;
-        info.layout     = hinf;
-        ret = (iterate_section_fields( hinf, section, L"CopyFiles", copy_files_callback, &info ) &&
-               iterate_section_fields( hinf, section, L"DelFiles", delete_files_callback, &info ) &&
-               iterate_section_fields( hinf, section, L"RenFiles", rename_files_callback, &info ) &&
+        ret = (SetupInstallFilesFromInfSectionW( hinf, NULL, queue, section, src_root, copy_flags ) &&
                SetupCommitFileQueueW( owner, queue, callback, context ));
         SetupCloseFileQueue( queue );
         if (!ret) return FALSE;

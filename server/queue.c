@@ -2534,6 +2534,9 @@ DECL_HANDLER(set_queue_mask)
             if (req->skip_wait) queue->wake_mask = queue->changed_mask = 0;
             else wake_up( &queue->obj, 0 );
         }
+
+        if (do_esync() && !is_signaled( queue ))
+            esync_clear( queue->esync_fd );
     }
 }
 
@@ -2801,6 +2804,10 @@ DECL_HANDLER(get_message)
     queue->wake_mask = req->wake_mask;
     queue->changed_mask = req->changed_mask;
     set_error( STATUS_PENDING );  /* FIXME */
+
+    if (do_esync() && !is_signaled( queue ))
+        esync_clear( queue->esync_fd );
+
     return;
 
 found_msg:

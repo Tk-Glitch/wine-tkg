@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - mar. 19 avril 2022 15:54:06 CEST :
+# Last wine-tkg-staging-fsync-git configuration - mar. 19 avril 2022 15:55:13 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.1.r0.g594e431e36d
-Using wine-staging patchset (version 7.1.r0.gf5ca8f5a)
+Wine (plain) version: 7.2.r0.gd318f43559d
+Using wine-staging patchset (version 7.2.r0.g68441b1d)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -12,66 +12,6 @@ Done applying reverting hotfixes (if any) - list available in prepare.log
 
 Applied reverting hotfix staging-fa5989b.mystagingrevert
 Applied hotfix protonify_stg_syscall_emu-009.mystagingpatch
-Applied hotfix 0001-Revert-winegstreamer-Get-rid-of-the-WMReader-typedef.myearlypatch
-Applied hotfix 0002-Revert-wmvcore-Move-the-async-reader-implementation-.myearlypatch
-Applied hotfix 0003-Revert-winegstreamer-Get-rid-of-the-WMSyncReader-typ.myearlypatch
-Applied hotfix 0004-Revert-wmvcore-Move-the-sync-reader-implementation-t.myearlypatch
-Applied hotfix 0005-Revert-winegstreamer-Translate-GST_AUDIO_CHANNEL_POS.myearlypatch
-Applied hotfix 0006-Revert-winegstreamer-Trace-the-unfiltered-caps-in-si.myearlypatch
-Applied hotfix 0007-Revert-winegstreamer-Avoid-seeking-past-the-end-of-a.myearlypatch
-Applied hotfix 0008-Revert-winegstreamer-Avoid-passing-a-NULL-buffer-to-.myearlypatch
-Applied hotfix 0009-Revert-winegstreamer-Use-array_reserve-to-reallocate.myearlypatch
-Applied hotfix 0010-Revert-winegstreamer-Handle-zero-length-reads-in-src.myearlypatch
-Applied hotfix 0011-Revert-winegstreamer-Convert-the-Unix-library-to-the.myearlypatch
-Applied hotfix 0012-Revert-winegstreamer-Return-void-from-wg_parser_stre.myearlypatch
-Applied hotfix 0013-Revert-winegstreamer-Move-Unix-library-definitions-i.myearlypatch
-Applied hotfix 0014-Revert-winegstreamer-Remove-the-no-longer-used-start.myearlypatch
-Applied hotfix 0015-Revert-winegstreamer-Set-unlimited-buffering-using-a.myearlypatch
-Applied hotfix 0016-Revert-winegstreamer-Initialize-GStreamer-in-wg_pars.myearlypatch
-Applied hotfix 0017-Revert-winegstreamer-Use-a-single-wg_parser_create-e.myearlypatch
-Applied hotfix 0018-Revert-winegstreamer-Fix-return-code-in-init_gst-fai.myearlypatch
-Applied hotfix 0019-Revert-winegstreamer-Allocate-source-media-buffers-i.myearlypatch
-Applied hotfix 0020-Revert-winegstreamer-Duplicate-source-shutdown-path-.myearlypatch
-Applied hotfix 0021-Revert-winegstreamer-Properly-clean-up-from-failure-.myearlypatch
-Applied hotfix 0022-Revert-winegstreamer-Factor-out-more-of-the-init_gst.myearlypatch
-Applied hotfix 0001-winegstreamer-Activate-source-pad-in-push-mode-if-it.myearlypatch
-Applied hotfix 0002-winegstreamer-Push-stream-start-and-segment-events-i.myearlypatch
-Applied hotfix 0003-winegstreamer-Introduce-H.264-decoder-transform.myearlypatch
-Applied hotfix 0004-winegstreamer-Implement-GetInputAvailableType-for-de.myearlypatch
-Applied hotfix 0005-winegstreamer-Implement-GetOutputAvailableType-for-d.myearlypatch
-Applied hotfix 0006-winegstreamer-Implement-SetInputType-for-decode-tran.myearlypatch
-Applied hotfix 0007-winegstreamer-Implement-SetOutputType-for-decode-tra.myearlypatch
-Applied hotfix 0008-winegstreamer-Implement-Get-Input-Output-StreamInfo-.myearlypatch
-Applied hotfix 0009-winegstreamer-Add-push-mode-path-for-wg_parser.myearlypatch
-Applied hotfix 0010-winegstreamer-Implement-Process-Input-Output-for-dec.myearlypatch
-Applied hotfix 0011-winestreamer-Implement-ProcessMessage-for-decoder-tr.myearlypatch
-Applied hotfix 0012-winegstreamer-Semi-stub-GetAttributes-for-decoder-tr.myearlypatch
-Applied hotfix 0013-winegstreamer-Register-the-H.264-decoder-transform.myearlypatch
-Applied hotfix 0014-winegstreamer-Introduce-AAC-decoder-transform.myearlypatch
-Applied hotfix 0015-winegstreamer-Register-the-AAC-decoder-transform.myearlypatch
-Applied hotfix 0016-winegstreamer-Rename-GStreamer-objects-to-be-more-ge.myearlypatch
-Applied hotfix 0017-winegstreamer-Report-streams-backwards-in-media-sour.myearlypatch
-Applied hotfix 0018-winegstreamer-Implement-Process-Input-Output-for-aud.myearlypatch
-Applied hotfix 0019-winegstreamer-Implement-Get-Input-Output-StreamInfo-.myearlypatch
-Applied hotfix 0020-winegstreamer-Semi-stub-Get-Attributes-functions-for.myearlypatch
-Applied hotfix 0021-winegstreamer-Introduce-color-conversion-transform.myearlypatch
-Applied hotfix 0022-winegstreamer-Register-the-color-conversion-transfor.myearlypatch
-Applied hotfix 0023-winegstreamer-Implement-GetInputAvailableType-for-co.myearlypatch
-Applied hotfix 0024-winegstreamer-Implement-SetInputType-for-color-conve.myearlypatch
-Applied hotfix 0025-winegstreamer-Implement-GetOutputAvailableType-for-c.myearlypatch
-Applied hotfix 0026-winegstreamer-Implement-SetOutputType-for-color-conv.myearlypatch
-Applied hotfix 0027-winegstreamer-Implement-Process-Input-Output-for-col.myearlypatch
-Applied hotfix 0028-winegstreamer-Implement-ProcessMessage-for-color-con.myearlypatch
-Applied hotfix 0029-winegstreamer-Implement-Get-Input-Output-StreamInfo-.myearlypatch
-Applied hotfix 0030-mf-topology-Forward-failure-from-SetOutputType-when-.myearlypatch
-Applied hotfix 0031-winegstreamer-Handle-flush-command-in-audio-converst.myearlypatch
-Applied hotfix 0032-winegstreamer-In-the-default-configuration-select-on.myearlypatch
-Applied hotfix 0033-winegstreamer-Implement-MF_SD_LANGUAGE.myearlypatch
-Applied hotfix 0034-winegstreamer-Only-require-videobox-element-for-pars.myearlypatch
-Applied hotfix 0035-winegstreamer-Don-t-rely-on-max_size-in-unseekable-p.myearlypatch
-Applied hotfix 0036-winegstreamer-Implement-MFT_MESSAGE_COMMAND_FLUSH-fo.myearlypatch
-Applied hotfix 0037-winegstreamer-Default-Frame-size-if-one-isn-t-availa.myearlypatch
-Applied hotfix 0038-mfplat-Stub-out-MFCreateDXGIDeviceManager-to-avoid-t.myearlypatch
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
@@ -79,14 +19,14 @@ Staging overrides, if any: -W xactengine3_7-callbacks -W winex11-WM_WINDOWPOSCHA
 
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
 leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32 and disabling libglesv2 dll) )
-fsync-unix-staging-5b56bad.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
+fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
-fsync_futex_waitv-5b56bad.patch -- ( Replace all fsync interfaces with futex_waitv )
+fsync_futex_waitv.patch -- ( Replace all fsync interfaces with futex_waitv )
 
 valve_proton_fullscreen_hack-staging-656edbb.patch -- ( Applied Proton fullscreen hack patch (656edbb) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging-96aa7bc.patch -- ( Using Steam-specific Proton-tkg patches (staging-96aa7bc) 2/2 )
+proton-tkg-staging-86bc819.patch -- ( Using Steam-specific Proton-tkg patches (staging-86bc819) 2/2 )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
 proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
@@ -94,12 +34,12 @@ josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
 Applied reverting hotfix f0cd33c.myrevert
-Applied reverting hotfix f0cd33c-1.myrevert
+Applied reverting hotfix f0cd33c-2.myrevert
 Applied reverting hotfix d8be858.myrevert
 Applied hotfix 0004-winevulkan1.mypatch
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
 Applied hotfix ef6e33f.mypatch
-Applied hotfix 0001-proton-bcrypt_rdr2_fixes3.mypatch
+Applied hotfix 0001-proton-bcrypt_rdr2_fixes4.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix a608ef1.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch

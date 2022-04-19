@@ -90,6 +90,7 @@ SOURCES = \
 	cordebug.idl \
 	corerror.h \
 	corhdr.h \
+	corsym.idl \
 	cpl.h \
 	crtrow.idl \
 	cryptdlg.h \
@@ -790,6 +791,7 @@ SOURCES = \
 	windows.h \
 	windows.media.devices.idl \
 	windows.media.idl \
+	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
 	windows.networking.idl \
 	windows.networking.connectivity.idl \

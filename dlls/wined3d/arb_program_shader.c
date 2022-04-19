@@ -765,7 +765,7 @@ static void shader_generate_arb_declarations(const struct wined3d_shader *shader
     char pshader = shader_is_pshader_version(reg_maps->shader_version.type);
     const struct wined3d_shader_lconst *lconst;
     unsigned max_constantsF;
-    DWORD map;
+    uint32_t map;
 
     /* In pixel shaders, all private constants are program local, we don't need anything
      * from program.env. Thus we can advertise the full set of constants in pixel shaders.
@@ -837,21 +837,27 @@ static void shader_generate_arb_declarations(const struct wined3d_shader *shader
         }
     }
 
-    for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
+    map = reg_maps->temporary;
+    while (map)
     {
-        if (map & 1) shader_addline(buffer, "TEMP R%u;\n", i);
+        i = wined3d_bit_scan(&map);
+        shader_addline(buffer, "TEMP R%u;\n", i);
     }
 
-    for (i = 0, map = reg_maps->address; map; map >>= 1, ++i)
+    map = reg_maps->address;
+    while (map)
     {
-        if (map & 1) shader_addline(buffer, "ADDRESS A%u;\n", i);
+        i = wined3d_bit_scan(&map);
+        shader_addline(buffer, "ADDRESS A%u;\n", i);
     }
 
     if (pshader && reg_maps->shader_version.major == 1 && reg_maps->shader_version.minor <= 3)
     {
-        for (i = 0, map = reg_maps->texcoord; map; map >>= 1, ++i)
+        map = reg_maps->texcoord;
+        while (map)
         {
-            if (map & 1) shader_addline(buffer, "TEMP T%u;\n", i);
+            i = wined3d_bit_scan(&map);
+            shader_addline(buffer, "TEMP T%u;\n", i);
         }
     }
 
@@ -3506,17 +3512,18 @@ static GLuint shader_arb_generate_pshader(const struct wined3d_shader *shader,
     BOOL dcl_td = FALSE;
     BOOL want_nv_prog = FALSE;
     struct arb_pshader_private *shader_priv = shader->backend_data;
-    DWORD map;
     BOOL custom_linear_fog = FALSE;
+    uint32_t map;
 
     char srgbtmp[4][4];
     char ftoa_tmp[17];
     unsigned int i, found = 0;
 
-    for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
+    map = reg_maps->temporary;
+    while (map)
     {
-        if (!(map & 1)
-                || (shader->u.ps.color0_mov && i == shader->u.ps.color0_reg)
+        i = wined3d_bit_scan(&map);
+        if ((shader->u.ps.color0_mov && i == shader->u.ps.color0_reg)
                 || (reg_maps->shader_version.major < 2 && !i))
             continue;
 
@@ -3675,12 +3682,12 @@ static GLuint shader_arb_generate_pshader(const struct wined3d_shader *shader,
     /* Base Declarations */
     shader_generate_arb_declarations(shader, reg_maps, buffer, gl_info, NULL, &priv_ctx);
 
-    for (i = 0, map = reg_maps->bumpmat; map; map >>= 1, ++i)
+    map = reg_maps->bumpmat;
+    while (map)
     {
         unsigned char bump_const;
 
-        if (!(map & 1)) continue;
-
+        i = wined3d_bit_scan(&map);
         bump_const = compiled->numbumpenvmatconsts;
         compiled->bumpenvmatconst[bump_const].const_num = WINED3D_CONST_NUM_UNUSED;
         compiled->bumpenvmatconst[bump_const].texunit = i;

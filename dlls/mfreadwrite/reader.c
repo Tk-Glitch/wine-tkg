@@ -72,6 +72,7 @@ enum media_stream_flags
     STREAM_FLAG_SAMPLE_REQUESTED = 0x1, /* Protects from making multiple sample requests. */
     STREAM_FLAG_SELECTED = 0x2,         /* Mirrors descriptor, used to simplify tests when starting the source. */
     STREAM_FLAG_PRESENTED = 0x4,        /* Set if stream was selected last time Start() was called. */
+    STREAM_FLAG_STOPPED = 0x8,          /* Received MEStreamStopped */
 };
 
 struct stream_transform
@@ -87,7 +88,7 @@ struct media_stream
     struct stream_transform decoder;
     IMFVideoSampleAllocatorEx *allocator;
     IMFVideoSampleAllocatorNotify notify_cb;
-    unsigned int id;
+    DWORD id;
     unsigned int index;
     enum media_stream_state state;
     unsigned int flags;
@@ -154,6 +155,7 @@ struct source_reader
     IMFAsyncCallback stream_events_callback;
     IMFAsyncCallback async_commands_callback;
     LONG refcount;
+    LONG public_refcount;
     IMFMediaSource *source;
     IMFPresentationDescriptor *descriptor;
     IMFSourceReaderCallback *async_callback;
@@ -162,15 +164,16 @@ struct source_reader
     unsigned int first_audio_stream_index;
     unsigned int first_video_stream_index;
     unsigned int last_read_index;
-    unsigned int stream_count;
+    DWORD stream_count;
     unsigned int flags;
-    unsigned int queue;
+    DWORD queue;
     enum media_source_state source_state;
     struct media_stream *streams;
     struct list responses;
     CRITICAL_SECTION cs;
     CONDITION_VARIABLE sample_event;
     CONDITION_VARIABLE state_event;
+    CONDITION_VARIABLE stop_event;
 };
 
 static inline struct source_reader *impl_from_IMFSourceReader(IMFSourceReader *iface)
@@ -201,6 +204,51 @@ static struct source_reader_async_command *impl_from_async_command_IUnknown(IUnk
 static struct media_stream *impl_stream_from_IMFVideoSampleAllocatorNotify(IMFVideoSampleAllocatorNotify *iface)
 {
     return CONTAINING_RECORD(iface, struct media_stream, notify_cb);
+}
+
+static void source_reader_release_responses(struct source_reader *reader, struct media_stream *stream);
+
+static ULONG source_reader_addref(struct source_reader *reader)
+{
+    return InterlockedIncrement(&reader->refcount);
+}
+
+static ULONG source_reader_release(struct source_reader *reader)
+{
+    ULONG refcount = InterlockedDecrement(&reader->refcount);
+    unsigned int i;
+
+    if (!refcount)
+    {
+        if (reader->async_callback)
+            IMFSourceReaderCallback_Release(reader->async_callback);
+        if (reader->descriptor)
+            IMFPresentationDescriptor_Release(reader->descriptor);
+        if (reader->attributes)
+            IMFAttributes_Release(reader->attributes);
+        IMFMediaSource_Release(reader->source);
+
+        for (i = 0; i < reader->stream_count; ++i)
+        {
+            struct media_stream *stream = &reader->streams[i];
+
+            if (stream->stream)
+                IMFMediaStream_Release(stream->stream);
+            if (stream->current)
+                IMFMediaType_Release(stream->current);
+            if (stream->decoder.transform)
+                IMFTransform_Release(stream->decoder.transform);
+            if (stream->allocator)
+                IMFVideoSampleAllocatorEx_Release(stream->allocator);
+        }
+        source_reader_release_responses(reader, NULL);
+        free(reader->streams);
+        MFUnlockWorkQueue(reader->queue);
+        DeleteCriticalSection(&reader->cs);
+        free(reader);
+    }
+
+    return refcount;
 }
 
 static HRESULT WINAPI source_reader_async_command_QueryInterface(IUnknown *iface, REFIID riid, void **obj)
@@ -325,13 +373,13 @@ static HRESULT WINAPI source_reader_callback_QueryInterface(IMFAsyncCallback *if
 static ULONG WINAPI source_reader_source_events_callback_AddRef(IMFAsyncCallback *iface)
 {
     struct source_reader *reader = impl_from_source_callback_IMFAsyncCallback(iface);
-    return IMFSourceReader_AddRef(&reader->IMFSourceReader_iface);
+    return source_reader_addref(reader);
 }
 
 static ULONG WINAPI source_reader_source_events_callback_Release(IMFAsyncCallback *iface)
 {
     struct source_reader *reader = impl_from_source_callback_IMFAsyncCallback(iface);
-    return IMFSourceReader_Release(&reader->IMFSourceReader_iface);
+    return source_reader_release(reader);
 }
 
 static HRESULT WINAPI source_reader_callback_GetParameters(IMFAsyncCallback *iface,
@@ -368,8 +416,8 @@ static void source_reader_response_ready(struct source_reader *reader, struct st
 static void source_reader_copy_sample_buffer(IMFSample *src, IMFSample *dst)
 {
     IMFMediaBuffer *buffer;
-    unsigned int flags;
     LONGLONG time;
+    DWORD flags;
     HRESULT hr;
 
     IMFSample_CopyAllItems(src, (IMFAttributes *)dst);
@@ -539,6 +587,8 @@ static HRESULT source_reader_source_state_handler(struct source_reader *reader, 
     LeaveCriticalSection(&reader->cs);
 
     WakeAllConditionVariable(&reader->state_event);
+    if (event_type == MESourceStopped)
+        WakeAllConditionVariable(&reader->stop_event);
 
     return S_OK;
 }
@@ -594,7 +644,8 @@ static HRESULT WINAPI source_reader_source_events_callback_Invoke(IMFAsyncCallba
 
     IMFMediaEvent_Release(event);
 
-    IMFMediaSource_BeginGetEvent(source, iface, (IUnknown *)source);
+    if (event_type != MESourceStopped)
+        IMFMediaSource_BeginGetEvent(source, iface, (IUnknown *)source);
 
     return S_OK;
 }
@@ -611,13 +662,13 @@ static const IMFAsyncCallbackVtbl source_events_callback_vtbl =
 static ULONG WINAPI source_reader_stream_events_callback_AddRef(IMFAsyncCallback *iface)
 {
     struct source_reader *reader = impl_from_stream_callback_IMFAsyncCallback(iface);
-    return IMFSourceReader_AddRef(&reader->IMFSourceReader_iface);
+    return source_reader_addref(reader);
 }
 
 static ULONG WINAPI source_reader_stream_events_callback_Release(IMFAsyncCallback *iface)
 {
     struct source_reader *reader = impl_from_stream_callback_IMFAsyncCallback(iface);
-    return IMFSourceReader_Release(&reader->IMFSourceReader_iface);
+    return source_reader_release(reader);
 }
 
 static HRESULT source_reader_pull_stream_samples(struct source_reader *reader, struct media_stream *stream)
@@ -810,6 +861,9 @@ static HRESULT source_reader_media_stream_state_handler(struct source_reader *re
                 case MEStreamStarted:
                     stream->state = STREAM_STATE_READY;
                     break;
+                case MEStreamStopped:
+                    stream->flags |= STREAM_FLAG_STOPPED;
+                    break;
                 case MEStreamTick:
                     value.vt = VT_EMPTY;
                     hr = SUCCEEDED(IMFMediaEvent_GetValue(event, &value)) && value.vt == VT_I8 ? S_OK : E_UNEXPECTED;
@@ -828,6 +882,9 @@ static HRESULT source_reader_media_stream_state_handler(struct source_reader *re
     }
 
     LeaveCriticalSection(&reader->cs);
+
+    if (event_type == MEStreamStopped)
+        WakeAllConditionVariable(&reader->stop_event);
 
     return S_OK;
 }
@@ -858,6 +915,7 @@ static HRESULT WINAPI source_reader_stream_events_callback_Invoke(IMFAsyncCallba
             break;
         case MEStreamSeeked:
         case MEStreamStarted:
+        case MEStreamStopped:
         case MEStreamTick:
         case MEEndOfStream:
             hr = source_reader_media_stream_state_handler(reader, stream, event);
@@ -871,7 +929,8 @@ static HRESULT WINAPI source_reader_stream_events_callback_Invoke(IMFAsyncCallba
 
     IMFMediaEvent_Release(event);
 
-    IMFMediaStream_BeginGetEvent(stream, iface, (IUnknown *)stream);
+    if (event_type != MEStreamStopped)
+        IMFMediaStream_BeginGetEvent(stream, iface, (IUnknown *)stream);
 
     return S_OK;
 }
@@ -888,13 +947,13 @@ static const IMFAsyncCallbackVtbl stream_events_callback_vtbl =
 static ULONG WINAPI source_reader_async_commands_callback_AddRef(IMFAsyncCallback *iface)
 {
     struct source_reader *reader = impl_from_async_commands_callback_IMFAsyncCallback(iface);
-    return IMFSourceReader_AddRef(&reader->IMFSourceReader_iface);
+    return source_reader_addref(reader);
 }
 
 static ULONG WINAPI source_reader_async_commands_callback_Release(IMFAsyncCallback *iface)
 {
     struct source_reader *reader = impl_from_async_commands_callback_IMFAsyncCallback(iface);
-    return IMFSourceReader_Release(&reader->IMFSourceReader_iface);
+    return source_reader_release(reader);
 }
 
 static struct stream_response * media_stream_detach_response(struct source_reader *reader, struct stream_response *response)
@@ -1057,7 +1116,7 @@ static BOOL source_reader_get_read_result(struct source_reader *reader, struct m
     return !request_sample;
 }
 
-static HRESULT source_reader_get_next_selected_stream(struct source_reader *reader, unsigned int *stream_index)
+static HRESULT source_reader_get_next_selected_stream(struct source_reader *reader, DWORD *stream_index)
 {
     unsigned int i, first_selected = ~0u, requests = ~0u;
     BOOL selected, stream_drained;
@@ -1095,7 +1154,7 @@ static HRESULT source_reader_get_next_selected_stream(struct source_reader *read
     return first_selected == ~0u ? MF_E_MEDIA_SOURCE_NO_STREAMS_SELECTED : S_OK;
 }
 
-static HRESULT source_reader_get_stream_read_index(struct source_reader *reader, unsigned int index, unsigned int *stream_index)
+static HRESULT source_reader_get_stream_read_index(struct source_reader *reader, unsigned int index, DWORD *stream_index)
 {
     BOOL selected;
     HRESULT hr;
@@ -1326,51 +1385,52 @@ static HRESULT WINAPI src_reader_QueryInterface(IMFSourceReader *iface, REFIID r
 static ULONG WINAPI src_reader_AddRef(IMFSourceReader *iface)
 {
     struct source_reader *reader = impl_from_IMFSourceReader(iface);
-    ULONG refcount = InterlockedIncrement(&reader->refcount);
+    ULONG refcount = InterlockedIncrement(&reader->public_refcount);
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
     return refcount;
 }
 
+static BOOL source_reader_is_source_stopped(const struct source_reader *reader)
+{
+    unsigned int i;
+
+    if (reader->source_state != SOURCE_STATE_STOPPED)
+        return FALSE;
+
+    for (i = 0; i < reader->stream_count; ++i)
+    {
+        if (reader->streams[i].stream && !(reader->streams[i].flags & STREAM_FLAG_STOPPED))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
 static ULONG WINAPI src_reader_Release(IMFSourceReader *iface)
 {
     struct source_reader *reader = impl_from_IMFSourceReader(iface);
-    ULONG refcount = InterlockedDecrement(&reader->refcount);
-    unsigned int i;
+    ULONG refcount = InterlockedDecrement(&reader->public_refcount);
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {
-        if (reader->async_callback)
-            IMFSourceReaderCallback_Release(reader->async_callback);
         if (reader->flags & SOURCE_READER_SHUTDOWN_ON_RELEASE)
             IMFMediaSource_Shutdown(reader->source);
-        if (reader->descriptor)
-            IMFPresentationDescriptor_Release(reader->descriptor);
-        if (reader->attributes)
-            IMFAttributes_Release(reader->attributes);
-        IMFMediaSource_Release(reader->source);
-
-        for (i = 0; i < reader->stream_count; ++i)
+        else if (SUCCEEDED(IMFMediaSource_Stop(reader->source)))
         {
-            struct media_stream *stream = &reader->streams[i];
+            EnterCriticalSection(&reader->cs);
 
-            if (stream->stream)
-                IMFMediaStream_Release(stream->stream);
-            if (stream->current)
-                IMFMediaType_Release(stream->current);
-            if (stream->decoder.transform)
-                IMFTransform_Release(stream->decoder.transform);
-            if (stream->allocator)
-                IMFVideoSampleAllocatorEx_Release(stream->allocator);
+            while (!source_reader_is_source_stopped(reader))
+            {
+                SleepConditionVariableCS(&reader->stop_event, &reader->cs, INFINITE);
+            }
+
+            LeaveCriticalSection(&reader->cs);
         }
-        source_reader_release_responses(reader, NULL);
-        free(reader->streams);
-        MFUnlockWorkQueue(reader->queue);
-        DeleteCriticalSection(&reader->cs);
-        free(reader);
+        source_reader_release(reader);
     }
 
     return refcount;
@@ -1814,7 +1874,8 @@ static HRESULT WINAPI src_reader_SetCurrentPosition(IMFSourceReader *iface, REFG
 {
     struct source_reader *reader = impl_from_IMFSourceReader(iface);
     struct source_reader_async_command *command;
-    unsigned int i, flags;
+    unsigned int i;
+    DWORD flags;
     HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(format), position);
@@ -1871,8 +1932,8 @@ static HRESULT WINAPI src_reader_SetCurrentPosition(IMFSourceReader *iface, REFG
 static HRESULT source_reader_read_sample(struct source_reader *reader, DWORD index, DWORD flags, DWORD *actual_index,
         DWORD *stream_flags, LONGLONG *timestamp, IMFSample **sample)
 {
-    unsigned int actual_index_tmp;
     struct media_stream *stream;
+    DWORD actual_index_tmp;
     LONGLONG timestamp_tmp;
     DWORD stream_index;
     HRESULT hr = S_OK;
@@ -1931,7 +1992,7 @@ static HRESULT source_reader_read_sample(struct source_reader *reader, DWORD ind
 }
 
 static HRESULT source_reader_read_sample_async(struct source_reader *reader, unsigned int index, unsigned int flags,
-        unsigned int *actual_index, unsigned int *stream_flags, LONGLONG *timestamp, IMFSample **sample)
+        DWORD *actual_index, DWORD *stream_flags, LONGLONG *timestamp, IMFSample **sample)
 {
     struct source_reader_async_command *command;
     HRESULT hr;
@@ -2166,7 +2227,7 @@ static const IMFSourceReaderVtbl srcreader_vtbl =
 
 static DWORD reader_get_first_stream_index(IMFPresentationDescriptor *descriptor, const GUID *major)
 {
-    unsigned int count, i;
+    DWORD count, i;
     BOOL selected;
     HRESULT hr;
     GUID guid;
@@ -2267,6 +2328,7 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
     object->source_events_callback.lpVtbl = &source_events_callback_vtbl;
     object->stream_events_callback.lpVtbl = &stream_events_callback_vtbl;
     object->async_commands_callback.lpVtbl = &async_commands_callback_vtbl;
+    object->public_refcount = 1;
     object->refcount = 1;
     list_init(&object->responses);
     if (shutdown_on_release)
@@ -2276,6 +2338,7 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
     InitializeCriticalSection(&object->cs);
     InitializeConditionVariable(&object->sample_event);
     InitializeConditionVariable(&object->state_event);
+    InitializeConditionVariable(&object->stop_event);
 
     if (FAILED(hr = IMFMediaSource_CreatePresentationDescriptor(object->source, &object->descriptor)))
         goto failed;
@@ -2389,92 +2452,6 @@ failed:
     return hr;
 }
 
-static HRESULT bytestream_get_url_hint(IMFByteStream *stream, WCHAR const **url)
-{
-    static const unsigned char asfmagic[]  = {0x30,0x26,0xb2,0x75,0x8e,0x66,0xcf,0x11,0xa6,0xd9,0x00,0xaa,0x00,0x62,0xce,0x6c};
-    static const unsigned char wavmagic[]  = { 'R', 'I', 'F', 'F',0x00,0x00,0x00,0x00, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' '};
-    static const unsigned char wavmask[]   = {0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-    static const unsigned char isommagic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm',0x00,0x00,0x00,0x00};
-    static const unsigned char mp4_magic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'M', 'S', 'N', 'V',0x00,0x00,0x00,0x00};
-    static const unsigned char mp42magic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'm', 'p', '4', '2',0x00,0x00,0x00,0x00};
-    static const unsigned char mp4vmagic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'M', '4', 'V', ' ',0x00,0x00,0x00,0x00};
-    static const unsigned char mp4mask[]   = {0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00};
-    static const struct stream_content_url_hint
-    {
-        const unsigned char *magic;
-        const WCHAR *url;
-        const unsigned char *mask;
-    }
-    url_hints[] =
-    {
-        { asfmagic,  L".asf" },
-        { wavmagic,  L".wav", wavmask },
-        { isommagic, L".mp4", mp4mask },
-        { mp42magic, L".mp4", mp4mask },
-        { mp4_magic, L".mp4", mp4mask },
-        { mp4vmagic, L".m4v", mp4mask },
-    };
-    unsigned char buffer[4 * sizeof(unsigned int)], pattern[4 * sizeof(unsigned int)];
-    unsigned int i, j, length = 0, caps = 0;
-    IMFAttributes *attributes;
-    QWORD position;
-    HRESULT hr;
-
-    *url = NULL;
-
-    if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&attributes)))
-    {
-        IMFAttributes_GetStringLength(attributes, &MF_BYTESTREAM_CONTENT_TYPE, &length);
-        IMFAttributes_Release(attributes);
-    }
-
-    if (length)
-        return S_OK;
-
-    if (FAILED(hr = IMFByteStream_GetCapabilities(stream, &caps)))
-        return hr;
-
-    if (!(caps & MFBYTESTREAM_IS_SEEKABLE))
-        return S_OK;
-
-    if (FAILED(hr = IMFByteStream_GetCurrentPosition(stream, &position)))
-        return hr;
-
-    hr = IMFByteStream_Read(stream, buffer, sizeof(buffer), &length);
-    IMFByteStream_SetCurrentPosition(stream, position);
-    if (FAILED(hr))
-        return hr;
-
-    if (length < sizeof(buffer))
-        return S_OK;
-
-    for (i = 0; i < ARRAY_SIZE(url_hints); ++i)
-    {
-        memcpy(pattern, buffer, sizeof(buffer));
-        if (url_hints[i].mask)
-        {
-            unsigned int *mask = (unsigned int *)url_hints[i].mask;
-            unsigned int *data = (unsigned int *)pattern;
-
-            for (j = 0; j < sizeof(buffer) / sizeof(unsigned int); ++j)
-                data[j] &= mask[j];
-
-        }
-        if (!memcmp(pattern, url_hints[i].magic, sizeof(pattern)))
-        {
-            *url = url_hints[i].url;
-            break;
-        }
-    }
-
-    if (*url)
-        TRACE("Stream type guessed as %s from %s.\n", debugstr_w(*url), debugstr_an((char *)buffer, length));
-    else
-        WARN("Unrecognized content type %s.\n", debugstr_an((char *)buffer, length));
-
-    return S_OK;
-}
-
 static HRESULT create_source_reader_from_stream(IMFByteStream *stream, IMFAttributes *attributes,
         REFIID riid, void **out)
 {
@@ -2482,12 +2459,7 @@ static HRESULT create_source_reader_from_stream(IMFByteStream *stream, IMFAttrib
     IMFSourceResolver *resolver;
     MF_OBJECT_TYPE obj_type;
     IMFMediaSource *source;
-    const WCHAR *url;
     HRESULT hr;
-
-    /* If stream does not have content type set, try to guess from starting byte sequence. */
-    if (FAILED(hr = bytestream_get_url_hint(stream, &url)))
-        return hr;
 
     if (FAILED(hr = MFCreateSourceResolver(&resolver)))
         return hr;
@@ -2496,8 +2468,8 @@ static HRESULT create_source_reader_from_stream(IMFByteStream *stream, IMFAttrib
         IMFAttributes_GetUnknown(attributes, &MF_SOURCE_READER_MEDIASOURCE_CONFIG, &IID_IPropertyStore,
                 (void **)&props);
 
-    hr = IMFSourceResolver_CreateObjectFromByteStream(resolver, stream, url, MF_RESOLUTION_MEDIASOURCE, props,
-            &obj_type, (IUnknown **)&source);
+    hr = IMFSourceResolver_CreateObjectFromByteStream(resolver, stream, NULL, MF_RESOLUTION_MEDIASOURCE
+            | MF_RESOLUTION_CONTENT_DOES_NOT_HAVE_TO_MATCH_EXTENSION_OR_MIME_TYPE, props, &obj_type, (IUnknown **)&source);
     IMFSourceResolver_Release(resolver);
     if (props)
         IPropertyStore_Release(props);

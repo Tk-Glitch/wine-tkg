@@ -164,7 +164,7 @@ uintptr_t CDECL _beginthread(
               (void*)start_address, &trampoline->module))
   {
       trampoline->module = NULL;
-      WARN("failed to get module for the start_address: %d\n", GetLastError());
+      WARN("failed to get module for the start_address: %lu\n", GetLastError());
   }
 #endif
 
@@ -230,12 +230,12 @@ uintptr_t CDECL _beginthreadex(
               (void*)start_address, &trampoline->module))
   {
      trampoline->module = NULL;
-     WARN("failed to get module for the start_address: %d\n", GetLastError());
+     WARN("failed to get module for the start_address: %lu\n", GetLastError());
   }
 #endif
 
   thread = CreateThread(security, stack_size, _beginthreadex_trampoline,
-          trampoline, initflag, thrdaddr);
+          trampoline, initflag, (DWORD *)thrdaddr);
   if(!thread) {
 #if _MSVCR_VER >= 140
       FreeLibrary(trampoline->module);

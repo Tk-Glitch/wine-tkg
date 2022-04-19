@@ -371,7 +371,7 @@ void __thiscall _Concurrent_queue_base_v4_dummy(_Concurrent_queue_base_v4 *this)
 
 DEFINE_RTTI_DATA0(_Concurrent_queue_base_v4, 0, ".?AV_Concurrent_queue_base_v4@details@Concurrency@@")
 
-static int _Runtime_object_id;
+static LONG _Runtime_object_id;
 
 typedef struct
 {
@@ -434,7 +434,7 @@ typedef struct compact_block
 /* Return the integer base-2 logarithm of (x|1). Result is 0 for x == 0. */
 static inline unsigned int log2i(unsigned int x)
 {
-    unsigned int index;
+    ULONG index;
     BitScanReverse(&index, x|1);
     return index;
 }

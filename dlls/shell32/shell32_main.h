@@ -32,7 +32,6 @@
 #include "commctrl.h"
 #include "objbase.h"
 #include "docobj.h"
-#include "undocshell.h"
 #include "shlobj.h"
 #include "shellapi.h"
 #include "wine/heap.h"
@@ -270,5 +269,30 @@ static inline WCHAR *strdupAtoW(const char *str)
 
     return ret;
 }
+
+/* explorer ("cabinet") window messages */
+#define CWM_SETPATH             (WM_USER + 2)
+#define CWM_WANTIDLE            (WM_USER + 3)
+#define CWM_GETSETCURRENTINFO   (WM_USER + 4)
+#define CWM_SELECTITEM          (WM_USER + 5)
+#define CWM_SELECTITEMSTR       (WM_USER + 6)
+#define CWM_GETISHELLBROWSER    (WM_USER + 7)
+#define CWM_TESTPATH            (WM_USER + 9)
+#define CWM_STATECHANGE         (WM_USER + 10)
+#define CWM_GETPATH             (WM_USER + 12)
+
+/* CWM_TESTPATH types */
+#define CWTP_ISEQUAL  0
+#define CWTP_ISCHILD  1
+
+/* CWM_TESTPATH structure */
+typedef struct
+{
+    DWORD dwType;
+    ITEMIDLIST idl;
+} CWTESTPATHSTRUCT;
+
+BOOL WINAPI StrRetToStrNA(char *, DWORD, STRRET *, const ITEMIDLIST *);
+BOOL WINAPI StrRetToStrNW(WCHAR *, DWORD, STRRET *, const ITEMIDLIST *);
 
 #endif

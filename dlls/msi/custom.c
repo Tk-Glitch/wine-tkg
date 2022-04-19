@@ -36,7 +36,6 @@
 #include "msipriv.h"
 #include "winemsi.h"
 #include "wine/asm.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
@@ -68,12 +67,12 @@ static struct list msi_pending_custom_actions = LIST_INIT( msi_pending_custom_ac
 
 void  __RPC_FAR * __RPC_USER MIDL_user_allocate(SIZE_T len)
 {
-    return heap_alloc(len);
+    return malloc(len);
 }
 
 void __RPC_USER MIDL_user_free(void __RPC_FAR * ptr)
 {
-    heap_free(ptr);
+    free(ptr);
 }
 
 LONG WINAPI rpc_filter(EXCEPTION_POINTERS *eptr)
@@ -213,7 +212,7 @@ WCHAR *msi_create_temp_file( MSIDATABASE *db )
     if (!db->tempfolder)
     {
         WCHAR tmp[MAX_PATH];
-        UINT len = ARRAY_SIZE( tmp );
+        DWORD len = ARRAY_SIZE( tmp );
 
         if (msi_get_property( db, L"TempFolder", tmp, &len ) ||
             GetFileAttributesW( tmp ) != FILE_ATTRIBUTE_DIRECTORY)
@@ -315,7 +314,7 @@ static UINT custom_get_process_return( HANDLE process )
     DWORD rc = 0;
 
     GetExitCodeProcess( process, &rc );
-    TRACE("exit code is %u\n", rc);
+    TRACE( "exit code is %lu\n", rc );
     if (rc != 0)
         return ERROR_FUNCTION_FAILED;
     return ERROR_SUCCESS;
@@ -340,7 +339,7 @@ static UINT custom_get_thread_return( MSIPACKAGE *package, HANDLE thread )
         ACTION_ForceReboot( package );
         return ERROR_SUCCESS;
     default:
-        ERR("Invalid Return Code %d\n",rc);
+        ERR( "invalid Return Code %lu\n", rc );
         return ERROR_INSTALL_FAILURE;
     }
 }
@@ -507,13 +506,13 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
         status = RpcStringBindingComposeW(NULL, (WCHAR *)L"ncalrpc", NULL, endpoint, NULL, &binding_str);
         if (status != RPC_S_OK)
         {
-            ERR("RpcStringBindingCompose failed: %#x\n", status);
+            ERR("RpcStringBindingCompose failed: %#lx\n", status);
             return status;
         }
         status = RpcBindingFromStringBindingW(binding_str, &rpc_handle);
         if (status != RPC_S_OK)
         {
-            ERR("RpcBindingFromStringBinding failed: %#x\n", status);
+            ERR("RpcBindingFromStringBinding failed: %#lx\n", status);
             return status;
         }
         RpcStringFreeW(&binding_str);
@@ -526,7 +525,7 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     hPackage = alloc_msi_remote_handle( remote_package );
     if (!hPackage)
     {
-        ERR( "failed to create handle for %x\n", remote_package );
+        ERR( "failed to create handle for %#lx\n", remote_package );
         midl_user_free( action );
         midl_user_free( dll );
         midl_user_free( proc );
@@ -536,7 +535,7 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     hModule = LoadLibraryW( dll );
     if (!hModule)
     {
-        ERR( "failed to load dll %s (%u)\n", debugstr_w( dll ), GetLastError() );
+        ERR( "failed to load dll %s (%lu)\n", debugstr_w( dll ), GetLastError() );
         midl_user_free( action );
         midl_user_free( dll );
         midl_user_free( proc );
@@ -556,7 +555,7 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
         }
         __EXCEPT_PAGE_FAULT
         {
-            ERR( "Custom action (%s:%s) caused a page fault: %08x\n",
+            ERR( "Custom action (%s:%s) caused a page fault: %#lx\n",
                  debugstr_w(dll), debugstr_a(proc), GetExceptionCode() );
             r = ERROR_SUCCESS;
         }
@@ -607,7 +606,7 @@ static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
     pipe = CreateNamedPipeW(buffer, PIPE_ACCESS_DUPLEX, 0, 1, sizeof(DWORD64),
         sizeof(GUID), 0, NULL);
     if (pipe == INVALID_HANDLE_VALUE)
-        ERR("Failed to create custom action client pipe: %u\n", GetLastError());
+        ERR("failed to create custom action client pipe: %lu\n", GetLastError());
 
     if ((sizeof(void *) == 8 || is_wow64) && arch == SCS_32BIT_BINARY)
         GetSystemWow64DirectoryW(path, MAX_PATH - ARRAY_SIZE(L"\\msiexec.exe"));
@@ -644,7 +643,7 @@ static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
 
     if (!ConnectNamedPipe(pipe, NULL))
     {
-        ERR("Failed to connect to custom action server: %u\n", GetLastError());
+        ERR("failed to connect to custom action server: %lu\n", GetLastError());
         return GetLastError();
     }
 
@@ -669,7 +668,7 @@ static DWORD WINAPI custom_client_thread(void *arg)
     HANDLE thread;
     HANDLE pipe;
     DWORD size;
-    UINT rc;
+    DWORD rc;
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED); /* needed to marshal streams */
 
@@ -689,13 +688,13 @@ static DWORD WINAPI custom_client_thread(void *arg)
     if (!WriteFile(pipe, &info->guid, sizeof(info->guid), &size, NULL) ||
         size != sizeof(info->guid))
     {
-        ERR("Failed to write to custom action client pipe: %u\n", GetLastError());
+        ERR("failed to write to custom action client pipe: %lu\n", GetLastError());
         LeaveCriticalSection(&msi_custom_action_cs);
         return GetLastError();
     }
     if (!ReadFile(pipe, &thread64, sizeof(thread64), &size, NULL) || size != sizeof(thread64))
     {
-        ERR("Failed to read from custom action client pipe: %u\n", GetLastError());
+        ERR("failed to read from custom action client pipe: %lu\n", GetLastError());
         LeaveCriticalSection(&msi_custom_action_cs);
         return GetLastError();
     }
@@ -793,7 +792,7 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
             endpoint, NULL);
         if (status != RPC_S_OK)
         {
-            ERR("RpcServerUseProtseqEp failed: %#x\n", status);
+            ERR("RpcServerUseProtseqEp failed: %#lx\n", status);
             return NULL;
         }
 
@@ -801,7 +800,7 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
             RPC_IF_AUTOLISTEN, RPC_C_LISTEN_MAX_CALLS_DEFAULT, NULL);
         if (status != RPC_S_OK)
         {
-            ERR("RpcServerRegisterIfEx failed: %#x\n", status);
+            ERR("RpcServerRegisterIfEx failed: %#lx\n", status);
             return NULL;
         }
 
@@ -869,7 +868,7 @@ static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
         }
         if (!len_exe)
         {
-            ERR("can't find executable %u\n", GetLastError());
+            ERR("can't find executable %lu\n", GetLastError());
             msi_free( exe );
             return INVALID_HANDLE_VALUE;
         }
@@ -907,7 +906,7 @@ static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
     msi_free( exe );
     if (!ret)
     {
-        ERR("unable to execute command %u\n", GetLastError());
+        ERR("unable to execute command %lu\n", GetLastError());
         return INVALID_HANDLE_VALUE;
     }
     CloseHandle( info.hThread );
@@ -1062,27 +1061,27 @@ static UINT write_substorage_to_file( MSIPACKAGE *package, const WCHAR *source, 
     hr = StgCreateDocfile( filename, STGM_CREATE|STGM_TRANSACTED|STGM_WRITE|STGM_SHARE_EXCLUSIVE, 0, &dst );
     if (FAILED( hr ))
     {
-        WARN( "can't open destination storage %s (%08x)\n", debugstr_w(filename), hr );
+        WARN( "can't open destination storage %s (%#lx)\n", debugstr_w(filename), hr );
         goto done;
     }
 
     hr = IStorage_OpenStorage( package->db->storage, source, NULL, STGM_SHARE_EXCLUSIVE, NULL, 0, &src );
     if (FAILED( hr ))
     {
-        WARN( "can't open source storage %s (%08x)\n", debugstr_w(source), hr );
+        WARN( "can't open source storage %s (%#lx)\n", debugstr_w(source), hr );
         goto done;
     }
 
     hr = IStorage_CopyTo( src, 0, NULL, NULL, dst );
     if (FAILED( hr ))
     {
-        ERR( "failed to copy storage %s (%08x)\n", debugstr_w(source), hr );
+        ERR( "failed to copy storage %s (%#lx)\n", debugstr_w(source), hr );
         goto done;
     }
 
     hr = IStorage_Commit( dst, 0 );
     if (FAILED( hr ))
-        ERR( "failed to commit storage (%08x)\n", hr );
+        ERR( "failed to commit storage (%#lx)\n", hr );
     else
         r = ERROR_SUCCESS;
 
@@ -1200,11 +1199,11 @@ static DWORD WINAPI ScriptThread( LPVOID arg )
     LPGUID guid = arg;
     DWORD rc;
 
-    TRACE("custom action (%x) started\n", GetCurrentThreadId() );
+    TRACE("custom action (%#lx) started\n", GetCurrentThreadId() );
 
     rc = ACTION_CallScript( guid );
 
-    TRACE("custom action (%x) returned %i\n", GetCurrentThreadId(), rc );
+    TRACE("custom action (%#lx) returned %lu\n", GetCurrentThreadId(), rc );
 
     MsiCloseAllHandles();
     return rc;

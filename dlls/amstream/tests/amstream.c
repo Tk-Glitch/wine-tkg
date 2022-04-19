@@ -1140,7 +1140,8 @@ static HRESULT WINAPI testsource_DecideAllocator(struct strmbase_source *iface, 
      * when it is able to do so it's behavior changes slightly
      * (e.g. it uses dynamic format change instead of reconnecting in SetFormat).
      * We don't yet implement the custom allocator so force the standard one for now. */
-    hr = BaseOutputPinImpl_InitAllocator(iface, alloc);
+    hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMemAllocator, (void **)alloc);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     IMemInputPin_GetAllocatorRequirements(pin, &props);
@@ -4256,7 +4257,7 @@ static void test_audiostream_begin_flush_end_flush(void)
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source.source.pAllocator, &media_sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -4272,7 +4273,7 @@ static void test_audiostream_begin_flush_end_flush(void)
     ref = IMediaSample_Release(media_sample);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source.source.pAllocator, &media_sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
@@ -4289,7 +4290,7 @@ static void test_audiostream_begin_flush_end_flush(void)
     hr = IPin_EndFlush(pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source.source.pAllocator, &media_sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -4408,7 +4409,7 @@ static IMediaSample *ammediastream_allocate_sample(struct testfilter *source, co
     BYTE *sample_data;
     HRESULT hr;
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source->source, &sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source->source.pAllocator, &sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IMediaSample_GetPointer(sample, &sample_data);
@@ -5848,7 +5849,7 @@ static void test_ddrawstream_begin_flush_end_flush(void)
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source.source.pAllocator, &media_sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     ammediastream_mem_input_pin = source.source.pMemInputPin;
@@ -5866,7 +5867,7 @@ static void test_ddrawstream_begin_flush_end_flush(void)
     ref = IMediaSample_Release(media_sample);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source.source.pAllocator, &media_sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
@@ -5883,7 +5884,7 @@ static void test_ddrawstream_begin_flush_end_flush(void)
     hr = IPin_EndFlush(pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    hr = IMemAllocator_GetBuffer(source.source.pAllocator, &media_sample, NULL, NULL, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
     ok(hr == S_OK, "Got hr %#x.\n", hr);

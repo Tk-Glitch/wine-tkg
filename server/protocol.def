@@ -1460,11 +1460,11 @@ enum server_fd_type
 @REQ(recv_socket)
     int          oob;           /* are we receiving OOB data? */
     async_data_t async;         /* async I/O parameters */
-    unsigned int status;        /* status of initial call */
-    unsigned int total;         /* number of bytes already read */
+    int          force_async;   /* Force asynchronous mode? */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking recv */
     unsigned int options;       /* device open options */
+    int          nonblocking;   /* is socket non-blocking? */
 @END
 
 
@@ -2173,6 +2173,16 @@ enum message_type
 @END
 
 
+/* Notify direct completion of async and close the wait handle if not blocking */
+@REQ(set_async_direct_result)
+    obj_handle_t   handle;        /* wait handle */
+    apc_param_t    information;   /* IO_STATUS_BLOCK Information */
+    unsigned int   status;        /* completion status */
+@REPLY
+    obj_handle_t   handle;        /* wait handle, or NULL if closed */
+@END
+
+
 /* Perform a read on a file object */
 @REQ(read)
     async_data_t   async;         /* async I/O parameters */
@@ -2313,19 +2323,18 @@ enum message_type
     user_handle_t  handle;        /* handle to the window */
     unsigned int   style;         /* window style */
     unsigned int   ex_style;      /* window extended style */
-    unsigned int   id;            /* window id */
+    data_size_t    extra_size;    /* size to set in extra bytes */
     mod_handle_t   instance;      /* creator instance */
     lparam_t       user_data;     /* user-specific data */
+    lparam_t       extra_value;   /* value to set in extra bytes or window id */
     int            extra_offset;  /* offset to set in extra bytes */
-    data_size_t    extra_size;    /* size to set in extra bytes */
-    lparam_t       extra_value;   /* value to set in extra bytes */
 @REPLY
     unsigned int   old_style;     /* old window style */
     unsigned int   old_ex_style;  /* old window extended style */
     mod_handle_t   old_instance;  /* old creator instance */
     lparam_t       old_user_data; /* old user-specific data */
     lparam_t       old_extra_value; /* old value in extra bytes */
-    unsigned int   old_id;        /* old window id */
+    lparam_t       old_id;        /* old window id */
 @END
 #define SET_WIN_STYLE     0x01
 #define SET_WIN_EXSTYLE   0x02

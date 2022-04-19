@@ -29,7 +29,6 @@ struct pulse_config
         REFERENCE_TIME def_period;
         REFERENCE_TIME min_period;
     } modes[2];
-    unsigned int speakers_mask;
 };
 
 struct main_loop_params
@@ -40,6 +39,7 @@ struct main_loop_params
 struct create_stream_params
 {
     const char *name;
+    const char *device;
     EDataFlow dataflow;
     AUDCLNT_SHAREMODE mode;
     DWORD flags;
@@ -180,6 +180,24 @@ struct test_connect_params
     struct pulse_config *config;
 };
 
+enum phys_device_bus_type {
+    phys_device_bus_invalid = -1,
+    phys_device_bus_pci,
+    phys_device_bus_usb
+};
+
+struct get_device_info_params
+{
+    char device[256];
+    EDataFlow dataflow;
+    enum phys_device_bus_type bus_type;
+    USHORT vendor_id, product_id;
+    EndpointFormFactor form;
+    DWORD channel_mask;
+    UINT index;
+    HRESULT result;
+};
+
 struct is_started_params
 {
     struct pulse_stream *stream;
@@ -210,5 +228,6 @@ enum unix_funcs
     set_volumes,
     set_event_handle,
     test_connect,
+    get_device_info,
     is_started,
 };

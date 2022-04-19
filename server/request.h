@@ -242,6 +242,7 @@ DECL_HANDLER(set_serial_info);
 DECL_HANDLER(register_async);
 DECL_HANDLER(cancel_async);
 DECL_HANDLER(get_async_result);
+DECL_HANDLER(set_async_direct_result);
 DECL_HANDLER(read);
 DECL_HANDLER(write);
 DECL_HANDLER(ioctl);
@@ -533,6 +534,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_register_async,
     (req_handler)req_cancel_async,
     (req_handler)req_get_async_result,
+    (req_handler)req_set_async_direct_result,
     (req_handler)req_read,
     (req_handler)req_write,
     (req_handler)req_ioctl,
@@ -1065,12 +1067,12 @@ C_ASSERT( FIELD_OFFSET(struct unlock_file_request, count) == 24 );
 C_ASSERT( sizeof(struct unlock_file_request) == 32 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_request, oob) == 12 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_request, async) == 16 );
-C_ASSERT( FIELD_OFFSET(struct recv_socket_request, status) == 56 );
-C_ASSERT( FIELD_OFFSET(struct recv_socket_request, total) == 60 );
+C_ASSERT( FIELD_OFFSET(struct recv_socket_request, force_async) == 56 );
 C_ASSERT( sizeof(struct recv_socket_request) == 64 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_reply, wait) == 8 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_reply, options) == 12 );
-C_ASSERT( sizeof(struct recv_socket_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct recv_socket_reply, nonblocking) == 16 );
+C_ASSERT( sizeof(struct recv_socket_reply) == 24 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_request, async) == 16 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_request, status) == 56 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_request, total) == 60 );
@@ -1419,6 +1421,12 @@ C_ASSERT( sizeof(struct cancel_async_request) == 32 );
 C_ASSERT( FIELD_OFFSET(struct get_async_result_request, user_arg) == 16 );
 C_ASSERT( sizeof(struct get_async_result_request) == 24 );
 C_ASSERT( sizeof(struct get_async_result_reply) == 8 );
+C_ASSERT( FIELD_OFFSET(struct set_async_direct_result_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct set_async_direct_result_request, information) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_async_direct_result_request, status) == 24 );
+C_ASSERT( sizeof(struct set_async_direct_result_request) == 32 );
+C_ASSERT( FIELD_OFFSET(struct set_async_direct_result_reply, handle) == 8 );
+C_ASSERT( sizeof(struct set_async_direct_result_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct read_request, async) == 16 );
 C_ASSERT( FIELD_OFFSET(struct read_request, pos) == 56 );
 C_ASSERT( sizeof(struct read_request) == 64 );
@@ -1502,12 +1510,11 @@ C_ASSERT( FIELD_OFFSET(struct set_window_info_request, is_unicode) == 14 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, handle) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, style) == 20 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, ex_style) == 24 );
-C_ASSERT( FIELD_OFFSET(struct set_window_info_request, id) == 28 );
+C_ASSERT( FIELD_OFFSET(struct set_window_info_request, extra_size) == 28 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, instance) == 32 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, user_data) == 40 );
-C_ASSERT( FIELD_OFFSET(struct set_window_info_request, extra_offset) == 48 );
-C_ASSERT( FIELD_OFFSET(struct set_window_info_request, extra_size) == 52 );
-C_ASSERT( FIELD_OFFSET(struct set_window_info_request, extra_value) == 56 );
+C_ASSERT( FIELD_OFFSET(struct set_window_info_request, extra_value) == 48 );
+C_ASSERT( FIELD_OFFSET(struct set_window_info_request, extra_offset) == 56 );
 C_ASSERT( sizeof(struct set_window_info_request) == 64 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_reply, old_style) == 8 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_reply, old_ex_style) == 12 );

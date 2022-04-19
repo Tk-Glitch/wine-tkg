@@ -36,7 +36,6 @@
 #include "d3d11.h"
 #include "uuids.h"
 
-#include "wine/debug.h"
 #include "wine/list.h"
 
 #include "mfplat_private.h"
@@ -52,6 +51,9 @@
 #define EXTERN_GUID DEFINE_GUID
 #include "initguid.h"
 #include "mfd3d12.h"
+
+#include "bcrypt.h"
+#include "pathcch.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
@@ -702,9 +704,10 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
     HRESULT hr = S_OK;
     HKEY hclsid = 0;
     WCHAR buffer[64];
-    DWORD size, ret;
     WCHAR str[250];
     UINT8 *blob;
+    UINT32 size;
+    DWORD ret;
 
     guid_to_string(buffer, clsid);
     swprintf(str, ARRAY_SIZE(str), L"%s\\%s", transform_keyW, buffer);
@@ -4576,11 +4579,8 @@ static const IMFGetServiceVtbl bytestream_file_getservice_vtbl =
     bytestream_file_getservice_GetService,
 };
 
-/***********************************************************************
- *      MFCreateFile (mfplat.@)
- */
-HRESULT WINAPI MFCreateFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE openmode, MF_FILE_FLAGS flags,
-                            LPCWSTR url, IMFByteStream **bytestream)
+static HRESULT create_file_bytestream(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE openmode, MF_FILE_FLAGS flags,
+        const WCHAR *path, BOOL is_tempfile, IMFByteStream **bytestream)
 {
     DWORD capabilities = MFBYTESTREAM_IS_SEEKABLE | MFBYTESTREAM_DOES_NOT_USE_NETWORK;
     DWORD filecreation_disposition = 0, fileaccessmode = 0, fileattributes = 0;
@@ -4589,8 +4589,6 @@ HRESULT WINAPI MFCreateFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE open
     FILETIME writetime;
     HANDLE file;
     HRESULT hr;
-
-    TRACE("%d, %d, %#x, %s, %p.\n", accessmode, openmode, flags, debugstr_w(url), bytestream);
 
     switch (accessmode)
     {
@@ -4630,12 +4628,12 @@ HRESULT WINAPI MFCreateFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE open
 
     if (flags & MF_FILEFLAGS_NOBUFFERING)
         fileattributes |= FILE_FLAG_NO_BUFFERING;
+    if (is_tempfile)
+        fileattributes |= FILE_FLAG_DELETE_ON_CLOSE;
 
     /* Open HANDLE to file */
-    file = CreateFileW(url, fileaccessmode, filesharemode, NULL,
-                       filecreation_disposition, fileattributes, 0);
-
-    if(file == INVALID_HANDLE_VALUE)
+    file = CreateFileW(path, fileaccessmode, filesharemode, NULL, filecreation_disposition, fileattributes, 0);
+    if (file == INVALID_HANDLE_VALUE)
         return HRESULT_FROM_WIN32(GetLastError());
 
     if (!(object = calloc(1, sizeof(*object))))
@@ -4660,17 +4658,59 @@ HRESULT WINAPI MFCreateFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE open
     object->capabilities = capabilities;
     object->hfile = file;
 
-    if (GetFileTime(file, NULL, NULL, &writetime))
+    if (!is_tempfile && GetFileTime(file, NULL, NULL, &writetime))
     {
         IMFAttributes_SetBlob(&object->attributes.IMFAttributes_iface, &MF_BYTESTREAM_LAST_MODIFIED_TIME,
                 (const UINT8 *)&writetime, sizeof(writetime));
     }
 
-    IMFAttributes_SetString(&object->attributes.IMFAttributes_iface, &MF_BYTESTREAM_ORIGIN_NAME, url);
+    IMFAttributes_SetString(&object->attributes.IMFAttributes_iface, &MF_BYTESTREAM_ORIGIN_NAME, path);
 
     *bytestream = &object->IMFByteStream_iface;
 
     return S_OK;
+}
+
+/***********************************************************************
+ *      MFCreateFile (mfplat.@)
+ */
+HRESULT WINAPI MFCreateFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE openmode, MF_FILE_FLAGS flags,
+        const WCHAR *path, IMFByteStream **bytestream)
+{
+    TRACE("%d, %d, %#x, %s, %p.\n", accessmode, openmode, flags, debugstr_w(path), bytestream);
+
+    return create_file_bytestream(accessmode, openmode, flags, path, FALSE, bytestream);
+}
+
+/***********************************************************************
+ *      MFCreateTempFile (mfplat.@)
+ */
+HRESULT WINAPI MFCreateTempFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE openmode, MF_FILE_FLAGS flags,
+        IMFByteStream **bytestream)
+{
+    WCHAR name[24], tmppath[MAX_PATH], *path;
+    ULONG64 rnd;
+    size_t len;
+    HRESULT hr;
+
+    TRACE("%d, %d, %#x, %p.\n", accessmode, openmode, flags, bytestream);
+
+    BCryptGenRandom(NULL, (UCHAR *)&rnd, sizeof(rnd), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    swprintf(name, ARRAY_SIZE(name), L"MFP%llX.TMP", rnd);
+    GetTempPathW(ARRAY_SIZE(tmppath), tmppath);
+
+    len = wcslen(tmppath) + wcslen(name) + 2;
+    if (!(path = malloc(len * sizeof(*path))))
+        return E_OUTOFMEMORY;
+
+    wcscpy(path, tmppath);
+    PathCchAppend(path, len, name);
+
+    hr = create_file_bytestream(accessmode, openmode, flags, path, TRUE, bytestream);
+
+    free(path);
+
+    return hr;
 }
 
 struct bytestream_wrapper
@@ -6094,8 +6134,9 @@ static const IRtwqAsyncCallbackVtbl source_resolver_callback_url_vtbl =
 
 static HRESULT resolver_create_registered_handler(HKEY hkey, REFIID riid, void **handler)
 {
-    unsigned int j = 0, name_length, type;
+    DWORD name_length, type;
     HRESULT hr = E_FAIL;
+    unsigned int j = 0;
     WCHAR clsidW[39];
     CLSID clsid;
 
@@ -6118,39 +6159,14 @@ static HRESULT resolver_create_registered_handler(HKEY hkey, REFIID riid, void *
     return hr;
 }
 
-static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHAR *url, DWORD flags,
-        IMFByteStreamHandler **handler)
+static HRESULT resolver_create_bytestream_handler(IMFByteStream *stream, DWORD flags, const WCHAR *mime,
+        const WCHAR *extension, IMFByteStreamHandler **handler)
 {
     static const HKEY hkey_roots[2] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
-    WCHAR *mimeW = NULL, *urlW = NULL;
-    IMFAttributes *attributes;
-    const WCHAR *url_ext;
     HRESULT hr = E_FAIL;
     unsigned int i, j;
-    UINT32 length;
 
     *handler = NULL;
-
-    /* MIME type */
-    if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&attributes)))
-    {
-        IMFAttributes_GetAllocatedString(attributes, &MF_BYTESTREAM_CONTENT_TYPE, &mimeW, &length);
-        if (!url)
-        {
-            IMFAttributes_GetAllocatedString(attributes, &MF_BYTESTREAM_ORIGIN_NAME, &urlW, &length);
-            url = urlW;
-        }
-        IMFAttributes_Release(attributes);
-    }
-
-    /* Extension */
-    url_ext = url ? wcsrchr(url, '.') : NULL;
-
-    if (!url_ext && !mimeW)
-    {
-        CoTaskMemFree(urlW);
-        return MF_E_UNSUPPORTED_BYTESTREAM_TYPE;
-    }
 
     if (!(flags & MF_RESOLUTION_DISABLE_LOCAL_PLUGINS))
     {
@@ -6160,8 +6176,8 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
 
         LIST_FOR_EACH_ENTRY(local_handler, &local_bytestream_handlers, struct local_handler, entry)
         {
-            if ((mimeW && !lstrcmpiW(mimeW, local_handler->u.bytestream.mime))
-                    || (url_ext && !lstrcmpiW(url_ext, local_handler->u.bytestream.extension)))
+            if ((mime && !lstrcmpiW(mime, local_handler->u.bytestream.mime))
+                    || (extension && !lstrcmpiW(extension, local_handler->u.bytestream.extension)))
             {
                 if (SUCCEEDED(hr = IMFActivate_ActivateObject(local_handler->activate, &IID_IMFByteStreamHandler,
                         (void **)handler)))
@@ -6172,16 +6188,12 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
         LeaveCriticalSection(&local_handlers_section);
 
         if (*handler)
-        {
-            CoTaskMemFree(mimeW);
-            CoTaskMemFree(urlW);
             return hr;
-        }
     }
 
     for (i = 0, hr = E_FAIL; i < ARRAY_SIZE(hkey_roots); ++i)
     {
-        const WCHAR *namesW[2] = { mimeW, url_ext };
+        const WCHAR *namesW[2] = { mime, extension };
         HKEY hkey, hkey_handler;
 
         if (RegOpenKeyW(hkey_roots[i], L"Software\\Microsoft\\Windows Media Foundation\\ByteStreamHandlers", &hkey))
@@ -6208,14 +6220,161 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
             break;
     }
 
-    if (FAILED(hr))
+    return hr;
+}
+
+static HRESULT resolver_get_bytestream_url_hint(IMFByteStream *stream, WCHAR const **url)
+{
+    static const unsigned char asfmagic[]  = {0x30,0x26,0xb2,0x75,0x8e,0x66,0xcf,0x11,0xa6,0xd9,0x00,0xaa,0x00,0x62,0xce,0x6c};
+    static const unsigned char wavmagic[]  = { 'R', 'I', 'F', 'F',0x00,0x00,0x00,0x00, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' '};
+    static const unsigned char wavmask[]   = {0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+    static const unsigned char isommagic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm',0x00,0x00,0x00,0x00};
+    static const unsigned char mp4_magic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'M', 'S', 'N', 'V',0x00,0x00,0x00,0x00};
+    static const unsigned char mp42magic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'm', 'p', '4', '2',0x00,0x00,0x00,0x00};
+    static const unsigned char mp4vmagic[] = {0x00,0x00,0x00,0x00, 'f', 't', 'y', 'p', 'M', '4', 'V', ' ',0x00,0x00,0x00,0x00};
+    static const unsigned char mp4mask[]   = {0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00};
+    static const struct stream_content_url_hint
     {
-        static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
-        hr = CoCreateInstance(&CLSID_GStreamerByteStreamHandler, NULL, CLSCTX_INPROC_SERVER, &IID_IMFByteStreamHandler, (void **)handler);
+        const unsigned char *magic;
+        const WCHAR *url;
+        const unsigned char *mask;
+    }
+    url_hints[] =
+    {
+        { asfmagic,  L".asf" },
+        { wavmagic,  L".wav", wavmask },
+        { isommagic, L".mp4", mp4mask },
+        { mp42magic, L".mp4", mp4mask },
+        { mp4_magic, L".mp4", mp4mask },
+        { mp4vmagic, L".m4v", mp4mask },
+    };
+    unsigned char buffer[4 * sizeof(unsigned int)], pattern[4 * sizeof(unsigned int)];
+    IMFAttributes *attributes;
+    DWORD length = 0, caps = 0;
+    unsigned int i, j;
+    QWORD position;
+    HRESULT hr;
+
+    *url = NULL;
+
+    if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&attributes)))
+    {
+        UINT32 string_length = 0;
+        IMFAttributes_GetStringLength(attributes, &MF_BYTESTREAM_CONTENT_TYPE, &string_length);
+        IMFAttributes_Release(attributes);
+
+        if (string_length)
+            return S_OK;
+    }
+
+    if (FAILED(hr = IMFByteStream_GetCapabilities(stream, &caps)))
+        return hr;
+
+    if (!(caps & MFBYTESTREAM_IS_SEEKABLE))
+        return MF_E_UNSUPPORTED_BYTESTREAM_TYPE;
+
+    if (FAILED(hr = IMFByteStream_GetCurrentPosition(stream, &position)))
+        return hr;
+
+    hr = IMFByteStream_Read(stream, buffer, sizeof(buffer), &length);
+    IMFByteStream_SetCurrentPosition(stream, position);
+    if (FAILED(hr))
+        return hr;
+
+    if (length < sizeof(buffer))
+        return S_OK;
+
+    for (i = 0; i < ARRAY_SIZE(url_hints); ++i)
+    {
+        memcpy(pattern, buffer, sizeof(buffer));
+        if (url_hints[i].mask)
+        {
+            unsigned int *mask = (unsigned int *)url_hints[i].mask;
+            unsigned int *data = (unsigned int *)pattern;
+
+            for (j = 0; j < sizeof(buffer) / sizeof(unsigned int); ++j)
+                data[j] &= mask[j];
+
+        }
+        if (!memcmp(pattern, url_hints[i].magic, sizeof(pattern)))
+        {
+            *url = url_hints[i].url;
+            break;
+        }
+    }
+
+    if (*url)
+        TRACE("Content type guessed as %s from %s.\n", debugstr_w(*url), debugstr_an((char *)buffer, length));
+    else
+        WARN("Unrecognized content type %s.\n", debugstr_an((char *)buffer, length));
+
+    return S_OK;
+}
+
+static HRESULT resolver_create_gstreamer_handler(IMFByteStreamHandler **handler)
+{
+    static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
+    return CoCreateInstance(&CLSID_GStreamerByteStreamHandler, NULL, CLSCTX_INPROC_SERVER, &IID_IMFByteStreamHandler, (void **)handler);
+}
+
+static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHAR *url, DWORD flags,
+        IMFByteStreamHandler **handler)
+{
+    WCHAR *mimeW = NULL, *urlW = NULL;
+    IMFAttributes *attributes;
+    const WCHAR *url_ext;
+    HRESULT hr = E_FAIL;
+    UINT32 length;
+
+    *handler = NULL;
+
+    /* MIME type */
+    if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&attributes)))
+    {
+        IMFAttributes_GetAllocatedString(attributes, &MF_BYTESTREAM_CONTENT_TYPE, &mimeW, &length);
+        if (!url)
+        {
+            IMFAttributes_GetAllocatedString(attributes, &MF_BYTESTREAM_ORIGIN_NAME, &urlW, &length);
+            url = urlW;
+        }
+        IMFAttributes_Release(attributes);
+    }
+
+    /* Extension */
+    url_ext = url ? wcsrchr(url, '.') : NULL;
+
+    /* If content type was provided by the caller, it's tried first. Otherwise an attempt to deduce
+       content type from the content itself is made.
+
+       TODO: wine specific fallback to predefined handler could be replaced by normally registering
+       this handler for all possible types.
+     */
+
+    if (url_ext || mimeW)
+    {
+        hr = resolver_create_bytestream_handler(stream, flags, mimeW, url_ext, handler);
+
+        if (FAILED(hr))
+            hr = resolver_create_gstreamer_handler(handler);
     }
 
     CoTaskMemFree(mimeW);
     CoTaskMemFree(urlW);
+
+    if (SUCCEEDED(hr))
+        return hr;
+
+    if (!(flags & MF_RESOLUTION_CONTENT_DOES_NOT_HAVE_TO_MATCH_EXTENSION_OR_MIME_TYPE))
+        return MF_E_UNSUPPORTED_BYTESTREAM_TYPE;
+
+    if (FAILED(hr = resolver_get_bytestream_url_hint(stream, &url_ext)))
+        return hr;
+
+    hr = resolver_create_bytestream_handler(stream, flags, NULL, url_ext, handler);
+
+    if (FAILED(hr))
+        hr = resolver_create_gstreamer_handler(handler);
+
     return hr;
 }
 
@@ -9082,8 +9241,6 @@ HRESULT WINAPI MFCreateDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **man
 
     TRACE("%p, %p.\n", token, manager);
 
-    return E_NOTIMPL;
-
     if (!token || !manager)
         return E_POINTER;
 
@@ -9209,7 +9366,7 @@ static ULONGLONG lldiv128(ULARGE_INTEGER c1, ULARGE_INTEGER c0, LONGLONG denom)
 {
     ULARGE_INTEGER q1, q0, rhat;
     ULARGE_INTEGER v, cmp1, cmp2;
-    unsigned int s = 0;
+    DWORD s = 0;
 
     v.QuadPart = llabs(denom);
 

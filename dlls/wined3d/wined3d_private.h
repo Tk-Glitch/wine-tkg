@@ -1625,6 +1625,9 @@ struct wined3d_bo_gl
     struct wined3d_bo b;
 
     GLuint id;
+
+    struct wined3d_allocator_block *memory;
+
     GLsizeiptr size;
     GLenum binding;
     GLenum usage;
@@ -2091,15 +2094,17 @@ struct wined3d_query_pool_vk
 
     struct list *free_list;
     VkQueryPool vk_query_pool;
+    VkEvent vk_event;
+
     uint32_t allocated[WINED3D_BITMAP_SIZE(WINED3D_QUERY_POOL_SIZE)];
     uint32_t completed[WINED3D_BITMAP_SIZE(WINED3D_QUERY_POOL_SIZE)];
 };
 
 bool wined3d_query_pool_vk_allocate_query(struct wined3d_query_pool_vk *pool_vk, size_t *idx) DECLSPEC_HIDDEN;
+void wined3d_query_pool_vk_mark_free(struct wined3d_context_vk *context_vk, struct wined3d_query_pool_vk *pool_vk,
+        uint32_t start, uint32_t count) DECLSPEC_HIDDEN;
 void wined3d_query_pool_vk_cleanup(struct wined3d_query_pool_vk *pool_vk,
         struct wined3d_context_vk *context_vk) DECLSPEC_HIDDEN;
-void wined3d_query_pool_vk_reset(struct wined3d_query_pool_vk *pool_vk, struct wined3d_context_vk *context_vk,
-        VkCommandBuffer vk_command_buffer) DECLSPEC_HIDDEN;
 bool wined3d_query_pool_vk_init(struct wined3d_query_pool_vk *pool_vk, struct wined3d_context_vk *context_vk,
         enum wined3d_query_type type, struct list *free_pools) DECLSPEC_HIDDEN;
 
@@ -2366,6 +2371,8 @@ void wined3d_context_gl_alloc_so_statistics_query(struct wined3d_context_gl *con
         struct wined3d_so_statistics_query *query) DECLSPEC_HIDDEN;
 void wined3d_context_gl_alloc_timestamp_query(struct wined3d_context_gl *context_gl,
         struct wined3d_timestamp_query *query) DECLSPEC_HIDDEN;
+GLuint wined3d_context_gl_allocate_vram_chunk_buffer(struct wined3d_context_gl *context_gl,
+        unsigned int pool, size_t size) DECLSPEC_HIDDEN;
 void wined3d_context_gl_apply_blit_state(struct wined3d_context_gl *context_gl,
         const struct wined3d_device *device) DECLSPEC_HIDDEN;
 BOOL wined3d_context_gl_apply_clear_state(struct wined3d_context_gl *context_gl, const struct wined3d_state *state,
@@ -2445,6 +2452,7 @@ enum wined3d_retired_object_type_vk
     WINED3D_RETIRED_BUFFER_VIEW_VK,
     WINED3D_RETIRED_IMAGE_VIEW_VK,
     WINED3D_RETIRED_SAMPLER_VK,
+    WINED3D_RETIRED_QUERY_POOL_VK,
 };
 
 struct wined3d_retired_object_vk
@@ -2467,6 +2475,12 @@ struct wined3d_retired_object_vk
         VkBufferView vk_buffer_view;
         VkImageView vk_image_view;
         VkSampler vk_sampler;
+        struct
+        {
+            struct wined3d_query_pool_vk *pool_vk;
+            uint32_t start;
+            uint32_t count;
+        } queries;
     } u;
     uint64_t command_buffer_id;
 };
@@ -4013,25 +4027,6 @@ static inline struct wined3d_device_no3d *wined3d_device_no3d(struct wined3d_dev
     return CONTAINING_RECORD(device, struct wined3d_device_no3d, d);
 }
 
-struct wined3d_device_gl
-{
-    struct wined3d_device d;
-
-    /* Textures for when no other textures are bound. */
-    struct wined3d_dummy_textures dummy_textures;
-
-    uint64_t completed_fence_id;
-    uint64_t current_fence_id;
-};
-
-static inline struct wined3d_device_gl *wined3d_device_gl(struct wined3d_device *device)
-{
-    return CONTAINING_RECORD(device, struct wined3d_device_gl, d);
-}
-
-void wined3d_device_gl_create_primary_opengl_context_cs(void *object) DECLSPEC_HIDDEN;
-void wined3d_device_gl_delete_opengl_contexts_cs(void *object) DECLSPEC_HIDDEN;
-
 struct wined3d_null_resources_vk
 {
     struct wined3d_bo_vk bo;
@@ -4077,6 +4072,18 @@ struct wined3d_allocator_chunk
 void wined3d_allocator_chunk_cleanup(struct wined3d_allocator_chunk *chunk) DECLSPEC_HIDDEN;
 bool wined3d_allocator_chunk_init(struct wined3d_allocator_chunk *chunk,
         struct wined3d_allocator *allocator) DECLSPEC_HIDDEN;
+
+struct wined3d_allocator_chunk_gl
+{
+    struct wined3d_allocator_chunk c;
+    unsigned int memory_type;
+    GLuint gl_buffer;
+};
+
+static inline struct wined3d_allocator_chunk_gl *wined3d_allocator_chunk_gl(struct wined3d_allocator_chunk *chunk)
+{
+    return CONTAINING_RECORD(chunk, struct wined3d_allocator_chunk_gl, c);
+}
 
 struct wined3d_allocator_chunk_vk
 {
@@ -4211,6 +4218,36 @@ void wined3d_device_vk_destroy_null_views(struct wined3d_device_vk *device_vk,
 
 void wined3d_device_vk_uav_clear_state_init(struct wined3d_device_vk *device_vk) DECLSPEC_HIDDEN;
 void wined3d_device_vk_uav_clear_state_cleanup(struct wined3d_device_vk *device_vk) DECLSPEC_HIDDEN;
+
+struct wined3d_device_gl
+{
+    struct wined3d_device d;
+
+    /* Textures for when no other textures are bound. */
+    struct wined3d_dummy_textures dummy_textures;
+
+    struct wined3d_allocator allocator;
+    uint64_t completed_fence_id;
+    uint64_t current_fence_id;
+
+    struct wined3d_retired_block_gl
+    {
+        struct wined3d_allocator_block *block;
+        uint64_t fence_id;
+    } *retired_blocks;
+    SIZE_T retired_blocks_size;
+    SIZE_T retired_block_count;
+};
+
+static inline struct wined3d_device_gl *wined3d_device_gl(struct wined3d_device *device)
+{
+    return CONTAINING_RECORD(device, struct wined3d_device_gl, d);
+}
+
+void wined3d_device_gl_create_primary_opengl_context_cs(void *object) DECLSPEC_HIDDEN;
+void wined3d_device_gl_delete_opengl_contexts_cs(void *object) DECLSPEC_HIDDEN;
+unsigned int wined3d_device_gl_find_memory_type(GLbitfield flags) DECLSPEC_HIDDEN;
+GLbitfield wined3d_device_gl_get_memory_type_flags(unsigned int memory_type_idx) DECLSPEC_HIDDEN;
 
 static inline float wined3d_alpha_ref(const struct wined3d_state *state)
 {
@@ -5684,6 +5721,21 @@ struct wined3d_shader_limits
     unsigned int packed_output;
     unsigned int packed_input;
 };
+
+#define wined3d_lock_init(lock, name) wined3d_lock_init_(lock, __FILE__ ": " name)
+static inline void wined3d_lock_init_(CRITICAL_SECTION *lock, const char *name)
+{
+    InitializeCriticalSection(lock);
+    if (lock->DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
+        lock->DebugInfo->Spare[0] = (DWORD_PTR)name;
+}
+
+static inline void wined3d_lock_cleanup(CRITICAL_SECTION *lock)
+{
+    if (lock->DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
+        lock->DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(lock);
+}
 
 #ifdef __GNUC__
 #define PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))

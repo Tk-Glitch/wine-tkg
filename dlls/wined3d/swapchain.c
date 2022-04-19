@@ -459,8 +459,9 @@ static void swapchain_blit_gdi(struct wined3d_swapchain *swapchain,
     if (!(dst_dc = GetDCEx(swapchain->win_handle, 0, DCX_USESTYLE | DCX_CACHE)))
         ERR("Failed to get destination DC.\n");
 
-    if (!BitBlt(dst_dc, dst_rect->left, dst_rect->top, dst_rect->right - dst_rect->left,
-            dst_rect->bottom - dst_rect->top, src_dc, src_rect->left, src_rect->top, SRCCOPY))
+    if (!StretchBlt(dst_dc, dst_rect->left, dst_rect->top, dst_rect->right - dst_rect->left,
+            dst_rect->bottom - dst_rect->top, src_dc, src_rect->left, src_rect->top,
+            src_rect->right - src_rect->left, src_rect->bottom - src_rect->top, SRCCOPY))
         ERR("Failed to blit.\n");
 
     ReleaseDC(swapchain->win_handle, dst_dc);
@@ -531,8 +532,9 @@ static void wined3d_swapchain_gl_rotate(struct wined3d_swapchain *swapchain, str
     unsigned int i;
     static const DWORD supported_locations = WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_RB_MULTISAMPLE;
 
-    if (swapchain->state.desc.backbuffer_count < 2 || wined3d_settings.offscreen_rendering_mode != ORM_FBO)
-        return;
+    if (swapchain->state.desc.swap_effect == WINED3D_SWAP_EFFECT_DISCARD
+            || swapchain->state.desc.backbuffer_count < 2 || wined3d_settings.offscreen_rendering_mode != ORM_FBO)
+         return;
 
     texture_prev = wined3d_texture_gl(swapchain->back_buffers[0]);
 
@@ -1181,7 +1183,8 @@ static void wined3d_swapchain_vk_rotate(struct wined3d_swapchain *swapchain, str
 
     static const DWORD supported_locations = WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_RB_MULTISAMPLE;
 
-    if (swapchain->state.desc.backbuffer_count < 2)
+    if (swapchain->state.desc.swap_effect == WINED3D_SWAP_EFFECT_DISCARD
+            || swapchain->state.desc.backbuffer_count < 2)
         return;
 
     texture_prev = wined3d_texture_vk(swapchain->back_buffers[0]);

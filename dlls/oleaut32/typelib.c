@@ -3670,7 +3670,7 @@ static BOOL TLB_GUIDFromString(const char *str, GUID *guid)
   int i;
   short s;
 
-  if(sscanf(str, "%x-%hx-%hx-%hx", &guid->Data1, &guid->Data2, &guid->Data3, &s) != 4) {
+  if(sscanf(str, "%lx-%hx-%hx-%hx", &guid->Data1, &guid->Data2, &guid->Data3, &s) != 4) {
     FIXME("Can't parse guid %s\n", debugstr_guid(guid));
     return FALSE;
   }
@@ -9989,7 +9989,7 @@ static DWORD WMSFT_compile_typeinfo_aux(ITypeInfoImpl *info,
         ++memid;
     }
 
-    name = (UINT*)memid;
+    name = (DWORD*)memid;
     for(i = 0; i < info->typeattr.cFuncs; ++i){
         TLBFuncDesc *desc = &info->funcdescs[i];
         if(desc->Name)

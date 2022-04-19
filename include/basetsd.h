@@ -153,15 +153,53 @@ typedef unsigned int UHALF_PTR, *PUHALF_PTR;
 
 #if !defined(__midl) && !defined(__WIDL__)
 
-static inline ULONG32 HandleToULong(const void *h)
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
+
+static inline unsigned long HandleToULong(const void *h)
 {
-    return (ULONG32)(ULONG_PTR)h;
+    return (unsigned long)(ULONG_PTR)h;
 }
 
-static inline LONG32 HandleToLong(const void *h)
+static inline long HandleToLong(const void *h)
 {
-    return (LONG32)(LONG_PTR)h;
+    return (long)(LONG_PTR)h;
 }
+
+static inline unsigned long PtrToUlong(const void *p)
+{
+    return (unsigned long)(ULONG_PTR)p;
+}
+
+static inline long PtrToLong(const void *p)
+{
+    return (long)(LONG_PTR)p;
+}
+
+
+#else
+
+static inline unsigned HandleToULong(const void *h)
+{
+    return (unsigned)(ULONG_PTR)h;
+}
+
+static inline int HandleToLong(const void *h)
+{
+    return (int)(LONG_PTR)h;
+}
+
+static inline unsigned PtrToUlong(const void *p)
+{
+    return (unsigned)(ULONG_PTR)p;
+}
+
+static inline int PtrToLong(const void *p)
+{
+    return (int)(LONG_PTR)p;
+}
+
+
+#endif /* !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES) */
 
 static inline void *ULongToHandle(ULONG32 ul)
 {
@@ -171,16 +209,6 @@ static inline void *ULongToHandle(ULONG32 ul)
 static inline void *LongToHandle(LONG32 l)
 {
     return (void *)(LONG_PTR)l;
-}
-
-static inline ULONG32 PtrToUlong(const void *p)
-{
-    return (ULONG32)(ULONG_PTR)p;
-}
-
-static inline LONG32 PtrToLong(const void *p)
-{
-    return (LONG32)(LONG_PTR)p;
 }
 
 static inline UINT32 PtrToUint(const void *p)

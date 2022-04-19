@@ -5,14 +5,14 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-12-21 23:32+0200\n"
+"PO-Revision-Date: 2022-02-04 10:44+0200\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 3.0\n"
+"X-Generator: Poedit 3.0.1\n"
 "X-Project-Style: default\n"
 
 #: dlls/aclui/aclui.rc:29 dlls/inetcpl.cpl/inetcpl.rc:90
@@ -4019,11 +4019,11 @@ msgstr "Failas nerastas.\n"
 msgid "Path not found.\n"
 msgstr "Kelias nerastas.\n"
 
-#: dlls/kernel32/winerror.mc:48
+#: dlls/kernel32/winerror.mc:48 dlls/kernel32/winerror.mc:3773
 msgid "Too many open files.\n"
 msgstr "Per daug atvertų failų.\n"
 
-#: dlls/kernel32/winerror.mc:53
+#: dlls/kernel32/winerror.mc:53 dlls/kernel32/winerror.mc:3758
 msgid "Access denied.\n"
 msgstr "Prieiga nesuteikta.\n"
 
@@ -5377,7 +5377,7 @@ msgstr "Operacija nutraukta naudotojo.\n"
 msgid "File has a user-mapped section.\n"
 msgstr "Failas turi naudotojo atvaizduotą sekciją.\n"
 
-#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3753
+#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3783
 msgid "Connection refused.\n"
 msgstr "Sujungimas nepriimtas.\n"
 
@@ -6962,26 +6962,58 @@ msgid "This network connection does not exist.\n"
 msgstr "Šis tinklo ryšys neegzistuoja.\n"
 
 #: dlls/kernel32/winerror.mc:3748
+msgid "Call interrupted.\n"
+msgstr "Kreipinys pertrauktas.\n"
+
+#: dlls/kernel32/winerror.mc:3753
+msgid "Invalid file handle.\n"
+msgstr "Neteisinga failo rodyklė.\n"
+
+#: dlls/kernel32/winerror.mc:3763
+msgid "Invalid pointer address.\n"
+msgstr "Neteisingas rodyklės adresas.\n"
+
+#: dlls/kernel32/winerror.mc:3768
+msgid "Invalid argument.\n"
+msgstr "Neteisingas argumentas.\n"
+
+#: dlls/kernel32/winerror.mc:3778
 msgid "Connection reset by peer.\n"
 msgstr "Sujungimas nutrauktas kito serverio.\n"
 
-#: dlls/kernel32/winerror.mc:3767
+#: dlls/kernel32/winerror.mc:3788
+msgid "Host not found.\n"
+msgstr "Serveris nerastas.\n"
+
+#: dlls/kernel32/winerror.mc:3793
+msgid "Nonauthoritative host not found.\n"
+msgstr "Neautoritetingas serveris nerastas.\n"
+
+#: dlls/kernel32/winerror.mc:3798
+msgid "Nonrecoverable error.\n"
+msgstr "Nepataisoma klaida.\n"
+
+#: dlls/kernel32/winerror.mc:3803
+msgid "Name valid, no data record.\n"
+msgstr "Vardas teisingas, nėra duomenų įrašo.\n"
+
+#: dlls/kernel32/winerror.mc:3817
 msgid "Not implemented.\n"
 msgstr "Nerealizuota.\n"
 
-#: dlls/kernel32/winerror.mc:3788
+#: dlls/kernel32/winerror.mc:3838
 msgid "Call failed.\n"
 msgstr "Kreipinys nepavyko.\n"
 
-#: dlls/kernel32/winerror.mc:3760
+#: dlls/kernel32/winerror.mc:3810
 msgid "No Signature found in file.\n"
 msgstr "Joks parašas nerastas faile.\n"
 
-#: dlls/kernel32/winerror.mc:3774
+#: dlls/kernel32/winerror.mc:3824
 msgid "Invalid call.\n"
 msgstr "Neteisingas kreipinys.\n"
 
-#: dlls/kernel32/winerror.mc:3781
+#: dlls/kernel32/winerror.mc:3831
 msgid "Resource is not currently available.\n"
 msgstr "Išteklius šiuo metu neprieinamas.\n"
 

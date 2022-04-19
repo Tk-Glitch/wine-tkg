@@ -143,7 +143,7 @@ BOOL WINAPI CopyFileExA(LPCSTR sourceFilename, LPCSTR destFilename,
  */
 BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %d, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
+    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -153,7 +153,7 @@ BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS
  */
 BOOL WINAPI MoveFileTransactedW(const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %d, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
+    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -392,7 +392,7 @@ BOOL WINAPI CheckNameLegalDOS8Dot3A(const char *name, char *oemname, DWORD oemna
 {
     WCHAR *nameW;
 
-    TRACE("(%s %p %u %p %p)\n", name, oemname,
+    TRACE("(%s %p %lu %p %p)\n", name, oemname,
             oemname_len, contains_spaces, is_legal);
 
     if (!name || !is_legal)
@@ -413,7 +413,7 @@ BOOL WINAPI CheckNameLegalDOS8Dot3W(const WCHAR *name, char *oemname, DWORD oemn
     UNICODE_STRING nameW;
     BOOLEAN contains_spaces;
 
-    TRACE("(%s %p %u %p %p)\n", wine_dbgstr_w(name), oemname,
+    TRACE("(%s %p %lu %p %p)\n", wine_dbgstr_w(name), oemname,
           oemname_len, contains_spaces_ret, is_legal);
 
     if (!name || !is_legal)

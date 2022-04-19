@@ -2067,7 +2067,11 @@ static void test_ck_default(void)
     hr = IDirect3DDevice_EndScene(device);
     ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
     color = get_surface_color(rt, 320, 240);
-    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+    /* Color keying is supposed to be on by default in ddraw1, but used only if a ckey is set.
+     * WARP begs to differ. The default of D3DRENDERSTATE_COLORKEYENABLE is random, and it
+     * doesn't mind the absence of a color key (the latter part affects other tests, not this one). */
+    ok(compare_color(color, 0x0000ff00, 1) || broken(ddraw_is_warp(ddraw) && compare_color(color, 0x000000ff, 1)),
+            "Got unexpected color 0x%08x.\n", color);
 
     hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
     ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
@@ -8386,6 +8390,20 @@ static void test_texturemapblend(void)
     emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREMAPBLEND, D3DTBLEND_MODULATE);
     emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
 
+    /* SPECULARENABLE shouldn't matter in this test, but WARP begs to
+     * differ. In the event that color keying is randomly on (see comments
+     * in test_ck_default for reference), WARP will randomly discard
+     * fragments based on something, even though texture and diffuse color
+     * alpha components are non-zero. Setting SPECULARENABLE to FALSE
+     * prevents this in some cases - presumably WARP multiplies the
+     * specular color "alpha" channel into the final result and then
+     * alpha tests the result. Since the specular property normally does
+     * not have an alpha component the actual specular color we set in
+     * the vertex data above does not matter. Setting FOGENABLE = FALSE
+     * does not help either (specular alpha can contain a per-vertex fog
+     * factor. Doesn't seem to matter here). */
+    emit_set_rs(&ptr, D3DRENDERSTATE_SPECULARENABLE, FALSE);
+
     emit_tquad(&ptr, 0);
     emit_tquad(&ptr, 4);
     emit_end(&ptr);
@@ -8403,6 +8421,7 @@ static void test_texturemapblend(void)
     hr = IDirect3DDevice_EndScene(device);
     ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
+    /* The above SPECULARENABLE = FALSE on WARP matters here.*/
     color = get_surface_color(rt, 5, 5);
     ok(compare_color(color, 0x00000080, 2), "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 400, 5);
@@ -8472,14 +8491,25 @@ static void test_texturemapblend(void)
     hr = IDirect3DDevice_EndScene(device);
     ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
+    /* Despite our best efforts at not making color keying randomly triggering, those
+     * four broken() results occur every now and then on WARP. Presumably the non-
+     * existent alpha channel sometimes samples 0.0 instead of the expected 1.0. */
     color = get_surface_color(rt, 5, 5);
-    ok(compare_color(color, 0x000000ff, 2), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x000000ff, 2)
+            || broken(ddraw_is_warp(ddraw) && compare_color(color, 0x00000000, 2)),
+            "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 400, 5);
-    ok(compare_color(color, 0x000000ff, 2), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x000000ff, 2)
+            || broken(ddraw_is_warp(ddraw) && compare_color(color, 0x00000000, 2)),
+            "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 5, 245);
-    ok(compare_color(color, 0x00000080, 2), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x00000080, 2)
+            || broken(ddraw_is_warp(ddraw) && compare_color(color, 0x00000000, 2)),
+            "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 400, 245);
-    ok(compare_color(color, 0x00000080, 2), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x00000080, 2)
+            || broken(ddraw_is_warp(ddraw) && compare_color(color, 0x00000000, 2)),
+            "Got unexpected color 0x%08x.\n", color);
 
     IDirect3DTexture_Release(texture);
     ref = IDirectDrawSurface_Release(surface);
@@ -11872,6 +11902,8 @@ static void test_texture_load(void)
     emit_process_vertices(&ptr, D3DPROCESSVERTICES_COPY, 0, 4);
     emit_texture_load(&ptr, dst_texture_handle, src_texture_handle);
     emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREHANDLE, dst_texture_handle);
+    /* WARP randomly applies color keying without having a key set. */
+    emit_set_rs(&ptr, D3DRENDERSTATE_COLORKEYENABLE, FALSE);
     emit_tquad(&ptr, 0);
     emit_end(&ptr);
     inst_length = (BYTE *)ptr - (BYTE *)exec_desc.lpData - sizeof(tquad);

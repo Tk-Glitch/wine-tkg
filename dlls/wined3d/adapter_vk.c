@@ -518,9 +518,7 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
         goto fail;
     }
 
-    InitializeCriticalSection(&device_vk->allocator_cs);
-    if (device_vk->allocator_cs.DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
-        device_vk->allocator_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": wined3d_device_vk.allocator_cs");
+    wined3d_lock_init(&device_vk->allocator_cs, "wined3d_device_vk.allocator_cs");
 
     *device = &device_vk->d;
 
@@ -540,9 +538,7 @@ static void adapter_vk_destroy_device(struct wined3d_device *device)
     wined3d_device_cleanup(&device_vk->d);
     wined3d_allocator_cleanup(&device_vk->allocator);
 
-    if (device_vk->allocator_cs.DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
-        device_vk->allocator_cs.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&device_vk->allocator_cs);
+    wined3d_lock_cleanup(&device_vk->allocator_cs);
 
     VK_CALL(vkDestroyDevice(device_vk->vk_device, NULL));
     heap_free(device_vk);
@@ -1243,7 +1239,7 @@ static bool adapter_vk_alloc_bo(struct wined3d_device *device, struct wined3d_re
 
         if (!bo_vk->b.map_ptr)
         {
-            WARN_(d3d_perf)("BO %p (chunk %p, slab %p) is not persistently mapped.\n",
+            WARN_(d3d_perf)("BO %p (chunk %p, slab %p) is not mapped.\n",
                     bo_vk, bo_vk->memory ? bo_vk->memory->chunk : NULL, bo_vk->slab);
 
             if (!wined3d_bo_vk_map(bo_vk, context_vk))

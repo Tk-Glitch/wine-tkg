@@ -1,4 +1,3 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL   = dinput.dll
 IMPORTS   = dinput dinput8 ole32 version user32 advapi32 hid uuid crypt32 newdev setupapi wintrust winmm
 
@@ -9,7 +8,6 @@ SOURCES = \
 	device.c \
 	device8.c \
 	dinput.c \
-	dinput8.c \
 	driver_hid.c \
 	driver_hid.spec \
 	force_feedback.c \

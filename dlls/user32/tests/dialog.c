@@ -1556,12 +1556,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc(HWND hdlg, UINT msg, WPARAM w
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1592,12 +1592,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc(HWND hdlg, UINT msg, WPARAM w
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1663,12 +1663,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc2(HWND hdlg, UINT msg, WPARAM 
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1699,12 +1699,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc2(HWND hdlg, UINT msg, WPARAM 
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-    todo_wine
+        todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1852,7 +1852,10 @@ static void test_DialogBoxParam(void)
     SetLastError(0xdeadbeef);
     ret = DialogBoxParamA(GetModuleHandleA(NULL), "TEST_DIALOG_INVALID_CLASS", 0, DestroyDlgWinProc, 0);
     ok(ret == -1, "DialogBoxParamA returned %ld, expected -1\n", ret);
-    ok(GetLastError() == 0, "got %d\n", GetLastError());
+    todo_wine
+    ok(GetLastError() == ERROR_CANNOT_FIND_WND_CLASS ||
+       broken(GetLastError() == ERROR_SUCCESS) /* < win10 21H1 */,
+       "got %u, expected ERROR_CANNOT_FIND_WND_CLASS\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = DefDlgProcA(0, WM_ERASEBKGND, 0, 0);
