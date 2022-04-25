@@ -912,6 +912,12 @@ sync_test("set_obj", function() {
 
     function test_length(name, len) {
         ok(Set.prototype[name].length === len, "Set.prototype." + name + " = " + Set.prototype[name].length);
+        try {
+            Set.prototype[name].call({}, 0);
+            ok(false, "expected exception calling Set.prototype." + name + "(object)");
+        }catch(e) {
+            ok(e.number === 0xa13fc - 0x80000000, "Set.prototype." + name + "(object) threw " + e.number);
+        }
     }
     test_length("add", 1);
     test_length("clear", 0);
@@ -924,6 +930,65 @@ sync_test("set_obj", function() {
 
     r = Object.prototype.toString.call(s);
     ok(r === "[object Object]", "toString returned " + r);
+
+    r = s.has(-0);
+    ok(r === false, "has(-0) returned " + r);
+    ok(s.size === 0, "size = " + s.size);
+
+    r = s.add(42);
+    ok(r === undefined, "add(42) returned " + r);
+    r = s.add(42);
+    ok(r === undefined, "add(42) returned " + r);
+    r = s.add(0);
+    ok(r === undefined, "add(0) returned " + r);
+    r = s.has(-0);
+    ok(r === false, "has(-0) returned " + r);
+    r = s.add(-0);
+    ok(r === undefined, "add(-0) returned " + r);
+    r = s.has(-0);
+    ok(r === true, "has(-0) after add returned " + r);
+    r = s.add("test");
+    ok(r === undefined, "add(test) returned " + r);
+    r = s.add(13);
+    ok(r === undefined, "add(13) returned " + r);
+    r = s.add(s);
+    ok(r === undefined, "add(s) returned " + r);
+
+    r = s["delete"]("test"); /* using s.delete() would break parsing in quirks mode */
+    ok(r === true, "delete(test) returned " + r);
+    r = s["delete"]("test");
+    ok(r === false, "delete(test) returned " + r);
+
+    ok(s.size === 5, "size = " + s.size);
+    s.size = 100;
+    ok(s.size === 5, "size (after set) = " + s.size);
+
+    var a = [];
+    r = s.forEach(function(value, key, obj) {
+        var t = s["delete"](key);
+        ok(t === true, "delete(" + key + ") returned " + r);
+        ok(value === key, "value = " + value + ", key = " + key);
+        ok(obj === s, "set = " + obj);
+        ok(this === a, "this = " + this);
+        a.push(value);
+    }, a);
+    ok(r === undefined, "forEach returned " + r);
+    ok(a.length === 5, "a.length = " + a.length);
+    for(var i = 0; i < a.length; i++)
+        ok(a[i] === [42, 0, -0, 13, s][i], "a[" + i + "] = " + a[i]);
+    ok(s.size === 0, "size = " + s.size);
+
+    s = new Set();
+    ok(s.size === 0, "size = " + s.size);
+    s.add(1);
+    s.add(2);
+    ok(s.size === 2, "size = " + s.size);
+    r = s.clear();
+    ok(r === undefined, "clear returned " + r);
+    ok(s.size === 0, "size = " + s.size);
+
+    s = new Set([1, 2, 3]);
+    ok(s.size === 0, "size = " + s.size);
 });
 
 sync_test("map_obj", function() {
@@ -995,7 +1060,7 @@ sync_test("map_obj", function() {
 
     var calls = [];
     i = 0;
-    r = s.forEach(function(value, key) {
+    r = s.forEach(function(value, key, map) {
         if(isNaN(test_keys[i])) {
             ok(isNaN(key), "key = " + key + " expected NaN");
             ok(isNaN(value), "value = " + value + " expected NaN");
@@ -1003,8 +1068,10 @@ sync_test("map_obj", function() {
             ok(key === test_keys[i], "key = " + key + " expected " + test_keys[i]);
             ok(value === key + 1, "value = " + value);
         }
+        ok(map === s, "map = " + map);
+        ok(this === test_keys, "this = " + this);
         i++;
-    });
+    }, test_keys);
     ok(i === test_keys.length, "i = " + i);
     ok(r === undefined, "forEach returned " + r);
 
@@ -1048,6 +1115,15 @@ sync_test("map_obj", function() {
         ok(r === true, "delete returned " + r);
     });
     ok(i === 66, "i = " + i);
+
+    s = new Map();
+    s.set(0,  10);
+    s.set(-0, 20);
+    ok(s.size === 2, "size = " + s.size + " expected 2");
+    r = s.get(-0);
+    ok(r === 20, "get(-0) returned " + r);
+    r = s.get(0);
+    ok(r === 10, "get(0) returned " + r);
 
     try {
         Map.prototype.set.call({}, 1, 2);
@@ -1306,6 +1382,74 @@ sync_test("builtins_diffs", function() {
         ok(false, "RegExp.toString with non-regexp: expected exception");
     }catch(e) {
         ok(e.number === 0xa1398 - 0x80000000, "RegExp.toString with non-regexp: exception = " + e.number);
+    }
+
+    try {
+        /a/.lastIndex();
+        ok(false, "/a/.lastIndex(): expected exception");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "/a/.lastIndex(): exception = " + e.number);
+    }
+    try {
+        "a".length();
+        ok(false, "\"a\".length(): expected exception");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "\"a\".length(): exception = " + e.number);
+    }
+});
+
+sync_test("nullDisp", function() {
+    var v = document.documentMode, nullDisp = external.nullDisp, r;
+
+    ok(external.getVT(nullDisp) === "VT_NULL", "getVT(nullDisp) is not VT_NULL");
+    ok(typeof(nullDisp) === "object", "typeof(nullDisp) = " + typeof(nullDisp));
+    ok(nullDisp === nullDisp, "nullDisp !== nullDisp");
+    ok(nullDisp === null, "nullDisp === null");
+    ok(nullDisp == null, "nullDisp == null");
+    ok(!nullDisp === true, "!nullDisp = " + !nullDisp);
+    ok(String(nullDisp) === "null", "String(nullDisp) = " + String(nullDisp));
+    ok(+nullDisp === 0, "+nullDisp !== 0");
+    ok(''+nullDisp === "null", "''+nullDisp !== null");
+    ok(nullDisp != new Object(), "nullDisp == new Object()");
+    ok(new Object() != nullDisp, "new Object() == nullDisp");
+    ok((typeof Object(nullDisp)) === "object", "typeof Object(nullDisp) !== 'object'");
+    r = Object(nullDisp).toString();
+    ok(r === "[object Object]", "Object(nullDisp).toString() = " + r);
+    ok(Object(nullDisp) != nullDisp, "Object(nullDisp) == nullDisp");
+    ok(new Object(nullDisp) != nullDisp, "new Object(nullDisp) == nullDisp");
+    r = (nullDisp instanceof Object);
+    ok(r === false, "nullDisp instance of Object");
+
+    if(v >= 8) {
+        r = JSON.stringify.call(null, nullDisp);
+        ok(r === "null", "JSON.stringify(nullDisp) returned " + r);
+    }
+
+    try {
+        (new Object()) instanceof nullDisp;
+        ok(false, "expected exception on (new Object()) instanceof nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "(new Object()) instanceof nullDisp threw " + e.number);
+    }
+
+    try {
+        Function.prototype.apply.call(nullDisp, Object, []);
+        ok(false, "expected exception calling Function.apply on nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "Function.apply on nullDisp threw " + e.number);
+    }
+    try {
+        Function.prototype.call.call(nullDisp, Object);
+        ok(false, "expected exception calling Function.call on nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "Function.call on nullDisp threw " + e.number);
+    }
+
+    try {
+        new nullDisp;
+        ok(false, "expected exception for new nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "new nullDisp threw " + e.number);
     }
 });
 

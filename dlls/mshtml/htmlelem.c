@@ -781,6 +781,139 @@ typedef struct {
     nsIDOMClientRectList *rect_list;
 } HTMLRectCollection;
 
+typedef struct {
+    IEnumVARIANT IEnumVARIANT_iface;
+
+    LONG ref;
+
+    ULONG iter;
+    HTMLRectCollection *col;
+} HTMLRectCollectionEnum;
+
+static inline HTMLRectCollectionEnum *HTMLRectCollectionEnum_from_IEnumVARIANT(IEnumVARIANT *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLRectCollectionEnum, IEnumVARIANT_iface);
+}
+
+static HRESULT WINAPI HTMLRectCollectionEnum_QueryInterface(IEnumVARIANT *iface, REFIID riid, void **ppv)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else if(IsEqualGUID(riid, &IID_IEnumVARIANT)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else {
+        FIXME("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLRectCollectionEnum_AddRef(IEnumVARIANT *iface)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLRectCollectionEnum_Release(IEnumVARIANT *iface)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    if(!ref) {
+        IHTMLRectCollection_Release(&This->col->IHTMLRectCollection_iface);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLRectCollectionEnum_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+    VARIANT index;
+    HRESULT hres;
+    ULONG num, i;
+    UINT32 len;
+
+    TRACE("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
+
+    nsIDOMClientRectList_GetLength(This->col->rect_list, &len);
+    num = min(len - This->iter, celt);
+    V_VT(&index) = VT_I4;
+
+    for(i = 0; i < num; i++) {
+        V_I4(&index) = This->iter + i;
+        hres = IHTMLRectCollection_item(&This->col->IHTMLRectCollection_iface, &index, &rgVar[i]);
+        if(FAILED(hres)) {
+            while(i--)
+                VariantClear(&rgVar[i]);
+            return hres;
+        }
+    }
+
+    This->iter += num;
+    if(pCeltFetched)
+        *pCeltFetched = num;
+    return num == celt ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI HTMLRectCollectionEnum_Skip(IEnumVARIANT *iface, ULONG celt)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+    UINT32 len;
+
+    TRACE("(%p)->(%lu)\n", This, celt);
+
+    nsIDOMClientRectList_GetLength(This->col->rect_list, &len);
+    if(This->iter + celt > len) {
+        This->iter = len;
+        return S_FALSE;
+    }
+
+    This->iter += celt;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLRectCollectionEnum_Reset(IEnumVARIANT *iface)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->()\n", This);
+
+    This->iter = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLRectCollectionEnum_Clone(IEnumVARIANT *iface, IEnumVARIANT **ppEnum)
+{
+    HTMLRectCollectionEnum *This = HTMLRectCollectionEnum_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p)\n", This, ppEnum);
+    return E_NOTIMPL;
+}
+
+static const IEnumVARIANTVtbl HTMLRectCollectionEnumVtbl = {
+    HTMLRectCollectionEnum_QueryInterface,
+    HTMLRectCollectionEnum_AddRef,
+    HTMLRectCollectionEnum_Release,
+    HTMLRectCollectionEnum_Next,
+    HTMLRectCollectionEnum_Skip,
+    HTMLRectCollectionEnum_Reset,
+    HTMLRectCollectionEnum_Clone
+};
+
 static inline HTMLRectCollection *impl_from_IHTMLRectCollection(IHTMLRectCollection *iface)
 {
     return CONTAINING_RECORD(iface, HTMLRectCollection, IHTMLRectCollection_iface);
@@ -883,8 +1016,23 @@ static HRESULT WINAPI HTMLRectCollection_get_length(IHTMLRectCollection *iface, 
 static HRESULT WINAPI HTMLRectCollection_get__newEnum(IHTMLRectCollection *iface, IUnknown **p)
 {
     HTMLRectCollection *This = impl_from_IHTMLRectCollection(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    HTMLRectCollectionEnum *ret;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    ret = heap_alloc(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->IEnumVARIANT_iface.lpVtbl = &HTMLRectCollectionEnumVtbl;
+    ret->ref = 1;
+    ret->iter = 0;
+
+    HTMLRectCollection_AddRef(&This->IHTMLRectCollection_iface);
+    ret->col = This;
+
+    *p = (IUnknown*)&ret->IEnumVARIANT_iface;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLRectCollection_item(IHTMLRectCollection *iface, VARIANT *index, VARIANT *result)
@@ -7430,6 +7578,253 @@ static HRESULT create_filters_collection(compat_mode_t compat_mode, IHTMLFilters
     return S_OK;
 }
 
+static HRESULT get_attr_dispid_by_relative_idx(HTMLAttributeCollection *This, LONG *idx, DISPID start, DISPID *dispid)
+{
+    IDispatchEx *dispex = &This->elem->node.event_target.dispex.IDispatchEx_iface;
+    DISPID id = start;
+    LONG len = -1;
+    HRESULT hres;
+
+    FIXME("filter non-enumerable attributes out\n");
+
+    while(1) {
+        hres = IDispatchEx_GetNextDispID(dispex, fdexEnumAll, id, &id);
+        if(FAILED(hres))
+            return hres;
+        else if(hres == S_FALSE)
+            break;
+
+        len++;
+        if(len == *idx)
+            break;
+    }
+
+    if(dispid) {
+        *dispid = id;
+        return *idx==len ? S_OK : DISP_E_UNKNOWNNAME;
+    }
+
+    *idx = len+1;
+    return S_OK;
+}
+
+static HRESULT get_attr_dispid_by_idx(HTMLAttributeCollection *This, LONG *idx, DISPID *dispid)
+{
+    return get_attr_dispid_by_relative_idx(This, idx, DISPID_STARTENUM, dispid);
+}
+
+static inline HRESULT get_attr_dispid_by_name(HTMLAttributeCollection *This, BSTR name, DISPID *id)
+{
+    HRESULT hres;
+
+    if(name[0]>='0' && name[0]<='9') {
+        WCHAR *end_ptr;
+        LONG idx;
+
+        idx = wcstoul(name, &end_ptr, 10);
+        if(!*end_ptr) {
+            hres = get_attr_dispid_by_idx(This, &idx, id);
+            if(SUCCEEDED(hres))
+                return hres;
+        }
+    }
+
+    if(!This->elem) {
+        WARN("NULL elem\n");
+        return E_UNEXPECTED;
+    }
+
+    hres = IDispatchEx_GetDispID(&This->elem->node.event_target.dispex.IDispatchEx_iface,
+            name, fdexNameCaseInsensitive, id);
+    return hres;
+}
+
+static inline HRESULT get_domattr(HTMLAttributeCollection *This, DISPID id, LONG *list_pos, HTMLDOMAttribute **attr)
+{
+    HTMLDOMAttribute *iter;
+    LONG pos = 0;
+    HRESULT hres;
+
+    *attr = NULL;
+    LIST_FOR_EACH_ENTRY(iter, &This->attrs, HTMLDOMAttribute, entry) {
+        if(iter->dispid == id) {
+            *attr = iter;
+            break;
+        }
+        pos++;
+    }
+
+    if(!*attr) {
+        if(!This->elem) {
+            WARN("NULL elem\n");
+            return E_UNEXPECTED;
+        }
+
+        hres = HTMLDOMAttribute_Create(NULL, This->elem, id, dispex_compat_mode(&This->elem->node.event_target.dispex), attr);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    IHTMLDOMAttribute_AddRef(&(*attr)->IHTMLDOMAttribute_iface);
+    if(list_pos)
+        *list_pos = pos;
+    return S_OK;
+}
+
+typedef struct {
+    IEnumVARIANT IEnumVARIANT_iface;
+
+    LONG ref;
+
+    ULONG iter;
+    DISPID iter_dispid;
+    HTMLAttributeCollection *col;
+} HTMLAttributeCollectionEnum;
+
+static inline HTMLAttributeCollectionEnum *HTMLAttributeCollectionEnum_from_IEnumVARIANT(IEnumVARIANT *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLAttributeCollectionEnum, IEnumVARIANT_iface);
+}
+
+static HRESULT WINAPI HTMLAttributeCollectionEnum_QueryInterface(IEnumVARIANT *iface, REFIID riid, void **ppv)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else if(IsEqualGUID(riid, &IID_IEnumVARIANT)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else {
+        FIXME("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLAttributeCollectionEnum_AddRef(IEnumVARIANT *iface)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLAttributeCollectionEnum_Release(IEnumVARIANT *iface)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    if(!ref) {
+        IHTMLAttributeCollection_Release(&This->col->IHTMLAttributeCollection_iface);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLAttributeCollectionEnum_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+    DISPID tmp, dispid = This->iter_dispid;
+    HTMLDOMAttribute *attr;
+    LONG rel_index = 0;
+    HRESULT hres;
+    ULONG i;
+
+    TRACE("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
+
+    for(i = 0; i < celt; i++) {
+        hres = get_attr_dispid_by_relative_idx(This->col, &rel_index, dispid, &tmp);
+        if(SUCCEEDED(hres)) {
+            dispid = tmp;
+            hres = get_domattr(This->col, dispid, NULL, &attr);
+        }
+        else if(hres == DISP_E_UNKNOWNNAME)
+            break;
+
+        if(FAILED(hres)) {
+            while(i--)
+                VariantClear(&rgVar[i]);
+            return hres;
+        }
+
+        V_VT(&rgVar[i]) = VT_DISPATCH;
+        V_DISPATCH(&rgVar[i]) = (IDispatch*)&attr->IHTMLDOMAttribute_iface;
+    }
+
+    This->iter += i;
+    This->iter_dispid = dispid;
+    if(pCeltFetched)
+        *pCeltFetched = i;
+    return i == celt ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI HTMLAttributeCollectionEnum_Skip(IEnumVARIANT *iface, ULONG celt)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+    LONG remaining, rel_index;
+    DISPID dispid;
+    HRESULT hres;
+
+    TRACE("(%p)->(%lu)\n", This, celt);
+
+    if(!celt)
+        return S_OK;
+
+    rel_index = -1;
+    hres = get_attr_dispid_by_relative_idx(This->col, &rel_index, This->iter_dispid, NULL);
+    if(FAILED(hres))
+        return hres;
+    remaining = min(celt, rel_index);
+
+    if(remaining) {
+        rel_index = remaining - 1;
+        hres = get_attr_dispid_by_relative_idx(This->col, &rel_index, This->iter_dispid, &dispid);
+        if(FAILED(hres))
+            return hres;
+        This->iter += remaining;
+        This->iter_dispid = dispid;
+    }
+    return celt > remaining ? S_FALSE : S_OK;
+}
+
+static HRESULT WINAPI HTMLAttributeCollectionEnum_Reset(IEnumVARIANT *iface)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->()\n", This);
+
+    This->iter = 0;
+    This->iter_dispid = DISPID_STARTENUM;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLAttributeCollectionEnum_Clone(IEnumVARIANT *iface, IEnumVARIANT **ppEnum)
+{
+    HTMLAttributeCollectionEnum *This = HTMLAttributeCollectionEnum_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p)\n", This, ppEnum);
+    return E_NOTIMPL;
+}
+
+static const IEnumVARIANTVtbl HTMLAttributeCollectionEnumVtbl = {
+    HTMLAttributeCollectionEnum_QueryInterface,
+    HTMLAttributeCollectionEnum_AddRef,
+    HTMLAttributeCollectionEnum_Release,
+    HTMLAttributeCollectionEnum_Next,
+    HTMLAttributeCollectionEnum_Skip,
+    HTMLAttributeCollectionEnum_Reset,
+    HTMLAttributeCollectionEnum_Clone
+};
+
 /* interface IHTMLAttributeCollection */
 static inline HTMLAttributeCollection *impl_from_IHTMLAttributeCollection(IHTMLAttributeCollection *iface)
 {
@@ -7524,94 +7919,6 @@ static HRESULT WINAPI HTMLAttributeCollection_Invoke(IHTMLAttributeCollection *i
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 }
 
-static HRESULT get_attr_dispid_by_idx(HTMLAttributeCollection *This, LONG *idx, DISPID *dispid)
-{
-    IDispatchEx *dispex = &This->elem->node.event_target.dispex.IDispatchEx_iface;
-    DISPID id = DISPID_STARTENUM;
-    LONG len = -1;
-    HRESULT hres;
-
-    FIXME("filter non-enumerable attributes out\n");
-
-    while(1) {
-        hres = IDispatchEx_GetNextDispID(dispex, fdexEnumAll, id, &id);
-        if(FAILED(hres))
-            return hres;
-        else if(hres == S_FALSE)
-            break;
-
-        len++;
-        if(len == *idx)
-            break;
-    }
-
-    if(dispid) {
-        *dispid = id;
-        return *idx==len ? S_OK : DISP_E_UNKNOWNNAME;
-    }
-
-    *idx = len+1;
-    return S_OK;
-}
-
-static inline HRESULT get_attr_dispid_by_name(HTMLAttributeCollection *This, BSTR name, DISPID *id)
-{
-    HRESULT hres;
-
-    if(name[0]>='0' && name[0]<='9') {
-        WCHAR *end_ptr;
-        LONG idx;
-
-        idx = wcstoul(name, &end_ptr, 10);
-        if(!*end_ptr) {
-            hres = get_attr_dispid_by_idx(This, &idx, id);
-            if(SUCCEEDED(hres))
-                return hres;
-        }
-    }
-
-    if(!This->elem) {
-        WARN("NULL elem\n");
-        return E_UNEXPECTED;
-    }
-
-    hres = IDispatchEx_GetDispID(&This->elem->node.event_target.dispex.IDispatchEx_iface,
-            name, fdexNameCaseInsensitive, id);
-    return hres;
-}
-
-static inline HRESULT get_domattr(HTMLAttributeCollection *This, DISPID id, LONG *list_pos, HTMLDOMAttribute **attr)
-{
-    HTMLDOMAttribute *iter;
-    LONG pos = 0;
-    HRESULT hres;
-
-    *attr = NULL;
-    LIST_FOR_EACH_ENTRY(iter, &This->attrs, HTMLDOMAttribute, entry) {
-        if(iter->dispid == id) {
-            *attr = iter;
-            break;
-        }
-        pos++;
-    }
-
-    if(!*attr) {
-        if(!This->elem) {
-            WARN("NULL elem\n");
-            return E_UNEXPECTED;
-        }
-
-        hres = HTMLDOMAttribute_Create(NULL, This->elem, id, dispex_compat_mode(&This->elem->node.event_target.dispex), attr);
-        if(FAILED(hres))
-            return hres;
-    }
-
-    IHTMLDOMAttribute_AddRef(&(*attr)->IHTMLDOMAttribute_iface);
-    if(list_pos)
-        *list_pos = pos;
-    return S_OK;
-}
-
 static HRESULT WINAPI HTMLAttributeCollection_get_length(IHTMLAttributeCollection *iface, LONG *p)
 {
     HTMLAttributeCollection *This = impl_from_IHTMLAttributeCollection(iface);
@@ -7627,8 +7934,24 @@ static HRESULT WINAPI HTMLAttributeCollection_get_length(IHTMLAttributeCollectio
 static HRESULT WINAPI HTMLAttributeCollection__newEnum(IHTMLAttributeCollection *iface, IUnknown **p)
 {
     HTMLAttributeCollection *This = impl_from_IHTMLAttributeCollection(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    HTMLAttributeCollectionEnum *ret;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    ret = heap_alloc(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->IEnumVARIANT_iface.lpVtbl = &HTMLAttributeCollectionEnumVtbl;
+    ret->ref = 1;
+    ret->iter = 0;
+    ret->iter_dispid = DISPID_STARTENUM;
+
+    HTMLAttributeCollection_AddRef(&This->IHTMLAttributeCollection_iface);
+    ret->col = This;
+
+    *p = (IUnknown*)&ret->IEnumVARIANT_iface;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLAttributeCollection_item(IHTMLAttributeCollection *iface, VARIANT *name, IDispatch **ppItem)

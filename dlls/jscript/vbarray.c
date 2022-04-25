@@ -93,7 +93,7 @@ static HRESULT VBArray_getItem(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
         return hres;
 
     if(r) {
-        hres = variant_to_jsval(&out, r);
+        hres = variant_to_jsval(ctx, &out, r);
         VariantClear(&out);
     }
     return hres;
@@ -163,7 +163,7 @@ static HRESULT VBArray_toArray(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
     }
 
     for(i=0; i<size; i++) {
-        hres = variant_to_jsval(v, &val);
+        hres = variant_to_jsval(ctx, v, &val);
         if(SUCCEEDED(hres)) {
             hres = jsdisp_propput_idx(array, i, val);
             jsval_release(val);
@@ -291,11 +291,13 @@ static HRESULT VBArrayConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         if(argc<1 || !is_variant(argv[0]) || V_VT(get_variant(argv[0])) != (VT_ARRAY|VT_VARIANT))
             return JS_E_VBARRAY_EXPECTED;
 
-        return jsval_copy(argv[0], r);
+        return r ? jsval_copy(argv[0], r) : S_OK;
 
     case DISPATCH_CONSTRUCT:
         if(argc<1 || !is_variant(argv[0]) || V_VT(get_variant(argv[0])) != (VT_ARRAY|VT_VARIANT))
             return JS_E_VBARRAY_EXPECTED;
+        if(!r)
+            return S_OK;
 
         hres = alloc_vbarray(ctx, NULL, &vbarray);
         if(FAILED(hres))

@@ -156,7 +156,7 @@ struct ACImpl {
     UINT32 channel_count;
     HANDLE timer;
 
-    struct pulse_stream *pulse_stream;
+    stream_handle pulse_stream;
 
     AudioSession *session;
     AudioSessionWrapper *session_wrapper;
@@ -228,7 +228,7 @@ static void pulse_call(enum unix_funcs code, void *params)
     assert(!status);
 }
 
-static void pulse_release_stream(struct pulse_stream *stream, HANDLE timer)
+static void pulse_release_stream(stream_handle stream, HANDLE timer)
 {
     struct release_stream_params params;
     params.stream = stream;
@@ -457,13 +457,16 @@ HRESULT WINAPI AUDDRV_GetEndpointIDs(EDataFlow flow, WCHAR ***ids_out, GUID **ke
     }
 
     for (i = 0; i < params.num; i++) {
-        unsigned int size = (wcslen(params.endpoints[i].name) + 1) * sizeof(WCHAR);
+        WCHAR *name = (WCHAR *)((char *)params.endpoints + params.endpoints[i].name);
+        char *pulse_name = (char *)params.endpoints + params.endpoints[i].pulse_name;
+        unsigned int size = (wcslen(name) + 1) * sizeof(WCHAR);
+
         if (!(ids[i] = HeapAlloc(GetProcessHeap(), 0, size))) {
             params.result = E_OUTOFMEMORY;
             break;
         }
-        memcpy(ids[i], params.endpoints[i].name, size);
-        get_device_guid(drv_key, flow, params.endpoints[i].pulse_name, &guids[i]);
+        memcpy(ids[i], name, size);
+        get_device_guid(drv_key, flow, pulse_name, &guids[i]);
     }
     if (drv_key)
         RegCloseKey(drv_key);
@@ -668,7 +671,7 @@ static ULONG WINAPI AudioClient_Release(IAudioClient3 *iface)
     if (!ref) {
         if (This->pulse_stream) {
             pulse_release_stream(This->pulse_stream, This->timer);
-            This->pulse_stream = NULL;
+            This->pulse_stream = 0;
             EnterCriticalSection(&session_cs);
             list_remove(&This->entry);
             LeaveCriticalSection(&session_cs);
@@ -822,7 +825,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
     ACImpl *This = impl_from_IAudioClient3(iface);
     struct create_stream_params params;
     unsigned int i, channel_count;
-    struct pulse_stream *stream;
+    stream_handle stream;
     char *name;
     HRESULT hr;
 

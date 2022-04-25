@@ -188,7 +188,7 @@ static const struct long_option long_options[] = {
     { "nostdinc", 0, NOSTDINC_OPTION },
     { "ns_prefix", 0, RT_NS_PREFIX },
     { "oldnames", 0, OLDNAMES_OPTION },
-    { "oldtlb", 0, NULL, OLD_TYPELIB_OPTION },
+    { "oldtlb", 0, OLD_TYPELIB_OPTION },
     { "output", 0, 'o' },
     { "prefix-all", 1, PREFIX_ALL_OPTION },
     { "prefix-client", 1, PREFIX_CLIENT_OPTION },

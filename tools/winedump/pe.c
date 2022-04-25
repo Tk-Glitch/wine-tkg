@@ -26,8 +26,6 @@
 #include <time.h>
 #include <fcntl.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
@@ -161,7 +159,7 @@ static inline void print_word(const char *title, WORD value)
     printf("  %-34s 0x%-4X         %u\n", title, value, value);
 }
 
-static inline void print_dword(const char *title, DWORD value)
+static inline void print_dword(const char *title, UINT value)
 {
     printf("  %-34s 0x%-8x     %u\n", title, value, value);
 }
@@ -231,8 +229,8 @@ static inline void print_datadirectory(DWORD n, const IMAGE_DATA_DIRECTORY *dire
     for (i = 0; i < n && i < 16; i++)
     {
         printf("  %-12s rva: 0x%-8x  size: 0x%-8x\n",
-               DirectoryNames[i], directory[i].VirtualAddress,
-               directory[i].Size);
+               DirectoryNames[i], (UINT)directory[i].VirtualAddress,
+               (UINT)directory[i].Size);
     }
 }
 
@@ -350,12 +348,12 @@ void dump_file_header(const IMAGE_FILE_HEADER *fileHeader)
 	   fileHeader->Machine, get_machine_str(fileHeader->Machine));
     printf("  Number of Sections:           %d\n", fileHeader->NumberOfSections);
     printf("  TimeDateStamp:                %08X (%s) offset %lu\n",
-	   fileHeader->TimeDateStamp, get_time_str(fileHeader->TimeDateStamp),
+	   (UINT)fileHeader->TimeDateStamp, get_time_str(fileHeader->TimeDateStamp),
 	   Offset(&(fileHeader->TimeDateStamp)));
-    printf("  PointerToSymbolTable:         %08X\n", fileHeader->PointerToSymbolTable);
-    printf("  NumberOfSymbols:              %08X\n", fileHeader->NumberOfSymbols);
-    printf("  SizeOfOptionalHeader:         %04X\n", fileHeader->SizeOfOptionalHeader);
-    printf("  Characteristics:              %04X\n", fileHeader->Characteristics);
+    printf("  PointerToSymbolTable:         %08X\n", (UINT)fileHeader->PointerToSymbolTable);
+    printf("  NumberOfSymbols:              %08X\n", (UINT)fileHeader->NumberOfSymbols);
+    printf("  SizeOfOptionalHeader:         %04X\n", (UINT)fileHeader->SizeOfOptionalHeader);
+    printf("  Characteristics:              %04X\n", (UINT)fileHeader->Characteristics);
 #define	X(f,s)	if (fileHeader->Characteristics & f) printf("    %s\n", s)
     X(IMAGE_FILE_RELOCS_STRIPPED, 	"RELOCS_STRIPPED");
     X(IMAGE_FILE_EXECUTABLE_IMAGE, 	"EXECUTABLE_IMAGE");
@@ -394,14 +392,14 @@ void dump_section(const IMAGE_SECTION_HEADER *sectHead, const char* strtable)
         else
 	    printf("  %-8.8s", sectHead->Name);
 	printf("   VirtSize: 0x%08x  VirtAddr:  0x%08x\n",
-               sectHead->Misc.VirtualSize, sectHead->VirtualAddress);
+               (UINT)sectHead->Misc.VirtualSize, (UINT)sectHead->VirtualAddress);
 	printf("    raw data offs:   0x%08x  raw data size: 0x%08x\n",
-	       sectHead->PointerToRawData, sectHead->SizeOfRawData);
+	       (UINT)sectHead->PointerToRawData, (UINT)sectHead->SizeOfRawData);
 	printf("    relocation offs: 0x%08x  relocations:   0x%08x\n",
-	       sectHead->PointerToRelocations, sectHead->NumberOfRelocations);
+	       (UINT)sectHead->PointerToRelocations, (UINT)sectHead->NumberOfRelocations);
 	printf("    line # offs:     %-8u  line #'s:      %-8u\n",
-	       sectHead->PointerToLinenumbers, sectHead->NumberOfLinenumbers);
-	printf("    characteristics: 0x%08x\n", sectHead->Characteristics);
+	       (UINT)sectHead->PointerToLinenumbers, (UINT)sectHead->NumberOfLinenumbers);
+	printf("    characteristics: 0x%08x\n", (UINT)sectHead->Characteristics);
 	printf("    ");
 #define X(b,s)	if (sectHead->Characteristics & b) printf("  " s)
 /* #define IMAGE_SCN_TYPE_REG			0x00000000 - Reserved */
@@ -600,27 +598,26 @@ static	void	dump_dir_exported_functions(void)
 {
     unsigned int size = 0;
     const IMAGE_EXPORT_DIRECTORY*exportDir = get_dir_and_size(IMAGE_FILE_EXPORT_DIRECTORY, &size);
-    unsigned int		i;
-    const DWORD*		pFunc;
-    const DWORD*		pName;
-    const WORD* 		pOrdl;
-    DWORD*		        funcs;
+    UINT i, *funcs;
+    const UINT *pFunc;
+    const UINT *pName;
+    const WORD *pOrdl;
 
     if (!exportDir) return;
 
     printf("Exports table:\n");
     printf("\n");
     printf("  Name:            %s\n", (const char*)RVA(exportDir->Name, sizeof(DWORD)));
-    printf("  Characteristics: %08x\n", exportDir->Characteristics);
+    printf("  Characteristics: %08x\n", (UINT)exportDir->Characteristics);
     printf("  TimeDateStamp:   %08X %s\n",
-	   exportDir->TimeDateStamp, get_time_str(exportDir->TimeDateStamp));
+           (UINT)exportDir->TimeDateStamp, get_time_str(exportDir->TimeDateStamp));
     printf("  Version:         %u.%02u\n", exportDir->MajorVersion, exportDir->MinorVersion);
-    printf("  Ordinal base:    %u\n", exportDir->Base);
-    printf("  # of functions:  %u\n", exportDir->NumberOfFunctions);
-    printf("  # of Names:      %u\n", exportDir->NumberOfNames);
-    printf("Addresses of functions: %08X\n", exportDir->AddressOfFunctions);
-    printf("Addresses of name ordinals: %08X\n", exportDir->AddressOfNameOrdinals);
-    printf("Addresses of names: %08X\n", exportDir->AddressOfNames);
+    printf("  Ordinal base:    %u\n", (UINT)exportDir->Base);
+    printf("  # of functions:  %u\n", (UINT)exportDir->NumberOfFunctions);
+    printf("  # of Names:      %u\n", (UINT)exportDir->NumberOfNames);
+    printf("Addresses of functions: %08X\n", (UINT)exportDir->AddressOfFunctions);
+    printf("Addresses of name ordinals: %08X\n", (UINT)exportDir->AddressOfNameOrdinals);
+    printf("Addresses of names: %08X\n", (UINT)exportDir->AddressOfNames);
     printf("\n");
     printf("  Entry Pt  Ordn  Name\n");
 
@@ -637,7 +634,7 @@ static	void	dump_dir_exported_functions(void)
     for (i = 0; i < exportDir->NumberOfFunctions; i++)
     {
         if (!pFunc[i]) continue;
-        printf("  %08X %5u ", pFunc[i], exportDir->Base + i);
+        printf("  %08X %5u ", pFunc[i], (UINT)exportDir->Base + i);
         if (funcs[i])
             printf("%s", get_symbol_str((const char*)RVA(funcs[i], sizeof(DWORD))));
         else
@@ -656,53 +653,53 @@ static	void	dump_dir_exported_functions(void)
 
 struct runtime_function_x86_64
 {
-    DWORD BeginAddress;
-    DWORD EndAddress;
-    DWORD UnwindData;
+    UINT BeginAddress;
+    UINT EndAddress;
+    UINT UnwindData;
 };
 
 struct runtime_function_armnt
 {
-    DWORD BeginAddress;
+    UINT BeginAddress;
     union {
-        DWORD UnwindData;
+        UINT UnwindData;
         struct {
-            DWORD Flag : 2;
-            DWORD FunctionLength : 11;
-            DWORD Ret : 2;
-            DWORD H : 1;
-            DWORD Reg : 3;
-            DWORD R : 1;
-            DWORD L : 1;
-            DWORD C : 1;
-            DWORD StackAdjust : 10;
-        } DUMMYSTRUCTNAME;
-    } DUMMYUNIONNAME;
+            UINT Flag : 2;
+            UINT FunctionLength : 11;
+            UINT Ret : 2;
+            UINT H : 1;
+            UINT Reg : 3;
+            UINT R : 1;
+            UINT L : 1;
+            UINT C : 1;
+            UINT StackAdjust : 10;
+        };
+    };
 };
 
 struct runtime_function_arm64
 {
-    DWORD BeginAddress;
+    UINT BeginAddress;
     union
     {
-        DWORD UnwindData;
+        UINT UnwindData;
         struct
         {
-            DWORD Flag : 2;
-            DWORD FunctionLength : 11;
-            DWORD RegF : 3;
-            DWORD RegI : 4;
-            DWORD H : 1;
-            DWORD CR : 2;
-            DWORD FrameSize : 9;
-        } DUMMYSTRUCTNAME;
-    } DUMMYUNIONNAME;
+            UINT Flag : 2;
+            UINT FunctionLength : 11;
+            UINT RegF : 3;
+            UINT RegI : 4;
+            UINT H : 1;
+            UINT CR : 2;
+            UINT FrameSize : 9;
+        };
+    };
 };
 
 union handler_data
 {
     struct runtime_function_x86_64 chain;
-    DWORD handler;
+    UINT handler;
 };
 
 struct opcode
@@ -726,13 +723,13 @@ struct unwind_info_x86_64
 
 struct unwind_info_armnt
 {
-    DWORD function_length : 18;
-    DWORD version : 2;
-    DWORD x : 1;
-    DWORD e : 1;
-    DWORD f : 1;
-    DWORD count : 5;
-    DWORD words : 4;
+    UINT function_length : 18;
+    UINT version : 2;
+    UINT x : 1;
+    UINT e : 1;
+    UINT f : 1;
+    UINT count : 5;
+    UINT words : 4;
 };
 
 struct unwind_info_ext_armnt
@@ -744,10 +741,10 @@ struct unwind_info_ext_armnt
 
 struct unwind_info_epilogue_armnt
 {
-    DWORD offset : 18;
-    DWORD res : 2;
-    DWORD cond : 4;
-    DWORD index : 8;
+    UINT offset : 18;
+    UINT res : 2;
+    UINT cond : 4;
+    UINT index : 8;
 };
 
 #define UWOP_PUSH_NONVOL     0
@@ -810,7 +807,7 @@ static void dump_x86_64_unwind_info( const struct runtime_function_x86_64 *funct
         case UWOP_ALLOC_LARGE:
             if (info->opcodes[i].info)
             {
-                count = *(const DWORD *)&info->opcodes[i+1];
+                count = *(const UINT *)&info->opcodes[i+1];
                 i += 2;
             }
             else
@@ -834,7 +831,7 @@ static void dump_x86_64_unwind_info( const struct runtime_function_x86_64 *funct
             i++;
             break;
         case UWOP_SAVE_NONVOL_FAR:
-            count = *(const DWORD *)&info->opcodes[i+1];
+            count = *(const UINT *)&info->opcodes[i+1];
             printf( "mov %%%s,0x%x(%%rsp)\n", reg_names[info->opcodes[i].info], count );
             i += 2;
             break;
@@ -844,7 +841,7 @@ static void dump_x86_64_unwind_info( const struct runtime_function_x86_64 *funct
             i++;
             break;
         case UWOP_SAVE_XMM128_FAR:
-            count = *(const DWORD *)&info->opcodes[i+1];
+            count = *(const UINT *)&info->opcodes[i+1];
             printf( "movaps %%xmm%u,0x%x(%%rsp)\n", info->opcodes[i].info, count );
             i += 2;
             break;
@@ -866,7 +863,7 @@ static void dump_x86_64_unwind_info( const struct runtime_function_x86_64 *funct
     }
     if (info->flags & (UNW_FLAG_EHANDLER | UNW_FLAG_UHANDLER))
         printf( "    handler %08x data at %08x\n", handler_data->handler,
-                (ULONG)(function->UnwindData + (const char *)(&handler_data->handler + 1) - (const char *)info ));
+                (UINT)(function->UnwindData + (const char *)(&handler_data->handler + 1) - (const char *)info ));
 }
 
 static const BYTE armnt_code_lengths[256] =
@@ -889,37 +886,37 @@ static void dump_armnt_unwind_info( const struct runtime_function_armnt *fnc )
     unsigned int rva;
     WORD i, count = 0, words = 0;
 
-    if (fnc->u.s.Flag)
+    if (fnc->Flag)
     {
         char intregs[32] = {0}, intregspop[32] = {0}, vfpregs[32] = {0};
-        WORD pf = 0, ef = 0, fpoffset = 0, stack = fnc->u.s.StackAdjust;
+        WORD pf = 0, ef = 0, fpoffset = 0, stack = fnc->StackAdjust;
 
         printf( "\nFunction %08x-%08x:\n", fnc->BeginAddress & ~1,
-                (fnc->BeginAddress & ~1) + fnc->u.s.FunctionLength * 2 );
-        printf( "    Flag           %x\n", fnc->u.s.Flag );
-        printf( "    FunctionLength %x\n", fnc->u.s.FunctionLength );
-        printf( "    Ret            %x\n", fnc->u.s.Ret );
-        printf( "    H              %x\n", fnc->u.s.H );
-        printf( "    Reg            %x\n", fnc->u.s.Reg );
-        printf( "    R              %x\n", fnc->u.s.R );
-        printf( "    L              %x\n", fnc->u.s.L );
-        printf( "    C              %x\n", fnc->u.s.C );
-        printf( "    StackAdjust    %x\n", fnc->u.s.StackAdjust );
+                (fnc->BeginAddress & ~1) + fnc->FunctionLength * 2 );
+        printf( "    Flag           %x\n", fnc->Flag );
+        printf( "    FunctionLength %x\n", fnc->FunctionLength );
+        printf( "    Ret            %x\n", fnc->Ret );
+        printf( "    H              %x\n", fnc->H );
+        printf( "    Reg            %x\n", fnc->Reg );
+        printf( "    R              %x\n", fnc->R );
+        printf( "    L              %x\n", fnc->L );
+        printf( "    C              %x\n", fnc->C );
+        printf( "    StackAdjust    %x\n", fnc->StackAdjust );
 
-        if (fnc->u.s.StackAdjust >= 0x03f4)
+        if (fnc->StackAdjust >= 0x03f4)
         {
-            pf = fnc->u.s.StackAdjust & 0x04;
-            ef = fnc->u.s.StackAdjust & 0x08;
-            stack = (fnc->u.s.StackAdjust & 3) + 1;
+            pf = fnc->StackAdjust & 0x04;
+            ef = fnc->StackAdjust & 0x08;
+            stack = (fnc->StackAdjust & 3) + 1;
         }
 
-        if (!fnc->u.s.R || pf)
+        if (!fnc->R || pf)
         {
-            int first = 4, last = fnc->u.s.Reg + 4;
+            int first = 4, last = fnc->Reg + 4;
             if (pf)
             {
-                first = (~fnc->u.s.StackAdjust) & 3;
-                if (fnc->u.s.R)
+                first = (~fnc->StackAdjust) & 3;
+                if (fnc->R)
                     last = 3;
             }
             if (first == last)
@@ -929,13 +926,13 @@ static void dump_armnt_unwind_info( const struct runtime_function_armnt *fnc )
             fpoffset = last + 1 - first;
         }
 
-        if (!fnc->u.s.R || ef)
+        if (!fnc->R || ef)
         {
-            int first = 4, last = fnc->u.s.Reg + 4;
+            int first = 4, last = fnc->Reg + 4;
             if (ef)
             {
-                first = (~fnc->u.s.StackAdjust) & 3;
-                if (fnc->u.s.R)
+                first = (~fnc->StackAdjust) & 3;
+                if (fnc->R)
                     last = 3;
             }
             if (first == last)
@@ -944,7 +941,7 @@ static void dump_armnt_unwind_info( const struct runtime_function_armnt *fnc )
                 sprintf(intregspop, "r%u-r%u", first, last);
         }
 
-        if (fnc->u.s.C)
+        if (fnc->C)
         {
             if (intregs[0])
                 strcat(intregs, ", ");
@@ -953,82 +950,82 @@ static void dump_armnt_unwind_info( const struct runtime_function_armnt *fnc )
             strcat(intregs, "r11");
             strcat(intregspop, "r11");
         }
-        if (fnc->u.s.L)
+        if (fnc->L)
         {
             if (intregs[0])
                 strcat(intregs, ", ");
             strcat(intregs, "lr");
 
-            if (intregspop[0] && (fnc->u.s.Ret != 0 || !fnc->u.s.H))
+            if (intregspop[0] && (fnc->Ret != 0 || !fnc->H))
                 strcat(intregspop, ", ");
-            if (fnc->u.s.Ret != 0)
+            if (fnc->Ret != 0)
                 strcat(intregspop, "lr");
-            else if (!fnc->u.s.H)
+            else if (!fnc->H)
                 strcat(intregspop, "pc");
         }
 
-        if (fnc->u.s.R)
+        if (fnc->R)
         {
-            if (fnc->u.s.Reg)
-                sprintf(vfpregs, "d8-d%u", fnc->u.s.Reg + 8);
+            if (fnc->Reg)
+                sprintf(vfpregs, "d8-d%u", fnc->Reg + 8);
             else
                 strcpy(vfpregs, "d8");
         }
 
-        if (fnc->u.s.Flag == 1) {
-            if (fnc->u.s.H)
+        if (fnc->Flag == 1) {
+            if (fnc->H)
                 printf( "    Unwind Code\tpush {r0-r3}\n" );
 
             if (intregs[0])
                 printf( "    Unwind Code\tpush {%s}\n", intregs );
 
-            if (fnc->u.s.C && fpoffset == 0)
+            if (fnc->C && fpoffset == 0)
                 printf( "    Unwind Code\tmov r11, sp\n" );
-            else if (fnc->u.s.C)
+            else if (fnc->C)
                 printf( "    Unwind Code\tadd r11, sp, #%d\n", fpoffset * 4 );
 
-            if (fnc->u.s.R && fnc->u.s.Reg != 0x07)
+            if (fnc->R && fnc->Reg != 0x07)
                 printf( "    Unwind Code\tvpush {%s}\n", vfpregs );
 
             if (stack && !pf)
                 printf( "    Unwind Code\tsub sp, sp, #%d\n", stack * 4 );
         }
 
-        if (fnc->u.s.Ret == 3)
+        if (fnc->Ret == 3)
             return;
         printf( "Epilogue:\n" );
 
         if (stack && !ef)
             printf( "    Unwind Code\tadd sp, sp, #%d\n", stack * 4 );
 
-        if (fnc->u.s.R && fnc->u.s.Reg != 0x07)
+        if (fnc->R && fnc->Reg != 0x07)
             printf( "    Unwind Code\tvpop {%s}\n", vfpregs );
 
         if (intregspop[0])
             printf( "    Unwind Code\tpop {%s}\n", intregspop );
 
-        if (fnc->u.s.H && !(fnc->u.s.L && fnc->u.s.Ret == 0))
+        if (fnc->H && !(fnc->L && fnc->Ret == 0))
             printf( "    Unwind Code\tadd sp, sp, #16\n" );
-        else if (fnc->u.s.H && (fnc->u.s.L && fnc->u.s.Ret == 0))
+        else if (fnc->H && (fnc->L && fnc->Ret == 0))
             printf( "    Unwind Code\tldr pc, [sp], #20\n" );
 
-        if (fnc->u.s.Ret == 1)
+        if (fnc->Ret == 1)
             printf( "    Unwind Code\tbx <reg>\n" );
-        else if (fnc->u.s.Ret == 2)
+        else if (fnc->Ret == 2)
             printf( "    Unwind Code\tb <address>\n" );
 
         return;
     }
 
-    info = RVA( fnc->u.UnwindData, sizeof(*info) );
-    rva = fnc->u.UnwindData + sizeof(*info);
+    info = RVA( fnc->UnwindData, sizeof(*info) );
+    rva = fnc->UnwindData + sizeof(*info);
     count = info->count;
     words = info->words;
 
     printf( "\nFunction %08x-%08x:\n", fnc->BeginAddress & ~1,
             (fnc->BeginAddress & ~1) + info->function_length * 2 );
-    printf( "  unwind info at %08x\n", fnc->u.UnwindData );
-    printf( "    Flag           %x\n", fnc->u.s.Flag );
+    printf( "  unwind info at %08x\n", fnc->UnwindData );
+    printf( "    Flag           %x\n", fnc->Flag );
     printf( "    FunctionLength %x\n", info->function_length );
     printf( "    Version        %x\n", info->version );
     printf( "    X              %x\n", info->x );
@@ -1281,12 +1278,12 @@ static void dump_armnt_unwind_info( const struct runtime_function_armnt *fnc )
 
 struct unwind_info_arm64
 {
-    DWORD function_length : 18;
-    DWORD version : 2;
-    DWORD x : 1;
-    DWORD e : 1;
-    DWORD epilog : 5;
-    DWORD codes : 5;
+    UINT function_length : 18;
+    UINT version : 2;
+    UINT x : 1;
+    UINT e : 1;
+    UINT epilog : 5;
+    UINT codes : 5;
 };
 
 struct unwind_info_ext_arm64
@@ -1298,9 +1295,9 @@ struct unwind_info_ext_arm64
 
 struct unwind_info_epilog_arm64
 {
-    DWORD offset : 18;
-    DWORD res : 4;
-    DWORD index : 10;
+    UINT offset : 18;
+    UINT res : 4;
+    UINT index : 10;
 };
 
 static const BYTE code_lengths[256] =
@@ -1462,15 +1459,15 @@ static void dump_arm64_codes( const BYTE *ptr, unsigned int count )
 
 static void dump_arm64_packed_info( const struct runtime_function_arm64 *func )
 {
-    int i, pos = 0, intsz = func->u.s.RegI * 8, fpsz = func->u.s.RegF * 8, savesz, locsz;
+    int i, pos = 0, intsz = func->RegI * 8, fpsz = func->RegF * 8, savesz, locsz;
 
-    if (func->u.s.CR == 1) intsz += 8;
-    if (func->u.s.RegF) fpsz += 8;
+    if (func->CR == 1) intsz += 8;
+    if (func->RegF) fpsz += 8;
 
-    savesz = ((intsz + fpsz + 8 * 8 * func->u.s.H) + 0xf) & ~0xf;
-    locsz = func->u.s.FrameSize * 16 - savesz;
+    savesz = ((intsz + fpsz + 8 * 8 * func->H) + 0xf) & ~0xf;
+    locsz = func->FrameSize * 16 - savesz;
 
-    switch (func->u.s.CR)
+    switch (func->CR)
     {
     case 3:
         printf( "    %04x:  mov x29,sp\n", pos++ );
@@ -1495,7 +1492,7 @@ static void dump_arm64_packed_info( const struct runtime_function_arm64 *func )
         break;
     }
 
-    if (func->u.s.H)
+    if (func->H)
     {
         printf( "    %04x:  stp x6,x7,[sp,#%#x]\n", pos++, intsz + fpsz + 48 );
         printf( "    %04x:  stp x4,x5,[sp,#%#x]\n", pos++, intsz + fpsz + 32 );
@@ -1503,11 +1500,11 @@ static void dump_arm64_packed_info( const struct runtime_function_arm64 *func )
         printf( "    %04x:  stp x0,x1,[sp,#%#x]\n", pos++, intsz + fpsz );
     }
 
-    if (func->u.s.RegF)
+    if (func->RegF)
     {
-        if (func->u.s.RegF % 2 == 0)
-            printf( "    %04x:  str d%u,[sp,#%#x]\n", pos++, 8 + func->u.s.RegF, intsz + fpsz - 8 );
-        for (i = (func->u.s.RegF - 1)/ 2; i >= 0; i--)
+        if (func->RegF % 2 == 0)
+            printf( "    %04x:  str d%u,[sp,#%#x]\n", pos++, 8 + func->RegF, intsz + fpsz - 8 );
+        for (i = (func->RegF - 1)/ 2; i >= 0; i--)
         {
             if (!i && !intsz)
                 printf( "    %04x:  stp d8,d9,[sp,-#%#x]!\n", pos++, savesz );
@@ -1516,30 +1513,30 @@ static void dump_arm64_packed_info( const struct runtime_function_arm64 *func )
         }
     }
 
-    switch (func->u.s.RegI)
+    switch (func->RegI)
     {
     case 0:
-        if (func->u.s.CR == 1)
+        if (func->CR == 1)
             printf( "    %04x:  str lr,[sp,-#%#x]!\n", pos++, savesz );
         break;
     case 1:
-        if (func->u.s.CR == 1)
+        if (func->CR == 1)
             printf( "    %04x:  stp x19,lr,[sp,-#%#x]!\n", pos++, savesz );
         else
             printf( "    %04x:  str x19,[sp,-#%#x]!\n", pos++, savesz );
         break;
     default:
-        if (func->u.s.RegI % 2)
+        if (func->RegI % 2)
         {
-            if (func->u.s.CR == 1)
-                printf( "    %04x:  stp x%u,lr,[sp,#%#x]\n", pos++, 18 + func->u.s.RegI, 8 * func->u.s.RegI - 8 );
+            if (func->CR == 1)
+                printf( "    %04x:  stp x%u,lr,[sp,#%#x]\n", pos++, 18 + func->RegI, 8 * func->RegI - 8 );
             else
-                printf( "    %04x:  str x%u,[sp,#%#x]\n", pos++, 18 + func->u.s.RegI, 8 * func->u.s.RegI - 8 );
+                printf( "    %04x:  str x%u,[sp,#%#x]\n", pos++, 18 + func->RegI, 8 * func->RegI - 8 );
         }
-        else if (func->u.s.CR == 1)
+        else if (func->CR == 1)
             printf( "    %04x:  str lr,[sp,#%#x]\n", pos++, intsz - 8 );
 
-        for (i = func->u.s.RegI / 2 - 1; i >= 0; i--)
+        for (i = func->RegI / 2 - 1; i >= 0; i--)
             if (i)
                 printf( "    %04x:  stp x%u,x%u,[sp,#%#x]\n", pos++, 19 + 2 * i, 20 + 2 * i, 16 * i );
             else
@@ -1557,18 +1554,18 @@ static void dump_arm64_unwind_info( const struct runtime_function_arm64 *func )
     const BYTE *ptr;
     unsigned int i, rva, codes, epilogs;
 
-    if (func->u.s.Flag)
+    if (func->Flag)
     {
         printf( "\nFunction %08x-%08x:\n", func->BeginAddress,
-                func->BeginAddress + func->u.s.FunctionLength * 4 );
+                func->BeginAddress + func->FunctionLength * 4 );
         printf( "    len=%#x flag=%x regF=%u regI=%u H=%u CR=%u frame=%x\n",
-                func->u.s.FunctionLength, func->u.s.Flag, func->u.s.RegF, func->u.s.RegI,
-                func->u.s.H, func->u.s.CR, func->u.s.FrameSize );
+                func->FunctionLength, func->Flag, func->RegF, func->RegI,
+                func->H, func->CR, func->FrameSize );
         dump_arm64_packed_info( func );
         return;
     }
 
-    rva = func->u.UnwindData;
+    rva = func->UnwindData;
     info = RVA( rva, sizeof(*info) );
     rva += sizeof(*info);
     epilogs = info->epilog;
@@ -1601,7 +1598,7 @@ static void dump_arm64_unwind_info( const struct runtime_function_arm64 *func )
     rva += codes * 4;
     if (info->x)
     {
-        const DWORD *handler = RVA( rva, sizeof(*handler) );
+        const UINT *handler = RVA( rva, sizeof(*handler) );
         rva += sizeof(*handler);
         printf( "    handler: %08x data %08x\n", *handler, rva );
     }
@@ -1641,14 +1638,14 @@ static void dump_dir_exceptions(void)
 }
 
 
-static void dump_image_thunk_data64(const IMAGE_THUNK_DATA64 *il, DWORD thunk_rva)
+static void dump_image_thunk_data64(const IMAGE_THUNK_DATA64 *il, UINT thunk_rva)
 {
     /* FIXME: This does not properly handle large images */
     const IMAGE_IMPORT_BY_NAME* iibn;
     for (; il->u1.Ordinal; il++, thunk_rva += sizeof(LONGLONG))
     {
         if (IMAGE_SNAP_BY_ORDINAL64(il->u1.Ordinal))
-            printf("  %08x  %4u  <by ordinal>\n", thunk_rva, (DWORD)IMAGE_ORDINAL64(il->u1.Ordinal));
+            printf("  %08x  %4u  <by ordinal>\n", thunk_rva, (UINT)IMAGE_ORDINAL64(il->u1.Ordinal));
         else
         {
             iibn = RVA((DWORD)il->u1.AddressOfData, sizeof(DWORD));
@@ -1660,13 +1657,13 @@ static void dump_image_thunk_data64(const IMAGE_THUNK_DATA64 *il, DWORD thunk_rv
     }
 }
 
-static void dump_image_thunk_data32(const IMAGE_THUNK_DATA32 *il, int offset, DWORD thunk_rva)
+static void dump_image_thunk_data32(const IMAGE_THUNK_DATA32 *il, int offset, UINT thunk_rva)
 {
     const IMAGE_IMPORT_BY_NAME* iibn;
-    for (; il->u1.Ordinal; il++, thunk_rva += sizeof(DWORD))
+    for (; il->u1.Ordinal; il++, thunk_rva += sizeof(UINT))
     {
         if (IMAGE_SNAP_BY_ORDINAL32(il->u1.Ordinal))
-            printf("  %08x  %4u  <by ordinal>\n", thunk_rva, IMAGE_ORDINAL32(il->u1.Ordinal));
+            printf("  %08x  %4u  <by ordinal>\n", thunk_rva, (UINT)IMAGE_ORDINAL32(il->u1.Ordinal));
         else
         {
             iibn = RVA((DWORD)il->u1.AddressOfData - offset, sizeof(DWORD));
@@ -1694,16 +1691,16 @@ static	void	dump_dir_imported_functions(void)
         if (!importDesc->Name || !importDesc->FirstThunk) break;
 
 	printf("  offset %08lx %s\n", Offset(importDesc), (const char*)RVA(importDesc->Name, sizeof(DWORD)));
-	printf("  Hint/Name Table: %08X\n", (DWORD)importDesc->u.OriginalFirstThunk);
+	printf("  Hint/Name Table: %08X\n", (UINT)importDesc->OriginalFirstThunk);
 	printf("  TimeDateStamp:   %08X (%s)\n",
-	       importDesc->TimeDateStamp, get_time_str(importDesc->TimeDateStamp));
-	printf("  ForwarderChain:  %08X\n", importDesc->ForwarderChain);
-	printf("  First thunk RVA: %08X\n", (DWORD)importDesc->FirstThunk);
+	       (UINT)importDesc->TimeDateStamp, get_time_str(importDesc->TimeDateStamp));
+	printf("  ForwarderChain:  %08X\n", (UINT)importDesc->ForwarderChain);
+	printf("  First thunk RVA: %08X\n", (UINT)importDesc->FirstThunk);
 
 	printf("   Thunk    Ordn  Name\n");
 
-	il = (importDesc->u.OriginalFirstThunk != 0) ?
-	    RVA((DWORD)importDesc->u.OriginalFirstThunk, sizeof(DWORD)) :
+	il = (importDesc->OriginalFirstThunk != 0) ?
+	    RVA((DWORD)importDesc->OriginalFirstThunk, sizeof(DWORD)) :
 	    RVA((DWORD)importDesc->FirstThunk, sizeof(DWORD));
 
 	if (!il)
@@ -1783,12 +1780,12 @@ static void dump_dir_delay_imported_functions(void)
 
         if (!importDesc->DllNameRVA || !importDesc->ImportAddressTableRVA || !importDesc->ImportNameTableRVA) break;
 
-        printf("  grAttrs %08x offset %08lx %s\n", importDesc->Attributes.AllAttributes, Offset(importDesc),
-               (const char *)RVA(importDesc->DllNameRVA - offset, sizeof(DWORD)));
-        printf("  Hint/Name Table: %08x\n", importDesc->ImportNameTableRVA);
-        printf("  Address Table:   %08x\n", importDesc->ImportAddressTableRVA);
+        printf("  grAttrs %08x offset %08lx %s\n", (UINT)importDesc->Attributes.AllAttributes,
+               Offset(importDesc), (const char *)RVA(importDesc->DllNameRVA - offset, sizeof(DWORD)));
+        printf("  Hint/Name Table: %08x\n", (UINT)importDesc->ImportNameTableRVA);
+        printf("  Address Table:   %08x\n", (UINT)importDesc->ImportAddressTableRVA);
         printf("  TimeDateStamp:   %08X (%s)\n",
-               importDesc->TimeDateStamp, get_time_str(importDesc->TimeDateStamp));
+               (UINT)importDesc->TimeDateStamp, get_time_str(importDesc->TimeDateStamp));
 
         printf("   Thunk    Ordn  Name\n");
 
@@ -1814,9 +1811,9 @@ static	void	dump_dir_debug_dir(const IMAGE_DEBUG_DIRECTORY* idd, int idx)
     const	char*	str;
 
     printf("Directory %02u\n", idx + 1);
-    printf("  Characteristics:   %08X\n", idd->Characteristics);
+    printf("  Characteristics:   %08X\n", (UINT)idd->Characteristics);
     printf("  TimeDateStamp:     %08X %s\n",
-	   idd->TimeDateStamp, get_time_str(idd->TimeDateStamp));
+	   (UINT)idd->TimeDateStamp, get_time_str(idd->TimeDateStamp));
     printf("  Version            %u.%02u\n", idd->MajorVersion, idd->MinorVersion);
     switch (idd->Type)
     {
@@ -1839,10 +1836,10 @@ static	void	dump_dir_debug_dir(const IMAGE_DEBUG_DIRECTORY* idd, int idx)
     case IMAGE_DEBUG_TYPE_MPX:         str = "MPX";        break;
     case IMAGE_DEBUG_TYPE_REPRO:       str = "REPRO";      break;
     }
-    printf("  Type:              %u (%s)\n", idd->Type, str);
-    printf("  SizeOfData:        %u\n", idd->SizeOfData);
-    printf("  AddressOfRawData:  %08X\n", idd->AddressOfRawData);
-    printf("  PointerToRawData:  %08X\n", idd->PointerToRawData);
+    printf("  Type:              %u (%s)\n", (UINT)idd->Type, str);
+    printf("  SizeOfData:        %u\n", (UINT)idd->SizeOfData);
+    printf("  AddressOfRawData:  %08X\n", (UINT)idd->AddressOfRawData);
+    printf("  PointerToRawData:  %08X\n", (UINT)idd->PointerToRawData);
 
     switch (idd->Type)
     {
@@ -1863,9 +1860,8 @@ static	void	dump_dir_debug_dir(const IMAGE_DEBUG_DIRECTORY* idd, int idx)
 	const IMAGE_DEBUG_MISC* misc = PRD(idd->PointerToRawData, idd->SizeOfData);
 	if (!misc) {printf("Can't get misc debug information\n"); break;}
 	printf("    DataType:          %u (%s)\n",
-	       misc->DataType,
-	       (misc->DataType == IMAGE_DEBUG_MISC_EXENAME) ? "Exe name" : "Unknown");
-	printf("    Length:            %u\n", misc->Length);
+	       (UINT)misc->DataType, (misc->DataType == IMAGE_DEBUG_MISC_EXENAME) ? "Exe name" : "Unknown");
+	printf("    Length:            %u\n", (UINT)misc->Length);
 	printf("    Unicode:           %s\n", misc->Unicode ? "Yes" : "No");
 	printf("    Data:              %s\n", misc->Data);
     }
@@ -1893,7 +1889,7 @@ static void	dump_dir_debug(void)
     printf("\n");
 }
 
-static inline void print_clrflags(const char *title, DWORD value)
+static inline void print_clrflags(const char *title, UINT value)
 {
     printf("  %-34s 0x%X\n", title, value);
 #define X(f,s) if (value & f) printf("    %s\n", s)
@@ -1907,7 +1903,7 @@ static inline void print_clrflags(const char *title, DWORD value)
 
 static inline void print_clrdirectory(const char *title, const IMAGE_DATA_DIRECTORY *dir)
 {
-    printf("  %-23s rva: 0x%-8x  size: 0x%-8x\n", title, dir->VirtualAddress, dir->Size);
+    printf("  %-23s rva: 0x%-8x  size: 0x%-8x\n", title, (UINT)dir->VirtualAddress, (UINT)dir->Size);
 }
 
 static void dump_dir_clr_header(void)
@@ -1921,7 +1917,7 @@ static void dump_dir_clr_header(void)
     print_dword( "Header Size", dir->cb );
     print_ver( "Required runtime version", dir->MajorRuntimeVersion, dir->MinorRuntimeVersion );
     print_clrflags( "Flags", dir->Flags );
-    print_dword( "EntryPointToken", dir->u.EntryPointToken );
+    print_dword( "EntryPointToken", dir->EntryPointToken );
     printf("\n");
     printf( "CLR Data Directory\n" );
     print_clrdirectory( "MetaData", &dir->MetaData );
@@ -1965,7 +1961,7 @@ static void dump_dir_reloc(void)
     printf( "Relocations\n" );
     while (rel < end - 1 && rel->SizeOfBlock)
     {
-        printf( "  Page %x\n", rel->VirtualAddress );
+        printf( "  Page %x\n", (UINT)rel->VirtualAddress );
         relocs = (const USHORT *)(rel + 1);
         i = (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT);
         while (i--)
@@ -1983,7 +1979,7 @@ static void dump_dir_reloc(void)
 static void dump_dir_tls(void)
 {
     IMAGE_TLS_DIRECTORY64 dir;
-    const DWORD *callbacks;
+    const UINT *callbacks;
     const IMAGE_TLS_DIRECTORY32 *pdir = get_dir(IMAGE_FILE_THREAD_LOCAL_STORAGE);
 
     if (!pdir) return;
@@ -2003,19 +1999,19 @@ static void dump_dir_tls(void)
     /* FIXME: This does not properly handle large images */
     printf( "Thread Local Storage\n" );
     printf( "  Raw data        %08x-%08x (data size %x zero fill size %x)\n",
-            (DWORD)dir.StartAddressOfRawData, (DWORD)dir.EndAddressOfRawData,
-            (DWORD)(dir.EndAddressOfRawData - dir.StartAddressOfRawData),
-            (DWORD)dir.SizeOfZeroFill );
-    printf( "  Index address   %08x\n", (DWORD)dir.AddressOfIndex );
-    printf( "  Characteristics %08x\n", dir.Characteristics );
-    printf( "  Callbacks       %08x -> {", (DWORD)dir.AddressOfCallBacks );
+            (UINT)dir.StartAddressOfRawData, (UINT)dir.EndAddressOfRawData,
+            (UINT)(dir.EndAddressOfRawData - dir.StartAddressOfRawData),
+            (UINT)dir.SizeOfZeroFill );
+    printf( "  Index address   %08x\n", (UINT)dir.AddressOfIndex );
+    printf( "  Characteristics %08x\n", (UINT)dir.Characteristics );
+    printf( "  Callbacks       %08x -> {", (UINT)dir.AddressOfCallBacks );
     if (dir.AddressOfCallBacks)
     {
-        DWORD   addr = (DWORD)dir.AddressOfCallBacks - PE_nt_headers->OptionalHeader.ImageBase;
-        while ((callbacks = RVA(addr, sizeof(DWORD))) && *callbacks)
+        UINT   addr = (UINT)dir.AddressOfCallBacks - PE_nt_headers->OptionalHeader.ImageBase;
+        while ((callbacks = RVA(addr, sizeof(UINT))) && *callbacks)
         {
             printf( " %08x", *callbacks );
-            addr += sizeof(DWORD);
+            addr += sizeof(UINT);
         }
     }
     printf(" }\n\n");
@@ -2049,13 +2045,13 @@ void	dbg_dump(void)
 	    separateDebugHead->Machine, get_machine_str(separateDebugHead->Machine));
     printf ("Characteristics:    0x%04X\n", separateDebugHead->Characteristics);
     printf ("TimeDateStamp:      0x%08X (%s)\n",
-	    separateDebugHead->TimeDateStamp, get_time_str(separateDebugHead->TimeDateStamp));
-    printf ("CheckSum:           0x%08X\n", separateDebugHead->CheckSum);
-    printf ("ImageBase:          0x%08X\n", separateDebugHead->ImageBase);
-    printf ("SizeOfImage:        0x%08X\n", separateDebugHead->SizeOfImage);
-    printf ("NumberOfSections:   0x%08X\n", separateDebugHead->NumberOfSections);
-    printf ("ExportedNamesSize:  0x%08X\n", separateDebugHead->ExportedNamesSize);
-    printf ("DebugDirectorySize: 0x%08X\n", separateDebugHead->DebugDirectorySize);
+	    (UINT)separateDebugHead->TimeDateStamp, get_time_str(separateDebugHead->TimeDateStamp));
+    printf ("CheckSum:           0x%08X\n", (UINT)separateDebugHead->CheckSum);
+    printf ("ImageBase:          0x%08X\n", (UINT)separateDebugHead->ImageBase);
+    printf ("SizeOfImage:        0x%08X\n", (UINT)separateDebugHead->SizeOfImage);
+    printf ("NumberOfSections:   0x%08X\n", (UINT)separateDebugHead->NumberOfSections);
+    printf ("ExportedNamesSize:  0x%08X\n", (UINT)separateDebugHead->ExportedNamesSize);
+    printf ("DebugDirectorySize: 0x%08X\n", (UINT)separateDebugHead->DebugDirectorySize);
 
     if (!PRD(sizeof(IMAGE_SEPARATE_DEBUG_HEADER),
 	     separateDebugHead->NumberOfSections * sizeof(IMAGE_SECTION_HEADER)))
@@ -2273,51 +2269,50 @@ static void dump_dir_resource(void)
     for (i = 0; i< root->NumberOfNamedEntries + root->NumberOfIdEntries; i++)
     {
         e1 = (const IMAGE_RESOURCE_DIRECTORY_ENTRY*)(root + 1) + i;
-        namedir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + e1->u2.s2.OffsetToDirectory);
+        namedir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + e1->OffsetToDirectory);
         for (j = 0; j < namedir->NumberOfNamedEntries + namedir->NumberOfIdEntries; j++)
         {
             e2 = (const IMAGE_RESOURCE_DIRECTORY_ENTRY*)(namedir + 1) + j;
-            langdir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + e2->u2.s2.OffsetToDirectory);
+            langdir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + e2->OffsetToDirectory);
             for (k = 0; k < langdir->NumberOfNamedEntries + langdir->NumberOfIdEntries; k++)
             {
                 e3 = (const IMAGE_RESOURCE_DIRECTORY_ENTRY*)(langdir + 1) + k;
 
                 printf( "\n  " );
-                if (e1->u.s.NameIsString)
+                if (e1->NameIsString)
                 {
-                    string = (const IMAGE_RESOURCE_DIR_STRING_U*)((const char *)root + e1->u.s.NameOffset);
+                    string = (const IMAGE_RESOURCE_DIR_STRING_U*)((const char *)root + e1->NameOffset);
                     dump_unicode_str( string->NameString, string->Length );
                 }
                 else
                 {
-                    const char *type = get_resource_type( e1->u.Id );
+                    const char *type = get_resource_type( e1->Id );
                     if (type) printf( "%s", type );
-                    else printf( "%04x", e1->u.Id );
+                    else printf( "%04x", e1->Id );
                 }
 
                 printf( " Name=" );
-                if (e2->u.s.NameIsString)
+                if (e2->NameIsString)
                 {
-                    string = (const IMAGE_RESOURCE_DIR_STRING_U*) ((const char *)root + e2->u.s.NameOffset);
+                    string = (const IMAGE_RESOURCE_DIR_STRING_U*) ((const char *)root + e2->NameOffset);
                     dump_unicode_str( string->NameString, string->Length );
                 }
                 else
-                    printf( "%04x", e2->u.Id );
+                    printf( "%04x", e2->Id );
 
-                printf( " Language=%04x:\n", e3->u.Id );
-                data = (const IMAGE_RESOURCE_DATA_ENTRY *)((const char *)root + e3->u2.OffsetToData);
-                if (e1->u.s.NameIsString)
+                printf( " Language=%04x:\n", e3->Id );
+                data = (const IMAGE_RESOURCE_DATA_ENTRY *)((const char *)root + e3->OffsetToData);
+                if (e1->NameIsString)
                 {
                     dump_data( RVA( data->OffsetToData, data->Size ), data->Size, "    " );
                 }
-                else switch(e1->u.Id)
+                else switch(e1->Id)
                 {
                 case 6:
-                    dump_string_data( RVA( data->OffsetToData, data->Size ), data->Size,                                      e2->u.Id, "    " );
+                    dump_string_data( RVA( data->OffsetToData, data->Size ), data->Size, e2->Id, "    " );
                     break;
                 case 11:
-                    dump_msgtable_data( RVA( data->OffsetToData, data->Size ), data->Size,
-                                        e2->u.Id, "    " );
+                    dump_msgtable_data( RVA( data->OffsetToData, data->Size ), data->Size, e2->Id, "    " );
                     break;
                 default:
                     dump_data( RVA( data->OffsetToData, data->Size ), data->Size, "    " );
@@ -2487,12 +2482,11 @@ static void dll_close (void)
 static	void	do_grab_sym( void )
 {
     const IMAGE_EXPORT_DIRECTORY*exportDir;
-    unsigned			i, j;
-    const DWORD*		pName;
-    const DWORD*		pFunc;
-    const WORD* 		pOrdl;
-    const char*			ptr;
-    DWORD*			map;
+    UINT i, j, *map;
+    const UINT *pName;
+    const UINT *pFunc;
+    const WORD *pOrdl;
+    const char *ptr;
 
     PE_nt_headers = get_nt_header();
     if (!(exportDir = get_dir(IMAGE_FILE_EXPORT_DIRECTORY))) return;
@@ -2530,7 +2524,7 @@ static	void	do_grab_sym( void )
 	    /* Ordinal only entry */
             sprintf (ordinal_text, "%s_%u",
 		      globals.forward_dll ? globals.forward_dll : OUTPUT_UC_DLL_NAME,
-		      exportDir->Base + i);
+                      (UINT)exportDir->Base + i);
 	    str_toupper(ordinal_text);
 	    dll_symbols[j].symbol = xstrdup(ordinal_text);
 	    assert(dll_symbols[j].symbol);
@@ -2543,7 +2537,8 @@ static	void	do_grab_sym( void )
 
     if (NORMAL)
 	printf("%u named symbols in DLL, %u total, %d unique (ordinal base = %d)\n",
-	       exportDir->NumberOfNames, exportDir->NumberOfFunctions, j, exportDir->Base);
+	       (UINT)exportDir->NumberOfNames, (UINT)exportDir->NumberOfFunctions,
+               j, (UINT)exportDir->Base);
 
     qsort( dll_symbols, j, sizeof(dll_symbol), symbol_cmp );
 

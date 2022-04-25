@@ -550,9 +550,11 @@ DECL_HANDLER(get_directory_entry)
             const struct unicode_str *type_name = &obj->ops->type->name;
             const WCHAR *name = get_object_name( obj, &name_len );
 
-            if (name_len + type_name->len <= get_reply_max_size())
+            reply->total_len = name_len + type_name->len;
+
+            if (reply->total_len <= get_reply_max_size())
             {
-                void *ptr = set_reply_data_size( name_len + type_name->len );
+                void *ptr = set_reply_data_size( reply->total_len );
                 if (ptr)
                 {
                     reply->name_len = name_len;
@@ -560,7 +562,7 @@ DECL_HANDLER(get_directory_entry)
                     memcpy( (char *)ptr + name_len, type_name->str, type_name->len );
                 }
             }
-            else set_error( STATUS_BUFFER_OVERFLOW );
+            else set_error( STATUS_BUFFER_TOO_SMALL );
 
             release_object( obj );
         }

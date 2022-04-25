@@ -651,6 +651,7 @@ done:
     HeapFree( GetProcessHeap(), 0, buffer );
     CloseHandle( h1 );
     CloseHandle( h2 );
+    if (ret) SetLastError( 0 );
     return ret;
 }
 

@@ -1507,11 +1507,6 @@ static  void    test_DebuggingFlag(void)
     DeleteFileA(resfile);
 }
 
-static BOOL is_console(HANDLE h)
-{
-    return h != INVALID_HANDLE_VALUE && ((ULONG_PTR)h & 3) == 3;
-}
-
 static void test_Console(void)
 {
     char                buffer[2 * MAX_PATH + 35];
@@ -1541,8 +1536,13 @@ static void test_Console(void)
     startup.hStdOutput = CreateFileA("CONOUT$", GENERIC_READ|GENERIC_WRITE, 0, &sa, OPEN_EXISTING, 0, 0);
 
     /* first, we need to be sure we're attached to a console */
-    if (!is_console(startup.hStdInput) || !is_console(startup.hStdOutput))
+    if (startup.hStdInput == INVALID_HANDLE_VALUE || startup.hStdOutput == INVALID_HANDLE_VALUE)
     {
+        /* this fails either when this test process is run detached from console
+         * (unlikely, as this very process must be explicitly created with detached flag),
+         * or is attached to a Wine's shell-no-window kind of console (if the later, detach from it)
+         */
+        FreeConsole();
         /* we're not attached to a console, let's do it */
         AllocConsole();
         startup.hStdInput = CreateFileA("CONIN$", GENERIC_READ|GENERIC_WRITE, 0, &sa, OPEN_EXISTING, 0, 0);
@@ -2495,17 +2495,11 @@ static void test_DuplicateHandle(void)
     DeleteFileA(file_name);
 
     f = CreateFileA("CONIN$", GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
-    if (!is_console(f))
-    {
-        skip("DuplicateHandle on console handle\n");
-        CloseHandle(f);
-        return;
-    }
-
+    ok(f != INVALID_HANDLE_VALUE, "Failed to open CONIN$ %lu\n", GetLastError());
     r = DuplicateHandle(GetCurrentProcess(), f, GetCurrentProcess(), &out,
             0, FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE);
     ok(r, "DuplicateHandle error %lu\n", GetLastError());
-    todo_wine ok(f != out, "f == out\n");
+    ok(f == out || broken(/* Win7 */ (((ULONG_PTR)f & 3) == 3) && (f != out)), "f != out\n");
     CloseHandle(out);
 }
 

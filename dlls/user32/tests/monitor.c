@@ -3,6 +3,7 @@
  *
  * Copyright 2005 Huw Davies
  * Copyright 2008 Dmitry Timoshkov
+ * Copyright 2019-2022 Zhiyi Zhang for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -484,8 +485,6 @@ static void test_ChangeDisplaySettingsEx(void)
     }
     if (pSetThreadDpiAwarenessContext && context)
         pSetThreadDpiAwarenessContext(context);
-    res = ChangeDisplaySettingsExA(NULL, NULL, NULL, CDS_RESET, NULL);
-    ok(res == DISP_CHANGE_SUCCESSFUL, "Failed to reset default resolution: %ld\n", res);
 
     /* Save the original mode for all devices so that they can be restored at the end of tests */
     device_count = 0;
@@ -566,10 +565,6 @@ static void test_ChangeDisplaySettingsEx(void)
                 CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
         ok(res == DISP_CHANGE_SUCCESSFUL ||
                 broken(res == DISP_CHANGE_BADPARAM) || /* win10 */
-                broken(res == DISP_CHANGE_FAILED), /* win8 TestBot */
-                "ChangeDisplaySettingsExA %s returned unexpected %ld\n", devices[0].name, res);
-        res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
-        ok(res == DISP_CHANGE_SUCCESSFUL ||
                 broken(res == DISP_CHANGE_FAILED), /* win8 TestBot */
                 "ChangeDisplaySettingsExA %s returned unexpected %ld\n", devices[0].name, res);
     }
@@ -2193,8 +2188,10 @@ static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_
 static void test_display_dc(void)
 {
     static const INT bpps[] = {1, 4, 8, 16, 24, 32};
+    unsigned char buffer[sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD)];
+    BITMAPINFO *bmi = (BITMAPINFO *)buffer;
+    INT count, old_count, i, bpp, value;
     HBITMAP hbitmap, old_hbitmap;
-    INT count, old_count, i, bpp;
     DWORD device_idx, mode_idx;
     DEVMODEA dm, dm2, dm3;
     DISPLAY_DEVICEA dd;
@@ -2247,7 +2244,94 @@ static void test_display_dc(void)
         winetest_pop_context();
     }
 
+    /* Test selecting a DIB of a different depth into a display compatible DC */
+    for (i = 0; i < ARRAY_SIZE(bpps); ++i)
+    {
+        winetest_push_context("bpp %d", bpps[i]);
+
+        mem_dc = CreateCompatibleDC(hdc);
+        memset(buffer, 0, sizeof(buffer));
+        bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
+        bmi->bmiHeader.biWidth = dm.dmPelsWidth;
+        bmi->bmiHeader.biHeight = dm.dmPelsHeight;
+        bmi->bmiHeader.biBitCount = bpps[i];
+        bmi->bmiHeader.biPlanes = 1;
+        bmi->bmiHeader.biCompression = BI_RGB;
+        hbitmap = CreateDIBSection(hdc, bmi, DIB_RGB_COLORS, NULL, NULL, 0);
+        ok(!!hbitmap, "CreateDIBSection failed, error %ld.\n", GetLastError());
+        old_hbitmap = SelectObject(mem_dc, hbitmap);
+        ok(!!old_hbitmap, "Failed to select bitmap.\n");
+
+        value = GetDeviceCaps(mem_dc, BITSPIXEL);
+        ok(value == 32, "Expected 32, got %d.\n", value);
+        value = GetDeviceCaps(mem_dc, NUMCOLORS);
+        ok(value == -1, "Expected -1, got %d.\n", value);
+
+        SelectObject(mem_dc, old_hbitmap);
+        DeleteObject(hbitmap);
+        DeleteDC(mem_dc);
+
+        winetest_pop_context();
+    }
+
+    /* Test NUMCOLORS for display DCs */
+    for (i = ARRAY_SIZE(bpps) - 1; i >= 0; --i)
+    {
+        winetest_push_context("bpp %d", bpps[i]);
+
+        ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
+        ok(ret, "EnumDisplaySettingsA failed.\n");
+        if (bpps[i] == dm.dmBitsPerPel)
+        {
+            res = DISP_CHANGE_SUCCESSFUL;
+        }
+        else
+        {
+            memset(&dm2, 0, sizeof(dm2));
+            dm2.dmSize = sizeof(dm2);
+            for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
+            {
+                if (dm2.dmBitsPerPel == bpps[i])
+                    break;
+            }
+            if (dm2.dmBitsPerPel != bpps[i])
+            {
+                skip("%d-bit display mode not found.\n", bpps[i]);
+                winetest_pop_context();
+                continue;
+            }
+
+            res = ChangeDisplaySettingsExA(NULL, &dm2, NULL, CDS_RESET, NULL);
+            /* Win8 TestBots */
+            ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED),
+               "ChangeDisplaySettingsExA returned unexpected %ld.\n", res);
+        }
+
+        if (res == DISP_CHANGE_SUCCESSFUL)
+        {
+            value = GetDeviceCaps(hdc, BITSPIXEL);
+            ok(value == (bpps[i] == 4 ? 1 : bpps[i]), "Expected %d, got %d.\n",
+                    (bpps[i] == 4 ? 1 : bpps[i]), value);
+
+            value = GetDeviceCaps(hdc, NUMCOLORS);
+            if (bpps[i] > 8 || (bpps[i] == 8 && LOBYTE(LOWORD(GetVersion())) >= 6))
+                ok(value == -1, "Expected -1, got %d.\n", value);
+            else if (bpps[i] == 8 && LOBYTE(LOWORD(GetVersion())) < 6)
+                ok(value > 16 && value <= 256, "Got %d.\n", value);
+            else
+                ok(value == 1 << bpps[i], "Expected %d, got %d.\n", 1 << bpps[i], value);
+        }
+        winetest_pop_context();
+    }
+    res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
+    /* Win8 TestBots */
+    ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED),
+       "ChangeDisplaySettingsExA returned unexpected %ld.\n", res);
+
     /* Test selecting a DDB of the same color depth into a display compatible DC */
+    ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
+    ok(ret, "EnumDisplaySettingsA failed.\n");
+
     mem_dc = CreateCompatibleDC(hdc);
     bpp = GetDeviceCaps(mem_dc, BITSPIXEL);
     ok(bpp == dm.dmBitsPerPel, "Expected bpp %ld, got %d.\n", dm.dmBitsPerPel, bpp);
@@ -2260,34 +2344,13 @@ static void test_display_dc(void)
     SelectObject(mem_dc, old_hbitmap);
     DeleteDC(mem_dc);
 
-    /* Tests after mode changes to a different resolution */
+    /* Tests after mode changes to a mode with different resolution and color depth */
     memset(&dm2, 0, sizeof(dm2));
     dm2.dmSize = sizeof(dm2);
     for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
     {
-        if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
-            break;
-    }
-    ok(dm2.dmPelsWidth && dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight,
-            "Failed to find a different resolution.\n");
-
-    res = ChangeDisplaySettingsExA(NULL, &dm2, NULL, CDS_RESET, NULL);
-    ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED), /* Win8 TestBots */
-            "ChangeDisplaySettingsExA returned unexpected %ld.\n", res);
-    if (res == DISP_CHANGE_SUCCESSFUL)
-    {
-        check_display_dc(hdc, &dm2, FALSE);
-
-        res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
-        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %ld.\n", res);
-    }
-
-    /* Tests after mode changes to a different color depth */
-    memset(&dm2, 0, sizeof(dm2));
-    dm2.dmSize = sizeof(dm2);
-    for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
-    {
-        if (dm2.dmBitsPerPel != dm.dmBitsPerPel && dm2.dmBitsPerPel != 1)
+        if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight &&
+            dm2.dmBitsPerPel != dm.dmBitsPerPel && dm2.dmBitsPerPel != 1)
             break;
     }
     if (dm2.dmBitsPerPel && dm2.dmBitsPerPel != dm.dmBitsPerPel)
@@ -2357,7 +2420,7 @@ static void test_display_dc(void)
     }
     else
     {
-        win_skip("Failed to find a different color depth other than %lu.\n", dm.dmBitsPerPel);
+        win_skip("Failed to find a required display mode.\n");
     }
 
     if (hbitmap)

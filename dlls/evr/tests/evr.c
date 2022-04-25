@@ -276,7 +276,7 @@ static void test_interfaces(void)
     IBaseFilter *filter = create_evr();
     ULONG ref;
 
-    todo_wine check_interface(filter, &IID_IAMFilterMiscFlags, TRUE);
+    check_interface(filter, &IID_IAMFilterMiscFlags, TRUE);
     check_interface(filter, &IID_IBaseFilter, TRUE);
     check_interface(filter, &IID_IEVRFilterConfig, TRUE);
     check_interface(filter, &IID_IMediaFilter, TRUE);
@@ -551,6 +551,24 @@ static void test_unconnected_eos(void)
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
 }
 
+static void test_misc_flags(void)
+{
+    IBaseFilter *filter = create_evr();
+    IAMFilterMiscFlags *misc_flags;
+    ULONG ref, flags;
+    HRESULT hr;
+
+    hr = IBaseFilter_QueryInterface(filter, &IID_IAMFilterMiscFlags, (void **)&misc_flags);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    flags = IAMFilterMiscFlags_GetMiscFlags(misc_flags);
+    ok(flags == AM_FILTER_MISC_FLAGS_IS_RENDERER, "Unexpected flags %#lx.\n", flags);
+    IAMFilterMiscFlags_Release(misc_flags);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
 static IMFMediaType * create_video_type(const GUID *subtype)
 {
     IMFMediaType *video_type;
@@ -654,7 +672,6 @@ static void test_default_mixer(void)
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFVideoProcessor_GetAvailableVideoProcessorModes(processor, &count, &guids);
-    todo_wine
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
 
     IMFVideoProcessor_Release(processor);
@@ -1071,6 +1088,9 @@ static void test_default_mixer_type_negotiation(void)
     hr = MFCreateVideoMixer(NULL, &IID_IDirect3DDevice9, &IID_IMFTransform, (void **)&transform);
     ok(hr == S_OK, "Failed to create default mixer, hr %#lx.\n", hr);
 
+    hr = IMFTransform_QueryInterface(transform, &IID_IMFVideoProcessor, (void **)&processor);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
     hr = IMFTransform_GetInputAvailableType(transform, 0, 0, &media_type);
     ok(hr == E_NOTIMPL, "Unexpected hr %#lx.\n", hr);
 
@@ -1094,6 +1114,9 @@ static void test_default_mixer_type_negotiation(void)
 
     hr = IMFTransform_SetInputType(transform, 0, media_type, MFT_SET_TYPE_TEST_ONLY);
     ok(hr == MF_E_NOT_INITIALIZED, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFVideoProcessor_GetAvailableVideoProcessorModes(processor, &count, &guids);
+    ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
 
     /* Now try with device manager. */
 
@@ -1282,15 +1305,11 @@ static void test_default_mixer_type_negotiation(void)
     IMFMediaType_Release(media_type2);
     IMFMediaType_Release(media_type);
 
-    hr = IMFTransform_QueryInterface(transform, &IID_IMFVideoProcessor, (void **)&processor);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
     hr = IMFVideoProcessor_GetVideoProcessorMode(processor, &guid);
     todo_wine
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFVideoProcessor_GetVideoProcessorCaps(processor, (GUID *)&DXVA2_VideoProcSoftwareDevice, &caps);
-    todo_wine
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
@@ -1302,7 +1321,6 @@ static void test_default_mixer_type_negotiation(void)
     IMFMediaType_Release(media_type);
 
     hr = IMFVideoProcessor_GetAvailableVideoProcessorModes(processor, &count, &guids);
-    todo_wine
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFTransform_GetOutputAvailableType(transform, 0, 0, &media_type);
@@ -1319,10 +1337,12 @@ static void test_default_mixer_type_negotiation(void)
     ok(hr == S_FALSE, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFVideoProcessor_GetAvailableVideoProcessorModes(processor, &count, &guids);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    if (SUCCEEDED(hr))
-        CoTaskMemFree(guids);
+    ok(count > 0 && !!guids, "Unexpected modes data.\n");
+    CoTaskMemFree(guids);
+
+    hr = IMFVideoProcessor_GetVideoProcessorCaps(processor, (GUID *)&DXVA2_VideoProcSoftwareDevice, &caps);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type2);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -3205,6 +3225,7 @@ START_TEST(evr)
     test_find_pin();
     test_pin_info();
     test_unconnected_eos();
+    test_misc_flags();
 
     test_default_mixer();
     test_default_mixer_type_negotiation();

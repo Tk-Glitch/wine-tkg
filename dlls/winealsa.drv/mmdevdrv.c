@@ -99,7 +99,7 @@ struct ACImpl {
     EDataFlow dataflow;
     float *vols;
     UINT32 channel_count;
-    struct alsa_stream *stream;
+    stream_handle stream;
 
     HANDLE timer_thread;
 
@@ -229,7 +229,7 @@ int WINAPI AUDDRV_GetPriority(void)
     return Priority_Neutral;
 }
 
-static HRESULT alsa_stream_release(struct alsa_stream *stream, HANDLE timer_thread)
+static HRESULT alsa_stream_release(stream_handle stream, HANDLE timer_thread)
 {
     struct release_stream_params params;
 
@@ -243,10 +243,10 @@ static HRESULT alsa_stream_release(struct alsa_stream *stream, HANDLE timer_thre
 
 static DWORD WINAPI alsa_timer_thread(void *user)
 {
-    struct alsa_stream *stream = user;
     struct timer_loop_params params;
+    struct ACImpl *This = user;
 
-    params.stream = stream;
+    params.stream = This->stream;
 
     ALSA_CALL(timer_loop, &params);
 
@@ -366,14 +366,17 @@ HRESULT WINAPI AUDDRV_GetEndpointIDs(EDataFlow flow, WCHAR ***ids_out, GUID **gu
     }
 
     for(i = 0; i < params.num; i++){
-        unsigned int size = (wcslen(params.endpoints[i].name) + 1) * sizeof(WCHAR);
+        WCHAR *name = (WCHAR *)((char *)params.endpoints + params.endpoints[i].name);
+        char *device = (char *)params.endpoints + params.endpoints[i].device;
+        unsigned int size = (wcslen(name) + 1) * sizeof(WCHAR);
+
         ids[i] = HeapAlloc(GetProcessHeap(), 0, size);
         if(!ids[i]){
             params.result = E_OUTOFMEMORY;
             goto end;
         }
-        memcpy(ids[i], params.endpoints[i].name, size);
-        get_device_guid(flow, params.endpoints[i].device, guids + i);
+        memcpy(ids[i], name, size);
+        get_device_guid(flow, device, guids + i);
     }
     *def_index = params.default_idx;
 
@@ -680,7 +683,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
 {
     ACImpl *This = impl_from_IAudioClient3(iface);
     struct create_stream_params params;
-    struct alsa_stream *stream;
+    stream_handle stream;
     unsigned int i;
 
     TRACE("(%p)->(%x, %x, %s, %s, %p, %s)\n", This, mode, flags,
@@ -954,7 +957,7 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient3 *iface)
     ALSA_CALL(start, &params);
 
     if(SUCCEEDED(params.result) && !This->timer_thread){
-        This->timer_thread = CreateThread(NULL, 0, alsa_timer_thread, This->stream, 0, NULL);
+        This->timer_thread = CreateThread(NULL, 0, alsa_timer_thread, This, 0, NULL);
         SetThreadPriority(This->timer_thread, THREAD_PRIORITY_TIME_CRITICAL);
     }
 

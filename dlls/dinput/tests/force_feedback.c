@@ -29,10 +29,50 @@
 #define COBJMACROS
 #include "dinput.h"
 #include "dinputd.h"
+#include "roapi.h"
+#include "unknwn.h"
+#include "winstring.h"
 
 #include "wine/hid.h"
 
 #include "dinput_test.h"
+
+#define WIDL_using_Windows_Foundation
+#define WIDL_using_Windows_Foundation_Collections
+#include "windows.foundation.h"
+#define WIDL_using_Windows_Devices_Haptics
+#define WIDL_using_Windows_Gaming_Input
+#define WIDL_using_Windows_Gaming_Input_ForceFeedback
+#include "windows.gaming.input.h"
+#include "windows.gaming.input.forcefeedback.h"
+#undef Size
+
+#define MAKE_FUNC(f) static typeof(f) *p ## f
+MAKE_FUNC( RoGetActivationFactory );
+MAKE_FUNC( RoInitialize );
+MAKE_FUNC( WindowsCreateString );
+MAKE_FUNC( WindowsDeleteString );
+MAKE_FUNC( WindowsGetStringRawBuffer );
+#undef MAKE_FUNC
+
+static BOOL load_combase_functions(void)
+{
+    HMODULE combase = GetModuleHandleW( L"combase.dll" );
+
+#define LOAD_FUNC(m, f) if (!(p ## f = (void *)GetProcAddress( m, #f ))) goto failed;
+    LOAD_FUNC( combase, RoGetActivationFactory );
+    LOAD_FUNC( combase, RoInitialize );
+    LOAD_FUNC( combase, WindowsCreateString );
+    LOAD_FUNC( combase, WindowsDeleteString );
+    LOAD_FUNC( combase, WindowsGetStringRawBuffer );
+#undef LOAD_FUNC
+
+    return TRUE;
+
+failed:
+    win_skip("Failed to load combase.dll functions, skipping tests\n");
+    return FALSE;
+}
 
 struct check_objects_todos
 {
@@ -4323,6 +4363,1194 @@ done:
     winetest_pop_context();
 }
 
+#define check_interface( a, b, c ) check_interface_( __LINE__, a, b, c )
+static void check_interface_( unsigned int line, void *iface_ptr, REFIID iid, BOOL supported )
+{
+    IUnknown *iface = iface_ptr;
+    HRESULT hr, expected;
+    IUnknown *unk;
+
+    expected = supported ? S_OK : E_NOINTERFACE;
+    hr = IUnknown_QueryInterface( iface, iid, (void **)&unk );
+    ok_(__FILE__, line)( hr == expected, "got hr %#lx, expected %#lx.\n", hr, expected );
+    if (SUCCEEDED(hr)) IUnknown_Release( unk );
+}
+
+#define check_runtimeclass( a, b ) check_runtimeclass_( __LINE__, (IInspectable *)a, b )
+static void check_runtimeclass_( int line, IInspectable *inspectable, const WCHAR *class_name )
+{
+    const WCHAR *buffer;
+    UINT32 length;
+    HSTRING str;
+    HRESULT hr;
+
+    hr = IInspectable_GetRuntimeClassName( inspectable, &str );
+    ok_(__FILE__, line)( hr == S_OK, "GetRuntimeClassName returned %#lx\n", hr );
+    buffer = pWindowsGetStringRawBuffer( str, &length );
+    ok_(__FILE__, line)( !wcscmp( buffer, class_name ), "got class name %s\n", debugstr_w(buffer) );
+    pWindowsDeleteString( str );
+}
+
+struct controller_handler
+{
+    IEventHandler_RawGameController IEventHandler_RawGameController_iface;
+    HANDLE event;
+    BOOL invoked;
+};
+
+static inline struct controller_handler *impl_from_IEventHandler_RawGameController( IEventHandler_RawGameController *iface )
+{
+    return CONTAINING_RECORD( iface, struct controller_handler, IEventHandler_RawGameController_iface );
+}
+
+static HRESULT WINAPI controller_handler_QueryInterface( IEventHandler_RawGameController *iface, REFIID iid, void **out )
+{
+    if (IsEqualGUID( iid, &IID_IUnknown ) ||
+        IsEqualGUID( iid, &IID_IAgileObject ) ||
+        IsEqualGUID( iid, &IID_IEventHandler_RawGameController ))
+    {
+        IUnknown_AddRef( iface );
+        *out = iface;
+        return S_OK;
+    }
+
+    trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI controller_handler_AddRef( IEventHandler_RawGameController *iface )
+{
+    return 2;
+}
+
+static ULONG WINAPI controller_handler_Release( IEventHandler_RawGameController *iface )
+{
+    return 1;
+}
+
+static HRESULT WINAPI controller_handler_Invoke( IEventHandler_RawGameController *iface,
+                                                 IInspectable *sender, IRawGameController *controller )
+{
+    struct controller_handler *impl = impl_from_IEventHandler_RawGameController( iface );
+
+    trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
+
+    ok( sender == NULL, "got sender %p\n", sender );
+    SetEvent( impl->event );
+    impl->invoked = TRUE;
+
+    return S_OK;
+}
+
+static const IEventHandler_RawGameControllerVtbl controller_handler_vtbl =
+{
+    controller_handler_QueryInterface,
+    controller_handler_AddRef,
+    controller_handler_Release,
+    controller_handler_Invoke,
+};
+
+static struct controller_handler controller_added = {{&controller_handler_vtbl}};
+
+#define check_bool_async( a, b, c, d, e ) check_bool_async_( __LINE__, a, b, c, d, e )
+static void check_bool_async_( int line, IAsyncOperation_boolean *async, UINT32 expect_id, AsyncStatus expect_status,
+                               HRESULT expect_hr, BOOLEAN expect_result )
+{
+    AsyncStatus async_status;
+    IAsyncInfo *async_info;
+    HRESULT hr, async_hr;
+    UINT32 async_id;
+    BOOLEAN result;
+
+    hr = IAsyncOperation_boolean_QueryInterface( async, &IID_IAsyncInfo, (void **)&async_info );
+    ok_(__FILE__, line)( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    async_id = 0xdeadbeef;
+    hr = IAsyncInfo_get_Id( async_info, &async_id );
+    if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_Id returned %#lx\n", hr );
+    else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_Id returned %#lx\n", hr );
+    ok_(__FILE__, line)( async_id == expect_id, "got id %u\n", async_id );
+
+    async_status = 0xdeadbeef;
+    hr = IAsyncInfo_get_Status( async_info, &async_status );
+    if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_Status returned %#lx\n", hr );
+    else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_Status returned %#lx\n", hr );
+    ok_(__FILE__, line)( async_status == expect_status, "got status %u\n", async_status );
+
+    async_hr = 0xdeadbeef;
+    hr = IAsyncInfo_get_ErrorCode( async_info, &async_hr );
+    if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_ErrorCode returned %#lx\n", hr );
+    else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_ErrorCode returned %#lx\n", hr );
+    if (expect_status < 4) ok_(__FILE__, line)( async_hr == expect_hr, "got error %#lx\n", async_hr );
+    else ok_(__FILE__, line)( async_hr == E_ILLEGAL_METHOD_CALL, "got error %#lx\n", async_hr );
+
+    IAsyncInfo_Release( async_info );
+
+    result = !expect_result;
+    hr = IAsyncOperation_boolean_GetResults( async, &result );
+    switch (expect_status)
+    {
+    case Completed:
+    case Error:
+        ok_(__FILE__, line)( hr == expect_hr, "GetResults returned %#lx\n", hr );
+        ok_(__FILE__, line)( result == expect_result, "got result %u\n", result );
+        break;
+    case Canceled:
+    case Started:
+    default:
+        ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "GetResults returned %#lx\n", hr );
+        break;
+    }
+}
+
+struct bool_async_handler
+{
+    IAsyncOperationCompletedHandler_boolean IAsyncOperationCompletedHandler_boolean_iface;
+    IAsyncOperation_boolean *async;
+    AsyncStatus status;
+    BOOL invoked;
+    HANDLE event;
+};
+
+static inline struct bool_async_handler *impl_from_IAsyncOperationCompletedHandler_boolean( IAsyncOperationCompletedHandler_boolean *iface )
+{
+    return CONTAINING_RECORD( iface, struct bool_async_handler, IAsyncOperationCompletedHandler_boolean_iface );
+}
+
+static HRESULT WINAPI bool_async_handler_QueryInterface( IAsyncOperationCompletedHandler_boolean *iface, REFIID iid, void **out )
+{
+    if (IsEqualGUID( iid, &IID_IUnknown ) ||
+        IsEqualGUID( iid, &IID_IAgileObject ) ||
+        IsEqualGUID( iid, &IID_IAsyncOperationCompletedHandler_boolean ))
+    {
+        IUnknown_AddRef( iface );
+        *out = iface;
+        return S_OK;
+    }
+
+    trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI bool_async_handler_AddRef( IAsyncOperationCompletedHandler_boolean *iface )
+{
+    return 2;
+}
+
+static ULONG WINAPI bool_async_handler_Release( IAsyncOperationCompletedHandler_boolean *iface )
+{
+    return 1;
+}
+
+static HRESULT WINAPI bool_async_handler_Invoke( IAsyncOperationCompletedHandler_boolean *iface,
+                                                 IAsyncOperation_boolean *async, AsyncStatus status )
+{
+    struct bool_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_boolean( iface );
+
+    trace( "iface %p, async %p, status %u\n", iface, async, status );
+
+    ok( !impl->invoked, "invoked twice\n" );
+    impl->invoked = TRUE;
+    impl->async = async;
+    impl->status = status;
+    if (impl->event) SetEvent( impl->event );
+
+    return S_OK;
+}
+
+static IAsyncOperationCompletedHandler_booleanVtbl bool_async_handler_vtbl =
+{
+    /*** IUnknown methods ***/
+    bool_async_handler_QueryInterface,
+    bool_async_handler_AddRef,
+    bool_async_handler_Release,
+    /*** IAsyncOperationCompletedHandler<boolean> methods ***/
+    bool_async_handler_Invoke,
+};
+
+struct bool_async_handler default_bool_async_handler = {{&bool_async_handler_vtbl}};
+
+static void test_windows_gaming_input(void)
+{
+#include "psh_hid_macros.h"
+    const unsigned char report_desc[] = {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Physical),
+                REPORT_ID(1, 1),
+
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_STEERING),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_ACCELERATOR),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_BRAKE),
+                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_CLUTCH),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 5),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 5),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE_PAGE(1, HID_USAGE_PAGE_PID),
+            USAGE(1, PID_USAGE_STATE_REPORT),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 2),
+
+                USAGE(1, PID_USAGE_DEVICE_PAUSED),
+                USAGE(1, PID_USAGE_ACTUATORS_ENABLED),
+                USAGE(1, PID_USAGE_SAFETY_SWITCH),
+                USAGE(1, PID_USAGE_ACTUATOR_OVERRIDE_SWITCH),
+                USAGE(1, PID_USAGE_ACTUATOR_POWER),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 5),
+                INPUT(1, Data|Var|Abs),
+                REPORT_COUNT(1, 3),
+                INPUT(1, Cnst|Var|Abs),
+
+                USAGE(1, PID_USAGE_EFFECT_PLAYING),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE_PAGE(1, HID_USAGE_PAGE_PID),
+            USAGE(1, PID_USAGE_DEVICE_CONTROL_REPORT),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 1),
+
+                USAGE(1, PID_USAGE_DEVICE_CONTROL),
+                COLLECTION(1, Logical),
+                    USAGE(1, PID_USAGE_DC_DEVICE_RESET),
+                    USAGE(1, PID_USAGE_DC_DEVICE_PAUSE),
+                    USAGE(1, PID_USAGE_DC_DEVICE_CONTINUE),
+                    USAGE(1, PID_USAGE_DC_ENABLE_ACTUATORS),
+                    USAGE(1, PID_USAGE_DC_DISABLE_ACTUATORS),
+                    USAGE(1, PID_USAGE_DC_STOP_ALL_EFFECTS),
+                    LOGICAL_MINIMUM(1, 1),
+                    LOGICAL_MAXIMUM(1, 6),
+                    PHYSICAL_MINIMUM(1, 1),
+                    PHYSICAL_MAXIMUM(1, 6),
+                    REPORT_SIZE(1, 8),
+                    REPORT_COUNT(1, 1),
+                    OUTPUT(1, Data|Ary|Abs),
+                END_COLLECTION,
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_EFFECT_OPERATION_REPORT),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 2),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_EFFECT_OPERATION),
+                COLLECTION(1, NamedArray),
+                    USAGE(1, PID_USAGE_OP_EFFECT_START),
+                    USAGE(1, PID_USAGE_OP_EFFECT_START_SOLO),
+                    USAGE(1, PID_USAGE_OP_EFFECT_STOP),
+                    LOGICAL_MINIMUM(1, 1),
+                    LOGICAL_MAXIMUM(1, 3),
+                    PHYSICAL_MINIMUM(1, 1),
+                    PHYSICAL_MAXIMUM(1, 3),
+                    REPORT_SIZE(1, 8),
+                    REPORT_COUNT(1, 1),
+                    OUTPUT(1, Data|Ary|Abs),
+                END_COLLECTION,
+
+                USAGE(1, PID_USAGE_LOOP_COUNT),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_SET_EFFECT_REPORT),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 3),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_EFFECT_TYPE),
+                COLLECTION(1, NamedArray),
+                    USAGE(1, PID_USAGE_ET_SQUARE),
+                    USAGE(1, PID_USAGE_ET_SINE),
+                    USAGE(1, PID_USAGE_ET_SPRING),
+                    LOGICAL_MINIMUM(1, 1),
+                    LOGICAL_MAXIMUM(1, 3),
+                    PHYSICAL_MINIMUM(1, 1),
+                    PHYSICAL_MAXIMUM(1, 3),
+                    REPORT_SIZE(1, 8),
+                    REPORT_COUNT(1, 1),
+                    OUTPUT(1, Data|Ary|Abs),
+                END_COLLECTION,
+
+                USAGE(1, PID_USAGE_AXES_ENABLE),
+                COLLECTION(1, Logical),
+                    USAGE(4, (HID_USAGE_PAGE_GENERIC << 16)|HID_USAGE_GENERIC_X),
+                    USAGE(4, (HID_USAGE_PAGE_GENERIC << 16)|HID_USAGE_GENERIC_Y),
+                    USAGE(4, (HID_USAGE_PAGE_GENERIC << 16)|HID_USAGE_GENERIC_Z),
+                    LOGICAL_MINIMUM(1, 0),
+                    LOGICAL_MAXIMUM(1, 1),
+                    PHYSICAL_MINIMUM(1, 0),
+                    PHYSICAL_MAXIMUM(1, 1),
+                    REPORT_SIZE(1, 1),
+                    REPORT_COUNT(1, 3),
+                    OUTPUT(1, Data|Var|Abs),
+                END_COLLECTION,
+                USAGE(1, PID_USAGE_DIRECTION_ENABLE),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+                REPORT_COUNT(1, 4),
+                OUTPUT(1, Cnst|Var|Abs),
+
+                USAGE(1, PID_USAGE_DURATION),
+                USAGE(1, PID_USAGE_START_DELAY),
+                UNIT(2, 0x1003),      /* Eng Lin:Time */
+                UNIT_EXPONENT(1, -3), /* 10^-3 */
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x7fff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x7fff),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 2),
+                OUTPUT(1, Data|Var|Abs),
+                UNIT(1, 0),
+                UNIT_EXPONENT(1, 0),
+
+                USAGE(1, PID_USAGE_TRIGGER_BUTTON),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x08),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x08),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_DIRECTION),
+                COLLECTION(1, Logical),
+                    USAGE(4, (HID_USAGE_PAGE_ORDINAL << 16)|1),
+                    USAGE(4, (HID_USAGE_PAGE_ORDINAL << 16)|2),
+                    UNIT(1, 0x14),        /* Eng Rot:Angular Pos */
+                    UNIT_EXPONENT(1, -2), /* 10^-2 */
+                    LOGICAL_MINIMUM(1, 0),
+                    LOGICAL_MAXIMUM(2, 0x00ff),
+                    PHYSICAL_MINIMUM(1, 0),
+                    PHYSICAL_MAXIMUM(4, 0x00008ca0),
+                    UNIT(1, 0),
+                    REPORT_SIZE(1, 8),
+                    REPORT_COUNT(1, 2),
+                    OUTPUT(1, Data|Var|Abs),
+                    UNIT_EXPONENT(1, 0),
+                    UNIT(1, 0),
+                END_COLLECTION,
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_SET_CONDITION_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 4),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_PARAMETER_BLOCK_OFFSET),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 4),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_TYPE_SPECIFIC_BLOCK_OFFSET),
+                COLLECTION(1, Logical),
+                    USAGE(4, (HID_USAGE_PAGE_ORDINAL << 16)|1),
+                    USAGE(4, (HID_USAGE_PAGE_ORDINAL << 16)|2),
+                    LOGICAL_MINIMUM(1, 0),
+                    LOGICAL_MAXIMUM(1, 1),
+                    PHYSICAL_MINIMUM(1, 0),
+                    PHYSICAL_MAXIMUM(1, 1),
+                    REPORT_SIZE(1, 2),
+                    REPORT_COUNT(1, 2),
+                    OUTPUT(1, Data|Var|Abs),
+                END_COLLECTION,
+
+                USAGE(1, PID_USAGE_CP_OFFSET),
+                LOGICAL_MINIMUM(1, 0x80),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(2, 0xd8f0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_POSITIVE_COEFFICIENT),
+                USAGE(1, PID_USAGE_NEGATIVE_COEFFICIENT),
+                LOGICAL_MINIMUM(1, 0x80),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(2, 0xd8f0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_POSITIVE_SATURATION),
+                USAGE(1, PID_USAGE_NEGATIVE_SATURATION),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x00ff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_DEAD_BAND),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x00ff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_BLOCK_FREE_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 5),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_DEVICE_GAIN_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 6),
+
+                USAGE(1, PID_USAGE_DEVICE_GAIN),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x00ff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_POOL_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 1),
+
+                USAGE(1, PID_USAGE_RAM_POOL_SIZE),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(4, 0xffff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(4, 0xffff),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                FEATURE(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_SIMULTANEOUS_EFFECTS_MAX),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                FEATURE(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_DEVICE_MANAGED_POOL),
+                USAGE(1, PID_USAGE_SHARED_PARAMETER_BLOCKS),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                FEATURE(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_CREATE_NEW_EFFECT_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 2),
+
+                USAGE(1, PID_USAGE_EFFECT_TYPE),
+                COLLECTION(1, NamedArray),
+                    USAGE(1, PID_USAGE_ET_SQUARE),
+                    USAGE(1, PID_USAGE_ET_SINE),
+                    USAGE(1, PID_USAGE_ET_SPRING),
+                    LOGICAL_MINIMUM(1, 1),
+                    LOGICAL_MAXIMUM(1, 3),
+                    PHYSICAL_MINIMUM(1, 1),
+                    PHYSICAL_MAXIMUM(1, 3),
+                    REPORT_SIZE(1, 8),
+                    REPORT_COUNT(1, 1),
+                    FEATURE(1, Data|Ary|Abs),
+                END_COLLECTION,
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_BLOCK_LOAD_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 3),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                FEATURE(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_BLOCK_LOAD_STATUS),
+                COLLECTION(1, NamedArray),
+                    USAGE(1, PID_USAGE_BLOCK_LOAD_SUCCESS),
+                    USAGE(1, PID_USAGE_BLOCK_LOAD_FULL),
+                    USAGE(1, PID_USAGE_BLOCK_LOAD_ERROR),
+                    LOGICAL_MINIMUM(1, 1),
+                    LOGICAL_MAXIMUM(1, 3),
+                    PHYSICAL_MINIMUM(1, 1),
+                    PHYSICAL_MAXIMUM(1, 3),
+                    REPORT_SIZE(1, 8),
+                    REPORT_COUNT(1, 1),
+                    FEATURE(1, Data|Ary|Abs),
+                END_COLLECTION,
+
+                USAGE(1, PID_USAGE_RAM_POOL_AVAILABLE),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(4, 0xffff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(4, 0xffff),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                FEATURE(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#undef REPORT_ID_OR_USAGE_PAGE
+#include "pop_hid_macros.h"
+
+    struct hid_device_desc desc =
+    {
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 8 },
+        .attributes = default_attributes,
+    };
+    struct hid_expect expect_init[] =
+    {
+        /* device pool */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 1,
+            .report_len = 5,
+            .report_buf = {1,0x10,0x00,0x04,0x03},
+            .todo = TRUE,
+        },
+    };
+    struct hid_expect expect_acquire[] =
+    {
+        /* device pool */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 1,
+            .report_len = 5,
+            .report_buf = {1,0x10,0x00,0x04,0x03},
+            .todo = TRUE,
+        },
+        /* device control */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 1,
+            .report_len = 2,
+            .report_buf = {1, 0x06},
+            .todo = TRUE,
+        },
+        /* device control */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 1,
+            .report_len = 2,
+            .report_buf = {1, 0x05},
+            .todo = TRUE,
+        },
+        /* device control */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 1,
+            .report_len = 2,
+            .report_buf = {1, 0x01},
+            .todo = TRUE,
+        },
+        /* device gain */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 6,
+            .report_len = 2,
+            .report_buf = {6, 0xff},
+            .todo = TRUE,
+        },
+    };
+    static struct hid_expect expect_set_gain =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 6,
+        .report_len = 2,
+        .report_buf = {6, 0x7f},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_pause =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 1,
+        .report_len = 2,
+        .report_buf = {1, 0x02},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_resume =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 1,
+        .report_len = 2,
+        .report_buf = {1, 0x03},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_stop =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 1,
+        .report_len = 2,
+        .report_buf = {1, 0x06},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_disable =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 1,
+        .report_len = 2,
+        .report_buf = {1, 0x05},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_enable =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 1,
+        .report_len = 2,
+        .report_buf = {1, 0x04},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_enable_fail =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .ret_status = STATUS_NOT_SUPPORTED,
+        .report_id = 1,
+        .report_len = 2,
+        .report_buf = {1, 0x04},
+        .todo = TRUE,
+    };
+    static struct hid_expect expect_reset_delay[] =
+    {
+        /* device control */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .ret_status = STATUS_PENDING,
+            .report_id = 1,
+            .report_len = 2,
+            .report_buf = {1, 0x01},
+            .todo = TRUE,
+        },
+        /* device gain */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 6,
+            .report_len = 2,
+            .report_buf = {6, 0x7f},
+            .todo = TRUE,
+        },
+    };
+    struct hid_expect expect_reset[] =
+    {
+        /* device control */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 1,
+            .report_len = 2,
+            .report_buf = {1, 0x01},
+            .todo = TRUE,
+        },
+        /* device gain */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 6,
+            .report_len = 2,
+            .report_buf = {6, 0x7f},
+            .todo = TRUE,
+        },
+    };
+    static const WCHAR *force_feedback_motor = RuntimeClass_Windows_Gaming_Input_ForceFeedback_ForceFeedbackMotor;
+    static const WCHAR *controller_class_name = RuntimeClass_Windows_Gaming_Input_RawGameController;
+    static const WCHAR *racing_wheel_class_name = RuntimeClass_Windows_Gaming_Input_RacingWheel;
+
+    DIPROPGUIDANDPATH guid_path =
+    {
+        .diph =
+        {
+            .dwSize = sizeof(DIPROPGUIDANDPATH),
+            .dwHeaderSize = sizeof(DIPROPHEADER),
+            .dwHow = DIPH_DEVICE,
+        },
+    };
+    DIDEVICEINSTANCEW devinst = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+    IAsyncOperationCompletedHandler_boolean *tmp_handler;
+    IVectorView_RawGameController *controllers_view;
+    IRawGameControllerStatics *controller_statics;
+    EventRegistrationToken controller_added_token;
+    struct bool_async_handler bool_async_handler;
+    IVectorView_ForceFeedbackMotor *motors_view;
+    IVectorView_RacingWheel *racing_wheels_view;
+    IRacingWheelStatics2 *racing_wheel_statics2;
+    IRacingWheelStatics *racing_wheel_statics;
+    ForceFeedbackEffectAxes supported_axes;
+    IAsyncOperation_boolean *bool_async;
+    IRawGameController *raw_controller;
+    IGameController *game_controller;
+    IDirectInputDevice8W *device;
+    IForceFeedbackMotor *motor;
+    IRacingWheel *racing_wheel;
+    BOOLEAN paused, enabled;
+    IAsyncInfo *async_info;
+    DOUBLE gain;
+    HSTRING str;
+    HANDLE file;
+    UINT32 size;
+    HRESULT hr;
+    DWORD ret;
+    ULONG ref;
+
+    if (!load_combase_functions()) return;
+
+    cleanup_registry_keys();
+
+    hr = pRoInitialize( RO_INIT_MULTITHREADED );
+    ok( hr == RPC_E_CHANGED_MODE, "RoInitialize returned %#lx\n", hr );
+
+    hr = pWindowsCreateString( controller_class_name, wcslen( controller_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IRawGameControllerStatics, (void **)&controller_statics );
+    ok( hr == S_OK || broken( hr == REGDB_E_CLASSNOTREG ), "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        win_skip( "%s runtimeclass not registered, skipping tests.\n", wine_dbgstr_w( controller_class_name ) );
+        goto done;
+    }
+
+    controller_added.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!controller_added.event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    hr = IRawGameControllerStatics_add_RawGameControllerAdded( controller_statics, &controller_added.IEventHandler_RawGameController_iface,
+                                                               &controller_added_token );
+    ok( hr == S_OK, "add_RawGameControllerAdded returned %#lx\n", hr );
+    ok( controller_added_token.value, "got token %I64u\n", controller_added_token.value );
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    desc.expect_size = sizeof(expect_init);
+    memcpy( desc.expect, expect_init, sizeof(expect_init) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
+    WaitForSingleObject( controller_added.event, INFINITE );
+    CloseHandle( controller_added.event );
+
+    if (FAILED(hr = dinput_test_create_device( 0x800, &devinst, &device ))) goto done;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_GUIDANDPATH, &guid_path.diph );
+    ok( hr == DI_OK, "GetProperty DIPROP_GUIDANDPATH returned %#lx\n", hr );
+    IDirectInputDevice8_Release( device );
+
+    file = CreateFileW( guid_path.wszPath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                        FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
+
+    hr = IRawGameControllerStatics_remove_RawGameControllerAdded( controller_statics, controller_added_token );
+    ok( hr == S_OK, "remove_RawGameControllerAdded returned %#lx\n", hr );
+
+    hr = IRawGameControllerStatics_get_RawGameControllers( controller_statics, &controllers_view );
+    ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
+    hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    ok( size == 1, "got size %u\n", size );
+    hr = IVectorView_RawGameController_GetAt( controllers_view, 0, &raw_controller );
+    ok( hr == S_OK, "GetAt returned %#lx\n", hr );
+    IVectorView_RawGameController_Release( controllers_view );
+
+    hr = pWindowsCreateString( racing_wheel_class_name, wcslen( racing_wheel_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IRacingWheelStatics, (void **)&racing_wheel_statics );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IRacingWheelStatics2, (void **)&racing_wheel_statics2 );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    /* HID driving wheels aren't exposed as WGI gamepads on Windows */
+
+    hr = IRacingWheelStatics_get_RacingWheels( racing_wheel_statics, &racing_wheels_view );
+    ok( hr == S_OK, "get_RacingWheels returned %#lx\n", hr );
+    hr = IVectorView_RacingWheel_get_Size( racing_wheels_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    todo_wine /* but Wine currently intentionally does */
+    ok( size == 0, "got size %u\n", size );
+    IVectorView_RacingWheel_Release( racing_wheels_view );
+    IRacingWheelStatics_Release( racing_wheel_statics );
+
+    hr = IRawGameController_QueryInterface( raw_controller, &IID_IGameController, (void **)&game_controller );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IRacingWheelStatics2_FromGameController( racing_wheel_statics2, game_controller, &racing_wheel );
+    ok( hr == S_OK, "FromGameController returned %#lx\n", hr );
+    todo_wine
+    ok( racing_wheel == NULL, "got racing_wheel %p\n", racing_wheel );
+    IGameController_Release( game_controller );
+    IRacingWheelStatics2_Release( racing_wheel_statics2 );
+
+    set_hid_expect( file, expect_acquire, sizeof(expect_acquire) );
+    hr = IRawGameController_get_ForceFeedbackMotors( raw_controller, &motors_view );
+    todo_wine
+    ok( hr == S_OK, "get_ForceFeedbackMotors returned %#lx\n", hr );
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE ); /* device gain reports are written asynchronously */
+    if (!motors_view) goto skip_tests;
+
+    hr = IVectorView_ForceFeedbackMotor_get_Size( motors_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    todo_wine
+    ok( size == 1, "got size %u\n", size );
+    hr = IVectorView_ForceFeedbackMotor_GetAt( motors_view, 0, &motor );
+    todo_wine
+    ok( hr == S_OK, "GetAt returned %#lx\n", hr );
+    IVectorView_ForceFeedbackMotor_Release( motors_view );
+
+    check_interface( motor, &IID_IUnknown, TRUE );
+    check_interface( motor, &IID_IInspectable, TRUE );
+    check_interface( motor, &IID_IAgileObject, TRUE );
+    check_interface( motor, &IID_IForceFeedbackMotor, TRUE );
+    check_runtimeclass( motor, force_feedback_motor );
+
+    paused = TRUE;
+    hr = IForceFeedbackMotor_get_AreEffectsPaused( motor, &paused );
+    todo_wine
+    ok( hr == S_OK, "get_AreEffectsPaused returned %#lx\n", hr );
+    todo_wine
+    ok( paused == FALSE, "got paused %u\n", paused );
+
+    gain = 12345.6;
+    hr = IForceFeedbackMotor_get_MasterGain( motor, &gain );
+    todo_wine
+    ok( hr == S_OK, "get_MasterGain returned %#lx\n", hr );
+    todo_wine
+    ok( gain == 1.0, "got gain %f\n", gain );
+    set_hid_expect( file, &expect_set_gain, sizeof(expect_set_gain) );
+    hr = IForceFeedbackMotor_put_MasterGain( motor, 0.5 );
+    todo_wine
+    ok( hr == S_OK, "put_MasterGain returned %#lx\n", hr );
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE ); /* device gain reports are written asynchronously */
+
+    enabled = FALSE;
+    hr = IForceFeedbackMotor_get_IsEnabled( motor, &enabled );
+    todo_wine
+    ok( hr == S_OK, "get_IsEnabled returned %#lx\n", hr );
+    todo_wine
+    ok( enabled == TRUE, "got enabled %u\n", enabled );
+
+    supported_axes = 0xdeadbeef;
+    hr = IForceFeedbackMotor_get_SupportedAxes( motor, &supported_axes );
+    todo_wine
+    ok( hr == S_OK, "get_SupportedAxes returned %#lx\n", hr );
+    todo_wine
+    ok( supported_axes == ForceFeedbackEffectAxes_X, "got axes %#x\n", supported_axes );
+
+    set_hid_expect( file, &expect_pause, sizeof(expect_pause) );
+    hr = IForceFeedbackMotor_PauseAllEffects( motor );
+    todo_wine
+    ok( hr == S_OK, "PauseAllEffects returned %#lx\n", hr );
+    set_hid_expect( file, &expect_resume, sizeof(expect_resume) );
+    hr = IForceFeedbackMotor_ResumeAllEffects( motor );
+    todo_wine
+    ok( hr == S_OK, "ResumeAllEffects returned %#lx\n", hr );
+    set_hid_expect( file, &expect_stop, sizeof(expect_stop) );
+    hr = IForceFeedbackMotor_StopAllEffects( motor );
+    todo_wine
+    ok( hr == S_OK, "StopAllEffects returned %#lx\n", hr );
+    set_hid_expect( file, NULL, 0 );
+
+
+    set_hid_expect( file, &expect_disable, sizeof(expect_disable) );
+    hr = IForceFeedbackMotor_TryDisableAsync( motor, &bool_async );
+    todo_wine
+    ok( hr == S_OK, "TryDisableAsync returned %#lx\n", hr );
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+
+    check_interface( bool_async, &IID_IUnknown, TRUE );
+    check_interface( bool_async, &IID_IInspectable, TRUE );
+    check_interface( bool_async, &IID_IAgileObject, TRUE );
+    check_interface( bool_async, &IID_IAsyncInfo, TRUE );
+    check_interface( bool_async, &IID_IAsyncOperation_boolean, TRUE );
+    check_runtimeclass( bool_async, L"Windows.Foundation.IAsyncOperation`1<Boolean>" );
+
+    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
+    ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
+    ok( tmp_handler == NULL, "got handler %p\n", tmp_handler );
+    bool_async_handler = default_bool_async_handler;
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
+    ok( bool_async_handler.invoked, "handler not invoked\n" );
+    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
+    ok( bool_async_handler.status == Completed, "got status %u\n", bool_async_handler.status );
+    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
+    ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
+    ok( tmp_handler == NULL, "got handler %p\n", tmp_handler );
+    bool_async_handler = default_bool_async_handler;
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    ok( hr == E_ILLEGAL_DELEGATE_ASSIGNMENT, "put_Completed returned %#lx\n", hr );
+    ok( !bool_async_handler.invoked, "handler invoked\n" );
+    ok( bool_async_handler.async == NULL, "got async %p\n", bool_async_handler.async );
+    ok( bool_async_handler.status == Started, "got status %u\n", bool_async_handler.status );
+
+    hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IAsyncInfo_Cancel( async_info );
+    ok( hr == S_OK, "Cancel returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    hr = IAsyncInfo_Close( async_info );
+    ok( hr == S_OK, "Close returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, 4, S_OK, FALSE );
+    IAsyncInfo_Release( async_info );
+
+    ref = IAsyncOperation_boolean_Release( bool_async );
+    ok( ref == 0, "Release returned %lu\n", ref );
+
+
+    set_hid_expect( file, &expect_enable_fail, sizeof(expect_enable_fail) );
+    hr = IForceFeedbackMotor_TryEnableAsync( motor, &bool_async );
+    todo_wine
+    ok( hr == S_OK, "TryEnableAsync returned %#lx\n", hr );
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    check_bool_async( bool_async, 1, Error, 0x8685400d, FALSE );
+
+    bool_async_handler = default_bool_async_handler;
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
+    ok( bool_async_handler.invoked, "handler not invoked\n" );
+    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
+    ok( bool_async_handler.status == Error, "got status %u\n", bool_async_handler.status );
+
+    hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IAsyncInfo_Cancel( async_info );
+    ok( hr == S_OK, "Cancel returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, Error, 0x8685400d, FALSE );
+    hr = IAsyncInfo_Close( async_info );
+    ok( hr == S_OK, "Close returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, 4, 0x8685400d, FALSE );
+    IAsyncInfo_Release( async_info );
+
+    ref = IAsyncOperation_boolean_Release( bool_async );
+    ok( ref == 0, "Release returned %lu\n", ref );
+
+
+    /* canceling the async op is just ignored */
+
+    set_hid_expect( file, expect_reset_delay, sizeof(expect_reset_delay) );
+    hr = IForceFeedbackMotor_TryResetAsync( motor, &bool_async );
+    todo_wine
+    ok( hr == S_OK, "TryResetAsync returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, Started, S_OK, FALSE );
+
+    bool_async_handler = default_bool_async_handler;
+    bool_async_handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!bool_async_handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
+    ok( !bool_async_handler.invoked, "handler invoked\n" );
+    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
+    ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
+    ok( tmp_handler == &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface,
+        "got handler %p\n", tmp_handler );
+
+    hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IAsyncInfo_Cancel( async_info );
+    ok( hr == S_OK, "Cancel returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, Canceled, S_OK, FALSE );
+    ok( !bool_async_handler.invoked, "handler invoked\n" );
+    IAsyncInfo_Release( async_info );
+
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    ret = WaitForSingleObject( bool_async_handler.event, 100 );
+    ok( ret == 0, "WaitForSingleObject returned %#lx\n", ret );
+    CloseHandle( bool_async_handler.event );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+
+    ok( bool_async_handler.invoked, "handler not invoked\n" );
+    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
+    ok( bool_async_handler.status == Completed, "got status %u\n", bool_async_handler.status );
+    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
+    ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
+    ok( tmp_handler == NULL, "got handler %p\n", tmp_handler );
+
+    ref = IAsyncOperation_boolean_Release( bool_async );
+    ok( ref == 0, "Release returned %lu\n", ref );
+
+
+    /* canceling then closing it calls the handler with closed state */
+
+    set_hid_expect( file, expect_reset_delay, sizeof(expect_reset_delay) );
+    hr = IForceFeedbackMotor_TryResetAsync( motor, &bool_async );
+    todo_wine
+    ok( hr == S_OK, "TryResetAsync returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, Started, S_OK, FALSE );
+
+    bool_async_handler = default_bool_async_handler;
+    bool_async_handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!bool_async_handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
+
+    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
+    ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
+    ok( !bool_async_handler.invoked, "handler invoked\n" );
+
+    hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IAsyncInfo_Close( async_info );
+    ok( hr == E_ILLEGAL_STATE_CHANGE, "Close returned %#lx\n", hr );
+    hr = IAsyncInfo_Cancel( async_info );
+    ok( hr == S_OK, "Cancel returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, Canceled, S_OK, FALSE );
+    ok( !bool_async_handler.invoked, "handler invoked\n" );
+    hr = IAsyncInfo_Close( async_info );
+    ok( hr == S_OK, "Close returned %#lx\n", hr );
+    check_bool_async( bool_async, 1, 4, S_OK, FALSE );
+    ok( !bool_async_handler.invoked, "handler invoked\n" );
+    IAsyncInfo_Release( async_info );
+
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    ret = WaitForSingleObject( bool_async_handler.event, 100 );
+    ok( ret == 0, "WaitForSingleObject returned %#lx\n", ret );
+    CloseHandle( bool_async_handler.event );
+    check_bool_async( bool_async, 1, 4, S_OK, FALSE );
+
+    ok( bool_async_handler.invoked, "handler not invoked\n" );
+    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
+    ok( bool_async_handler.status == 4, "got status %u\n", bool_async_handler.status );
+    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
+    ok( hr == E_ILLEGAL_METHOD_CALL, "get_Completed returned %#lx\n", hr );
+
+    ref = IAsyncOperation_boolean_Release( bool_async );
+    ok( ref == 0, "Release returned %lu\n", ref );
+
+
+    set_hid_expect( file, &expect_enable, sizeof(expect_enable) );
+    hr = IForceFeedbackMotor_TryEnableAsync( motor, &bool_async );
+    todo_wine
+    ok( hr == S_OK, "TryEnableAsync returned %#lx\n", hr );
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    ref = IAsyncOperation_boolean_Release( bool_async );
+    ok( ref == 0, "Release returned %lu\n", ref );
+
+
+    set_hid_expect( file, expect_reset, sizeof(expect_reset) );
+    hr = IForceFeedbackMotor_TryResetAsync( motor, &bool_async );
+    todo_wine
+    ok( hr == S_OK, "TryResetAsync returned %#lx\n", hr );
+    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    ref = IAsyncOperation_boolean_Release( bool_async );
+    ok( ref == 0, "Release returned %lu\n", ref );
+
+
+    IForceFeedbackMotor_Release( motor );
+
+skip_tests:
+    IRawGameController_Release( raw_controller );
+
+    CloseHandle( file );
+    IRawGameControllerStatics_Release( controller_statics );
+
+done:
+    hid_device_stop( &desc );
+    cleanup_registry_keys();
+}
+
 START_TEST( force_feedback )
 {
     if (!dinput_test_init()) return;
@@ -4334,6 +5562,7 @@ START_TEST( force_feedback )
         test_force_feedback_joystick( 0x500 );
         test_force_feedback_joystick( 0x700 );
         test_device_managed_effect();
+        test_windows_gaming_input();
     }
     CoUninitialize();
 

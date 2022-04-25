@@ -1230,25 +1230,23 @@ NTSTATUS WINAPI NtQueryDirectoryObject( HANDLE handle, DIRECTORY_BASIC_INFORMATI
                                         ULONG size, BOOLEAN single_entry, BOOLEAN restart,
                                         ULONG *context, ULONG *ret_size )
 {
+    ULONG index = restart ? 0 : *context;
     NTSTATUS ret;
-
-    if (restart) *context = 0;
 
     if (single_entry)
     {
-        if (size <= sizeof(*buffer) + 2 * sizeof(WCHAR)) return STATUS_BUFFER_OVERFLOW;
-
         SERVER_START_REQ( get_directory_entry )
         {
             req->handle = wine_server_obj_handle( handle );
-            req->index = *context;
-            wine_server_set_reply( req, buffer + 1, size - sizeof(*buffer) - 2*sizeof(WCHAR) );
+            req->index = index;
+            if (size >= 2 * sizeof(*buffer) + 2 * sizeof(WCHAR))
+                wine_server_set_reply( req, buffer + 2, size - 2 * sizeof(*buffer) - 2 * sizeof(WCHAR) );
             if (!(ret = wine_server_call( req )))
             {
-                buffer->ObjectName.Buffer = (WCHAR *)(buffer + 1);
+                buffer->ObjectName.Buffer = (WCHAR *)(buffer + 2);
                 buffer->ObjectName.Length = reply->name_len;
                 buffer->ObjectName.MaximumLength = reply->name_len + sizeof(WCHAR);
-                buffer->ObjectTypeName.Buffer = (WCHAR *)(buffer + 1) + reply->name_len/sizeof(WCHAR) + 1;
+                buffer->ObjectTypeName.Buffer = (WCHAR *)(buffer + 2) + reply->name_len/sizeof(WCHAR) + 1;
                 buffer->ObjectTypeName.Length = wine_server_reply_size( reply ) - reply->name_len;
                 buffer->ObjectTypeName.MaximumLength = buffer->ObjectTypeName.Length + sizeof(WCHAR);
                 /* make room for the terminating null */
@@ -1256,12 +1254,22 @@ NTSTATUS WINAPI NtQueryDirectoryObject( HANDLE handle, DIRECTORY_BASIC_INFORMATI
                          buffer->ObjectTypeName.Length );
                 buffer->ObjectName.Buffer[buffer->ObjectName.Length/sizeof(WCHAR)] = 0;
                 buffer->ObjectTypeName.Buffer[buffer->ObjectTypeName.Length/sizeof(WCHAR)] = 0;
-                (*context)++;
+
+                memset( &buffer[1], 0, sizeof(buffer[1]) );
+
+                *context = index + 1;
             }
+            else if (ret == STATUS_NO_MORE_ENTRIES)
+            {
+                if (size > sizeof(*buffer))
+                    memset( buffer, 0, sizeof(*buffer) );
+                if (ret_size) *ret_size = sizeof(*buffer);
+            }
+
+            if (ret_size && (!ret || ret == STATUS_BUFFER_TOO_SMALL))
+                *ret_size = 2 * sizeof(*buffer) + reply->total_len + 2 * sizeof(WCHAR);
         }
         SERVER_END_REQ;
-        if (ret_size)
-            *ret_size = buffer->ObjectName.MaximumLength + buffer->ObjectTypeName.MaximumLength + sizeof(*buffer);
     }
     else
     {

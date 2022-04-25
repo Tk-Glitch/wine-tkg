@@ -504,12 +504,13 @@ static BOOL get_url_encoding(HKEY root, DWORD *encoding)
 }
 
 static LPWSTR user_agent;
+static BOOL user_agent_set;
 
 static size_t obtain_user_agent(unsigned int version, WCHAR *ret, size_t size)
 {
+    BOOL is_wow, quirks = FALSE, use_current = FALSE;
     OSVERSIONINFOW info = {sizeof(info)};
     const WCHAR *os_type, *is_nt;
-    BOOL is_wow, quirks = FALSE;
     DWORD res;
     size_t len = 0;
     HKEY key;
@@ -518,17 +519,18 @@ static size_t obtain_user_agent(unsigned int version, WCHAR *ret, size_t size)
         version &= ~UAS_EXACTLEGACY;
         if(version == 7)
             quirks = TRUE;
-        else
+        else {
+            use_current = TRUE;
             version = 7;
-    }else if(version < 7) {
-        version = 7;
+        }
     }
+
     if(version > 11) {
         FIXME("Unsupported version %u\n", version);
         version = 11;
     }
 
-    if(version < 7 || (version == 7 && !quirks)) {
+    if(version < 7 || use_current) {
         EnterCriticalSection(&session_cs);
         if(user_agent) {
             len = wcslen(user_agent) + 1;
@@ -537,6 +539,9 @@ static size_t obtain_user_agent(unsigned int version, WCHAR *ret, size_t size)
         LeaveCriticalSection(&session_cs);
         if(len) return len;
     }
+
+    if(version < 7)
+        version = 7;
 
     swprintf(ret, size, L"Mozilla/%s (", version < 9 ? L"4.0" : L"5.0");
     len = lstrlenW(ret);
@@ -710,6 +715,7 @@ HRESULT WINAPI UrlMkSetSessionOption(DWORD dwOption, LPVOID pBuffer, DWORD dwBuf
 
         heap_free(user_agent);
         user_agent = new_user_agent;
+        user_agent_set = TRUE;
         update_user_agent(user_agent);
 
         LeaveCriticalSection(&session_cs);
@@ -746,6 +752,44 @@ HRESULT WINAPI ObtainUserAgentString(DWORD option, char *ret, DWORD *ret_size)
 
     *ret_size = size;
     return hres;
+}
+
+/***********************************************************************
+ *                 MapBrowserEmulationModeToUserAgent (URLMON.445)
+ *    Undocumented, added in IE8
+ */
+HRESULT WINAPI MapBrowserEmulationModeToUserAgent(const void *arg, WCHAR **ret)
+{
+    DWORD size, version;
+    const WCHAR *ua;
+    WCHAR buf[1024];
+
+    TRACE("%p %p: semi-stub\n", arg, ret);
+
+    if(user_agent_set) {
+        /* Native ignores first arg if custom user agent has been set, doesn't crash even if NULL */
+        size = (wcslen(user_agent) + 1) * sizeof(WCHAR);
+        ua = user_agent;
+    }else {
+        *ret = NULL;
+
+        /* First arg seems to be a pointer to a structure of unknown size, and crashes
+           if it's too small (or filled with arbitrary values from the stack). For our
+           purposes, we only check first field which seems to be the requested version. */
+        version = *(DWORD*)arg;
+        if(version == 5)
+            version = 7;
+        if(version < 7 || version > 11)
+            return E_FAIL;
+
+        size = obtain_user_agent(version, buf, ARRAY_SIZE(buf)) * sizeof(WCHAR);
+        ua = buf;
+    }
+
+    if(!(*ret = CoTaskMemAlloc(size)))
+        return E_OUTOFMEMORY;
+    memcpy(*ret, ua, size);
+    return S_OK;
 }
 
 void free_session(void)

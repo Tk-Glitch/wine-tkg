@@ -164,8 +164,8 @@ static const struct { UINT cp; const WCHAR *name; } codepage_names[] =
     { 28604, L"ISO 8859-14 Latin 8 (Celtic)" },
     { 28605, L"ISO 8859-15 Latin 9 (Euro)" },
     { 28606, L"ISO 8859-16 Latin 10 (Balkan)" },
-    { 65000, L"Unicode (UTF-7)" },
-    { 65001, L"Unicode (UTF-8)" }
+    { 65000, L"65000 (UTF-7)" },
+    { 65001, L"65001 (UTF-8)" }
 };
 
 /* Unicode expanded ligatures */
@@ -285,7 +285,6 @@ struct norm_table
 
 static NLSTABLEINFO nls_info;
 static UINT unix_cp = CP_UTF8;
-static UINT mac_cp = 10000;
 static LCID system_lcid;
 static LCID user_lcid;
 static HKEY intl_key;
@@ -366,10 +365,9 @@ static void load_locale_nls(void)
         UINT  index_count;
     } *geo_header;
 
-    LCID lcid;
     LARGE_INTEGER dummy;
 
-    RtlGetLocaleFileMappingAddress( (void **)&header, &lcid, &dummy );
+    RtlGetLocaleFileMappingAddress( (void **)&header, &system_lcid, &dummy );
     locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
     lcids_index = (const NLS_LOCALE_LCID_INDEX *)((char *)locale_table + locale_table->lcids_offset);
     lcnames_index = (const NLS_LOCALE_LCNAME_INDEX *)((char *)locale_table + locale_table->lcnames_offset);
@@ -1753,7 +1751,7 @@ static void update_locale_registry(void)
  */
 void init_locale( HMODULE module )
 {
-    UINT ansi_cp = 0, oem_cp = 0;
+    USHORT utf8[2] = { 0, CP_UTF8 };
     USHORT *ansi_ptr, *oem_ptr;
     void *sort_ptr;
     WCHAR bufferW[LOCALE_NAME_MAX_LENGTH];
@@ -1766,17 +1764,10 @@ void init_locale( HMODULE module )
     kernelbase_handle = module;
     load_locale_nls();
 
-    NtQueryDefaultLocale( FALSE, &system_lcid );
-    NtQueryDefaultLocale( FALSE, &user_lcid );
-    if (!(system_locale = NlsValidateLocale( &system_lcid, 0 )))
-    {
-        if (GetEnvironmentVariableW( L"WINELOCALE", bufferW, ARRAY_SIZE(bufferW) ))
-            system_locale = get_locale_by_name( bufferW, &system_lcid );
-        if (!system_locale) system_locale = get_locale_by_name( L"en-US", &system_lcid );
-    }
-    system_lcid = system_locale->ilanguage;
-    if (system_lcid == LOCALE_CUSTOM_UNSPECIFIED) system_lcid = LOCALE_CUSTOM_DEFAULT;
+    if (system_lcid == LOCALE_CUSTOM_UNSPECIFIED) system_lcid = MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT );
+    system_locale = NlsValidateLocale( &system_lcid, 0 );
 
+    NtQueryDefaultLocale( TRUE, &user_lcid );
     if (!(user_locale = NlsValidateLocale( &user_lcid, 0 )))
     {
         if (GetEnvironmentVariableW( L"WINEUSERLOCALE", bufferW, ARRAY_SIZE(bufferW) ))
@@ -1789,26 +1780,13 @@ void init_locale( HMODULE module )
     if (GetEnvironmentVariableW( L"WINEUNIXCP", bufferW, ARRAY_SIZE(bufferW) ))
         unix_cp = wcstoul( bufferW, NULL, 10 );
 
-    GetLocaleInfoW( LOCALE_SYSTEM_DEFAULT, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
-                    (WCHAR *)&ansi_cp, sizeof(ansi_cp)/sizeof(WCHAR) );
-    GetLocaleInfoW( LOCALE_SYSTEM_DEFAULT, LOCALE_IDEFAULTMACCODEPAGE | LOCALE_RETURN_NUMBER,
-                    (WCHAR *)&mac_cp, sizeof(mac_cp)/sizeof(WCHAR) );
-    GetLocaleInfoW( LOCALE_SYSTEM_DEFAULT, LOCALE_IDEFAULTCODEPAGE | LOCALE_RETURN_NUMBER,
-                    (WCHAR *)&oem_cp, sizeof(oem_cp)/sizeof(WCHAR) );
-
     NtGetNlsSectionPtr( 9, 0, NULL, &sort_ptr, &size );
     NtGetNlsSectionPtr( 12, NormalizationC, NULL, (void **)&norm_info, &size );
     init_sortkeys( sort_ptr );
 
-    if (!ansi_cp || NtGetNlsSectionPtr( 11, ansi_cp, NULL, (void **)&ansi_ptr, &size ))
-        NtGetNlsSectionPtr( 11, 1252, NULL, (void **)&ansi_ptr, &size );
-    if (!oem_cp || NtGetNlsSectionPtr( 11, oem_cp, 0, (void **)&oem_ptr, &size ))
-        NtGetNlsSectionPtr( 11, 437, NULL, (void **)&oem_ptr, &size );
-    NtCurrentTeb()->Peb->AnsiCodePageData = ansi_ptr;
-    NtCurrentTeb()->Peb->OemCodePageData = oem_ptr;
-    NtCurrentTeb()->Peb->UnicodeCaseTableData = sort.casemap;
+    ansi_ptr = NtCurrentTeb()->Peb->AnsiCodePageData ? NtCurrentTeb()->Peb->AnsiCodePageData : utf8;
+    oem_ptr = NtCurrentTeb()->Peb->OemCodePageData ? NtCurrentTeb()->Peb->OemCodePageData : utf8;
     RtlInitNlsTables( ansi_ptr, oem_ptr, sort.casemap, &nls_info );
-    RtlResetRtlTranslations( &nls_info );
 
     RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Nls",
                      0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &nls_key, NULL );
@@ -1848,11 +1826,11 @@ void init_locale( HMODULE module )
     if (!RegCreateKeyExW( nls_key, L"Codepage",
                           0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL ))
     {
-        count = swprintf( bufferW, ARRAY_SIZE(bufferW), L"%03d", ansi_cp );
+        count = swprintf( bufferW, ARRAY_SIZE(bufferW), L"%03d", GetACP() );
         RegSetValueExW( hkey, L"ACP", 0, REG_SZ, (BYTE *)bufferW, (count + 1) * sizeof(WCHAR) );
-        count = swprintf( bufferW, ARRAY_SIZE(bufferW), L"%03d", oem_cp );
+        count = swprintf( bufferW, ARRAY_SIZE(bufferW), L"%03d", GetOEMCP() );
         RegSetValueExW( hkey, L"OEMCP", 0, REG_SZ, (BYTE *)bufferW, (count + 1) * sizeof(WCHAR) );
-        count = swprintf( bufferW, ARRAY_SIZE(bufferW), L"%03d", mac_cp );
+        count = swprintf( bufferW, ARRAY_SIZE(bufferW), L"%03d", system_locale->idefaultmaccodepage );
         RegSetValueExW( hkey, L"MACCP", 0, REG_SZ, (BYTE *)bufferW, (count + 1) * sizeof(WCHAR) );
         RegCloseKey( hkey );
     }
@@ -1964,24 +1942,28 @@ static WCHAR compose_chars( WCHAR ch1, WCHAR ch2 )
 static UINT get_locale_codepage( const NLS_LOCALE_DATA *locale, ULONG flags )
 {
     UINT ret = locale->idefaultansicodepage;
-    if ((flags & LOCALE_USE_CP_ACP) || ret == CP_UTF8) ret = system_locale->idefaultansicodepage;
+    if ((flags & LOCALE_USE_CP_ACP) || ret == CP_UTF8) ret = nls_info.AnsiTableInfo.CodePage;
     return ret;
 }
 
 
 static UINT get_lcid_codepage( LCID lcid, ULONG flags )
 {
-    UINT ret = GetACP();
+    UINT ret = nls_info.AnsiTableInfo.CodePage;
 
-    if (!(flags & LOCALE_USE_CP_ACP) && lcid != GetSystemDefaultLCID())
-        GetLocaleInfoW( lcid, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
-                        (WCHAR *)&ret, sizeof(ret)/sizeof(WCHAR) );
+    if (!(flags & LOCALE_USE_CP_ACP) && lcid != system_lcid)
+    {
+        const NLS_LOCALE_DATA *locale = NlsValidateLocale( &lcid, 0 );
+        if (locale) ret = locale->idefaultansicodepage;
+    }
     return ret;
 }
 
 
 static const CPTABLEINFO *get_codepage_table( UINT codepage )
 {
+    static const CPTABLEINFO utf7_cpinfo = { CP_UTF7, 5, '?', 0xfffd, '?', '?' };
+    static const CPTABLEINFO utf8_cpinfo = { CP_UTF8, 4, '?', 0xfffd, '?', '?' };
     unsigned int i;
     USHORT *ptr;
     SIZE_T size;
@@ -1993,18 +1975,16 @@ static const CPTABLEINFO *get_codepage_table( UINT codepage )
     case CP_OEMCP:
         return &nls_info.OemTableInfo;
     case CP_MACCP:
-        codepage = mac_cp;
+        codepage = system_locale->idefaultmaccodepage;
         break;
     case CP_THREAD_ACP:
-        if (NtCurrentTeb()->CurrentLocale == GetUserDefaultLCID()) return &nls_info.AnsiTableInfo;
         codepage = get_lcid_codepage( NtCurrentTeb()->CurrentLocale, 0 );
-        if (!codepage) return &nls_info.AnsiTableInfo;
-        break;
-    default:
-        if (codepage == nls_info.AnsiTableInfo.CodePage) return &nls_info.AnsiTableInfo;
-        if (codepage == nls_info.OemTableInfo.CodePage) return &nls_info.OemTableInfo;
         break;
     }
+    if (codepage == nls_info.AnsiTableInfo.CodePage) return &nls_info.AnsiTableInfo;
+    if (codepage == nls_info.OemTableInfo.CodePage) return &nls_info.OemTableInfo;
+    if (codepage == CP_UTF8) return &utf8_cpinfo;
+    if (codepage == CP_UTF7) return &utf7_cpinfo;
 
     RtlEnterCriticalSection( &locale_section );
 
@@ -2281,11 +2261,6 @@ static int mbstowcs_utf8( DWORD flags, const char *src, int srclen, WCHAR *dst, 
     DWORD reslen;
     NTSTATUS status;
 
-    if (flags & ~(MB_PRECOMPOSED | MB_COMPOSITE | MB_USEGLYPHCHARS | MB_ERR_INVALID_CHARS))
-    {
-        SetLastError( ERROR_INVALID_FLAGS );
-        return 0;
-    }
     if (!dstlen) dst = NULL;
     status = RtlUTF8ToUnicodeN( dst, dstlen * sizeof(WCHAR), &reslen, src, srclen );
     if (status == STATUS_SOME_NOT_MAPPED)
@@ -2526,23 +2501,11 @@ static int mbstowcs_dbcs( const CPTABLEINFO *info, const unsigned char *src, int
 }
 
 
-static int mbstowcs_codepage( UINT codepage, DWORD flags, const char *src, int srclen,
+static int mbstowcs_codepage( const CPTABLEINFO *info, DWORD flags, const char *src, int srclen,
                               WCHAR *dst, int dstlen )
 {
     CPTABLEINFO local_info;
-    const CPTABLEINFO *info = get_codepage_table( codepage );
     const unsigned char *str = (const unsigned char *)src;
-
-    if (!info)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
-    }
-    if (flags & ~(MB_PRECOMPOSED | MB_COMPOSITE | MB_USEGLYPHCHARS | MB_ERR_INVALID_CHARS))
-    {
-        SetLastError( ERROR_INVALID_FLAGS );
-        return 0;
-    }
 
     if ((flags & MB_USEGLYPHCHARS) && info->MultiByteTable[256] == 256)
     {
@@ -2702,17 +2665,7 @@ static int wcstombs_utf8( DWORD flags, const WCHAR *src, int srclen, char *dst, 
     DWORD reslen;
     NTSTATUS status;
 
-    if (defchar || used)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
-    }
-    if (flags & ~(WC_DISCARDNS | WC_SEPCHARS | WC_DEFAULTCHAR | WC_ERR_INVALID_CHARS |
-                  WC_COMPOSITECHECK | WC_NO_BEST_FIT_CHARS))
-    {
-        SetLastError( ERROR_INVALID_FLAGS );
-        return 0;
-    }
+    if (used) *used = FALSE;
     if (!dstlen) dst = NULL;
     status = RtlUnicodeToUTF8N( dst, dstlen, &reslen, src, srclen * sizeof(WCHAR) );
     if (status == STATUS_SOME_NOT_MAPPED)
@@ -2722,6 +2675,7 @@ static int wcstombs_utf8( DWORD flags, const WCHAR *src, int srclen, char *dst, 
             SetLastError( ERROR_NO_UNICODE_TRANSLATION );
             return 0;
         }
+        if (used) *used = TRUE;
     }
     else if (!set_ntstatus( status )) reslen = 0;
     return reslen;
@@ -3069,22 +3023,9 @@ static int wcstombs_dbcs_slow( const CPTABLEINFO *info, DWORD flags, const WCHAR
 }
 
 
-static int wcstombs_codepage( UINT codepage, DWORD flags, const WCHAR *src, int srclen,
+static int wcstombs_codepage( const CPTABLEINFO *info, DWORD flags, const WCHAR *src, int srclen,
                               char *dst, int dstlen, const char *defchar, BOOL *used )
 {
-    const CPTABLEINFO *info = get_codepage_table( codepage );
-
-    if (!info)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
-    }
-    if (flags & ~(WC_DISCARDNS | WC_SEPCHARS | WC_DEFAULTCHAR | WC_ERR_INVALID_CHARS |
-                  WC_COMPOSITECHECK | WC_NO_BEST_FIT_CHARS))
-    {
-        SetLastError( ERROR_INVALID_FLAGS );
-        return 0;
-    }
     if (flags || defchar || used)
     {
         if (!defchar) defchar = (const char *)&info->DefaultChar;
@@ -5223,27 +5164,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetCPInfo( UINT codepage, CPINFO *cpinfo )
 {
     const CPTABLEINFO *table;
 
-    if (!cpinfo)
+    if (!cpinfo || !(table = get_codepage_table( codepage )))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
-    switch (codepage)
-    {
-    case CP_UTF7:
-    case CP_UTF8:
-        cpinfo->DefaultChar[0] = 0x3f;
-        cpinfo->DefaultChar[1] = 0;
-        memset( cpinfo->LeadByte, 0, sizeof(cpinfo->LeadByte) );
-        cpinfo->MaxCharSize = (codepage == CP_UTF7) ? 5 : 4;
-        break;
-    default:
-        if (!(table = get_codepage_table( codepage ))) return FALSE;
-        cpinfo->MaxCharSize = table->MaximumCharacterSize;
-        memcpy( cpinfo->DefaultChar, &table->DefaultChar, sizeof(cpinfo->DefaultChar) );
-        memcpy( cpinfo->LeadByte, table->LeadByte, sizeof(cpinfo->LeadByte) );
-        break;
-    }
+    cpinfo->MaxCharSize = table->MaximumCharacterSize;
+    memcpy( cpinfo->DefaultChar, &table->DefaultChar, sizeof(cpinfo->DefaultChar) );
+    memcpy( cpinfo->LeadByte, table->LeadByte, sizeof(cpinfo->LeadByte) );
     return TRUE;
 }
 
@@ -5256,38 +5184,16 @@ BOOL WINAPI GetCPInfoExW( UINT codepage, DWORD flags, CPINFOEXW *cpinfo )
     const CPTABLEINFO *table;
     int min, max, pos;
 
-    if (!cpinfo)
+    if (!cpinfo || !(table = get_codepage_table( codepage )))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
-    switch (codepage)
-    {
-    case CP_UTF7:
-        cpinfo->DefaultChar[0] = 0x3f;
-        cpinfo->DefaultChar[1] = 0;
-        cpinfo->LeadByte[0] = cpinfo->LeadByte[1] = 0;
-        cpinfo->MaxCharSize = 5;
-        cpinfo->CodePage = CP_UTF7;
-        cpinfo->UnicodeDefaultChar = 0x3f;
-        break;
-    case CP_UTF8:
-        cpinfo->DefaultChar[0] = 0x3f;
-        cpinfo->DefaultChar[1] = 0;
-        cpinfo->LeadByte[0] = cpinfo->LeadByte[1] = 0;
-        cpinfo->MaxCharSize = 4;
-        cpinfo->CodePage = CP_UTF8;
-        cpinfo->UnicodeDefaultChar = 0x3f;
-        break;
-    default:
-        if (!(table = get_codepage_table( codepage ))) return FALSE;
-        cpinfo->MaxCharSize = table->MaximumCharacterSize;
-        memcpy( cpinfo->DefaultChar, &table->DefaultChar, sizeof(cpinfo->DefaultChar) );
-        memcpy( cpinfo->LeadByte, table->LeadByte, sizeof(cpinfo->LeadByte) );
-        cpinfo->CodePage = table->CodePage;
-        cpinfo->UnicodeDefaultChar = table->UniDefaultChar;
-        break;
-    }
+    cpinfo->MaxCharSize = table->MaximumCharacterSize;
+    memcpy( cpinfo->DefaultChar, &table->DefaultChar, sizeof(cpinfo->DefaultChar) );
+    memcpy( cpinfo->LeadByte, table->LeadByte, sizeof(cpinfo->LeadByte) );
+    cpinfo->CodePage = table->CodePage;
+    cpinfo->UnicodeDefaultChar = table->UniDefaultChar;
 
     min = 0;
     max = ARRAY_SIZE(codepage_names) - 1;
@@ -5483,6 +5389,7 @@ INT WINAPI DECLSPEC_HOTPATCH GetGeoInfoW( GEOID id, GEOTYPE type, WCHAR *data, i
  */
 INT WINAPI DECLSPEC_HOTPATCH GetLocaleInfoA( LCID lcid, LCTYPE lctype, char *buffer, INT len )
 {
+    const NLS_LOCALE_DATA *locale;
     WCHAR *bufferW;
     INT lenW, ret;
 
@@ -5498,19 +5405,26 @@ INT WINAPI DECLSPEC_HOTPATCH GetLocaleInfoA( LCID lcid, LCTYPE lctype, char *buf
         SetLastError( ERROR_INVALID_FLAGS );
         return 0;
     }
-
+    if (!(locale = NlsValidateLocale( &lcid, 0 )))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
     if (LOWORD(lctype) == LOCALE_FONTSIGNATURE || (lctype & LOCALE_RETURN_NUMBER))
-        return GetLocaleInfoW( lcid, lctype, (WCHAR *)buffer, len / sizeof(WCHAR) ) * sizeof(WCHAR);
+    {
+        ret = get_locale_info( locale, lcid, lctype, (WCHAR *)buffer, len / sizeof(WCHAR) );
+        return ret * sizeof(WCHAR);
+    }
 
-    if (!(lenW = GetLocaleInfoW( lcid, lctype, NULL, 0 ))) return 0;
+    if (!(lenW = get_locale_info( locale, lcid, lctype, NULL, 0 ))) return 0;
 
     if (!(bufferW = RtlAllocateHeap( GetProcessHeap(), 0, lenW * sizeof(WCHAR) )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return 0;
     }
-    ret = GetLocaleInfoW( lcid, lctype, bufferW, lenW );
-    if (ret) ret = WideCharToMultiByte( get_lcid_codepage( lcid, lctype ), 0,
+    ret = get_locale_info( locale, lcid, lctype, bufferW, lenW );
+    if (ret) ret = WideCharToMultiByte( get_locale_codepage( locale, lctype ), 0,
                                         bufferW, ret, buffer, len, NULL, NULL );
     RtlFreeHeap( GetProcessHeap(), 0, bufferW );
     return ret;
@@ -5965,8 +5879,10 @@ INT WINAPI DECLSPEC_HOTPATCH IdnToUnicode( DWORD flags, const WCHAR *src, INT sr
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsCharAlphaA( CHAR c )
 {
-    WCHAR wc = nls_info.AnsiTableInfo.MultiByteTable[(unsigned char)c];
-    return !!(get_char_type( CT_CTYPE1, wc ) & C1_ALPHA);
+    WCHAR wc;
+    DWORD reslen;
+    RtlMultiByteToUnicodeN( &wc, sizeof(WCHAR), &reslen, &c, 1 );
+    return reslen && (get_char_type( CT_CTYPE1, wc ) & C1_ALPHA);
 }
 
 
@@ -5984,8 +5900,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsCharAlphaW( WCHAR wc )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsCharAlphaNumericA( CHAR c )
 {
-    WCHAR wc = nls_info.AnsiTableInfo.MultiByteTable[(unsigned char)c];
-    return !!(get_char_type( CT_CTYPE1, wc ) & (C1_ALPHA | C1_DIGIT));
+    WCHAR wc;
+    DWORD reslen;
+    RtlMultiByteToUnicodeN( &wc, sizeof(WCHAR), &reslen, &c, 1 );
+    return reslen && (get_char_type( CT_CTYPE1, wc ) & (C1_ALPHA | C1_DIGIT));
 }
 
 
@@ -6030,8 +5948,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsCharDigitW( WCHAR wc )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsCharLowerA( CHAR c )
 {
-    WCHAR wc = nls_info.AnsiTableInfo.MultiByteTable[(unsigned char)c];
-    return !!(get_char_type( CT_CTYPE1, wc ) & C1_LOWER);
+    WCHAR wc;
+    DWORD reslen;
+    RtlMultiByteToUnicodeN( &wc, sizeof(WCHAR), &reslen, &c, 1 );
+    return reslen && (get_char_type( CT_CTYPE1, wc ) & C1_LOWER);
 }
 
 
@@ -6058,8 +5978,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsCharPunctW( WCHAR wc )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsCharSpaceA( CHAR c )
 {
-    WCHAR wc = nls_info.AnsiTableInfo.MultiByteTable[(unsigned char)c];
-    return !!(get_char_type( CT_CTYPE1, wc ) & C1_SPACE);
+    WCHAR wc;
+    DWORD reslen;
+    RtlMultiByteToUnicodeN( &wc, sizeof(WCHAR), &reslen, &c, 1 );
+    return reslen && (get_char_type( CT_CTYPE1, wc ) & C1_SPACE);
 }
 
 
@@ -6077,8 +5999,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsCharSpaceW( WCHAR wc )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsCharUpperA( CHAR c )
 {
-    WCHAR wc = nls_info.AnsiTableInfo.MultiByteTable[(unsigned char)c];
-    return !!(get_char_type( CT_CTYPE1, wc ) & C1_UPPER);
+    WCHAR wc;
+    DWORD reslen;
+    RtlMultiByteToUnicodeN( &wc, sizeof(WCHAR), &reslen, &c, 1 );
+    return reslen && (get_char_type( CT_CTYPE1, wc ) & C1_UPPER);
 }
 
 
@@ -6142,9 +6066,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsValidCodePage( UINT codepage )
     case CP_MACCP:
     case CP_THREAD_ACP:
         return FALSE;
-    case CP_UTF7:
-    case CP_UTF8:
-        return TRUE;
     default:
         return get_codepage_table( codepage ) != NULL;
     }
@@ -6564,6 +6485,7 @@ LCID WINAPI DECLSPEC_HOTPATCH LocaleNameToLCID( const WCHAR *name, DWORD flags )
 INT WINAPI DECLSPEC_HOTPATCH MultiByteToWideChar( UINT codepage, DWORD flags, const char *src, INT srclen,
                                                   WCHAR *dst, INT dstlen )
 {
+    const CPTABLEINFO *info;
     int ret;
 
     if (!src || !srclen || (!dst && dstlen) || dstlen < 0)
@@ -6581,19 +6503,24 @@ INT WINAPI DECLSPEC_HOTPATCH MultiByteToWideChar( UINT codepage, DWORD flags, co
     case CP_UTF7:
         ret = mbstowcs_utf7( flags, src, srclen, dst, dstlen );
         break;
-    case CP_UTF8:
-        ret = mbstowcs_utf8( flags, src, srclen, dst, dstlen );
-        break;
     case CP_UNIXCP:
-        if (unix_cp == CP_UTF8)
-        {
-            ret = mbstowcs_utf8( flags, src, srclen, dst, dstlen );
-            break;
-        }
         codepage = unix_cp;
         /* fall through */
     default:
-        ret = mbstowcs_codepage( codepage, flags, src, srclen, dst, dstlen );
+        if (!(info = get_codepage_table( codepage )))
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+        if (flags & ~(MB_PRECOMPOSED | MB_COMPOSITE | MB_USEGLYPHCHARS | MB_ERR_INVALID_CHARS))
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
+        if (info->CodePage == CP_UTF8)
+            ret = mbstowcs_utf8( flags, src, srclen, dst, dstlen );
+        else
+            ret = mbstowcs_codepage( info, flags, src, srclen, dst, dstlen );
         break;
     }
     TRACE( "cp %d %s -> %s, ret = %d\n", codepage, debugstr_an(src, srclen), debugstr_wn(dst, ret), ret );
@@ -6882,6 +6809,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH VerLanguageNameW( DWORD lang, LPWSTR buffer, DWOR
 INT WINAPI DECLSPEC_HOTPATCH WideCharToMultiByte( UINT codepage, DWORD flags, LPCWSTR src, INT srclen,
                                                   LPSTR dst, INT dstlen, LPCSTR defchar, BOOL *used )
 {
+    const CPTABLEINFO *info;
     int ret;
 
     if (!src || !srclen || (!dst && dstlen) || dstlen < 0)
@@ -6900,20 +6828,25 @@ INT WINAPI DECLSPEC_HOTPATCH WideCharToMultiByte( UINT codepage, DWORD flags, LP
     case CP_UTF7:
         ret = wcstombs_utf7( flags, src, srclen, dst, dstlen, defchar, used );
         break;
-    case CP_UTF8:
-        ret = wcstombs_utf8( flags, src, srclen, dst, dstlen, defchar, used );
-        break;
     case CP_UNIXCP:
-        if (unix_cp == CP_UTF8)
-        {
-            if (used) *used = FALSE;
-            ret = wcstombs_utf8( flags, src, srclen, dst, dstlen, NULL, NULL );
-            break;
-        }
         codepage = unix_cp;
         /* fall through */
     default:
-        ret = wcstombs_codepage( codepage, flags, src, srclen, dst, dstlen, defchar, used );
+        if (!(info = get_codepage_table( codepage )))
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+        if (flags & ~(WC_DISCARDNS | WC_SEPCHARS | WC_DEFAULTCHAR | WC_ERR_INVALID_CHARS |
+                      WC_COMPOSITECHECK | WC_NO_BEST_FIT_CHARS))
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
+        if (info->CodePage == CP_UTF8)
+            ret = wcstombs_utf8( flags, src, srclen, dst, dstlen, defchar, used );
+        else
+            ret = wcstombs_codepage( info, flags, src, srclen, dst, dstlen, defchar, used );
         break;
     }
     TRACE( "cp %d %s -> %s, ret = %d\n", codepage, debugstr_wn(src, srclen), debugstr_an(dst, ret), ret );

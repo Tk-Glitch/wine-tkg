@@ -115,6 +115,30 @@ enum
     NtGdiSetGraphicsMode,
 };
 
+/* NtGdiGetDCDword parameter, not compatible with Windows */
+enum
+{
+    NtGdiGetArcDirection,
+    NtGdiGetBkColor,
+    NtGdiGetBkMode,
+    NtGdiGetDCBrushColor,
+    NtGdiGetDCPenColor,
+    NtGdiGetGraphicsMode,
+    NtGdiGetLayout,
+    NtGdiGetPolyFillMode,
+    NtGdiGetROP2,
+    NtGdiGetTextColor,
+    NtGdiIsMemDC,
+};
+
+/* NtGdiGetDCPoint parameter, not compatible with Windows */
+enum
+{
+    NtGdiGetBrushOrgEx,
+    NtGdiGetCurrentPosition,
+    NtGdiGetDCOrg,
+};
+
 enum
 {
     NtGdiAnimatePalette,

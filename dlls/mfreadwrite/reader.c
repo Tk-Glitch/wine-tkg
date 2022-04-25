@@ -1412,6 +1412,7 @@ static ULONG WINAPI src_reader_Release(IMFSourceReader *iface)
 {
     struct source_reader *reader = impl_from_IMFSourceReader(iface);
     ULONG refcount = InterlockedDecrement(&reader->public_refcount);
+    unsigned int i;
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
@@ -1430,6 +1431,23 @@ static ULONG WINAPI src_reader_Release(IMFSourceReader *iface)
 
             LeaveCriticalSection(&reader->cs);
         }
+
+        for (i = 0; i < reader->stream_count; ++i)
+        {
+            struct media_stream *stream = &reader->streams[i];
+            IMFVideoSampleAllocatorCallback *callback;
+
+            if (!stream->allocator)
+                continue;
+
+            if (SUCCEEDED(IMFVideoSampleAllocatorEx_QueryInterface(stream->allocator, &IID_IMFVideoSampleAllocatorCallback,
+                    (void **)&callback)))
+            {
+                IMFVideoSampleAllocatorCallback_SetCallback(callback, NULL);
+                IMFVideoSampleAllocatorCallback_Release(callback);
+            }
+        }
+
         source_reader_release(reader);
     }
 
@@ -2282,12 +2300,14 @@ static HRESULT WINAPI stream_sample_allocator_cb_QueryInterface(IMFVideoSampleAl
 
 static ULONG WINAPI stream_sample_allocator_cb_AddRef(IMFVideoSampleAllocatorNotify *iface)
 {
-    return 2;
+    struct media_stream *stream = impl_stream_from_IMFVideoSampleAllocatorNotify(iface);
+    return source_reader_addref(stream->reader);
 }
 
 static ULONG WINAPI stream_sample_allocator_cb_Release(IMFVideoSampleAllocatorNotify *iface)
 {
-    return 1;
+    struct media_stream *stream = impl_stream_from_IMFVideoSampleAllocatorNotify(iface);
+    return source_reader_release(stream->reader);
 }
 
 static HRESULT WINAPI stream_sample_allocator_cb_NotifyRelease(IMFVideoSampleAllocatorNotify *iface)

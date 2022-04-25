@@ -4670,10 +4670,10 @@ struct get_directory_entry_request
 struct get_directory_entry_reply
 {
     struct reply_header __header;
+    data_size_t    total_len;
     data_size_t    name_len;
     /* VARARG(name,unicode_str,name_len); */
     /* VARARG(type,unicode_str); */
-    char __pad_12[4];
 };
 
 
@@ -6513,7 +6513,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 751
+#define SERVER_PROTOCOL_VERSION 752
 
 /* ### protocol_version end ### */
 

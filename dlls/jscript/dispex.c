@@ -285,7 +285,10 @@ static HRESULT find_prop_name(jsdisp_t *This, unsigned hash, const WCHAR *name, 
         for(ptr = name; is_digit(*ptr) && idx < 0x10000; ptr++)
             idx = idx*10 + (*ptr-'0');
         if(!*ptr && idx < This->builtin_info->idx_length(This)) {
-            prop = alloc_prop(This, name, PROP_IDX, This->builtin_info->idx_put ? PROPF_WRITABLE : 0);
+            unsigned flags = PROPF_ENUMERABLE;
+            if(This->builtin_info->idx_put)
+                flags |= PROPF_WRITABLE;
+            prop = alloc_prop(This, name, PROP_IDX, flags);
             if(!prop)
                 return E_OUTOFMEMORY;
 
@@ -383,7 +386,7 @@ static IDispatch *get_this(DISPPARAMS *dp)
     return NULL;
 }
 
-static HRESULT convert_params(const DISPPARAMS *dp, jsval_t *buf, unsigned *argc, jsval_t **ret)
+static HRESULT convert_params(script_ctx_t *ctx, const DISPPARAMS *dp, jsval_t *buf, unsigned *argc, jsval_t **ret)
 {
     jsval_t *argv;
     unsigned cnt;
@@ -401,7 +404,7 @@ static HRESULT convert_params(const DISPPARAMS *dp, jsval_t *buf, unsigned *argc
     }
 
     for(i = 0; i < cnt; i++) {
-        hres = variant_to_jsval(dp->rgvarg+dp->cArgs-i-1, argv+i);
+        hres = variant_to_jsval(ctx, dp->rgvarg+dp->cArgs-i-1, argv+i);
         if(FAILED(hres)) {
             while(i--)
                 jsval_release(argv[i]);
@@ -556,6 +559,9 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
     switch(prop->type) {
     case PROP_BUILTIN: {
         jsval_t vthis;
+
+        if(!prop->u.p->invoke)
+            return JS_E_FUNCTION_EXPECTED;
 
         if(flags == DISPATCH_CONSTRUCT && (prop->flags & PROPF_METHOD)) {
             WARN("%s is not a constructor\n", debugstr_w(prop->name));
@@ -1587,7 +1593,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         jsval_t *argv, buf[6], r;
         unsigned argc;
 
-        hres = convert_params(pdp, buf, &argc, &argv);
+        hres = convert_params(This->ctx, pdp, buf, &argc, &argv);
         if(FAILED(hres))
             break;
 
@@ -1621,6 +1627,8 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         }
         break;
     }
+    case DISPATCH_PROPERTYPUTREF | DISPATCH_PROPERTYPUT:
+    case DISPATCH_PROPERTYPUTREF:
     case DISPATCH_PROPERTYPUT: {
         jsval_t val;
         DWORD i;
@@ -1641,7 +1649,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
             break;
         }
 
-        hres = variant_to_jsval(pdp->rgvarg+i, &val);
+        hres = variant_to_jsval(This->ctx, pdp->rgvarg+i, &val);
         if(FAILED(hres))
             break;
 
@@ -2133,7 +2141,7 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, uns
         heap_free(dp.rgvarg);
 
     if(SUCCEEDED(hres) && ret)
-        hres = variant_to_jsval(&retv, ret);
+        hres = variant_to_jsval(ctx, &retv, ret);
     VariantClear(&retv);
     return hres;
 }
@@ -2201,7 +2209,7 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
     if(!r)
         return S_OK;
 
-    hres = variant_to_jsval(&retv, r);
+    hres = variant_to_jsval(ctx, &retv, r);
     VariantClear(&retv);
     return hres;
 }
@@ -2377,7 +2385,7 @@ HRESULT disp_propget(script_ctx_t *ctx, IDispatch *disp, DISPID id, jsval_t *val
     V_VT(&var) = VT_EMPTY;
     hres = disp_invoke(ctx, disp, id, INVOKE_PROPERTYGET, &dp, &var);
     if(SUCCEEDED(hres)) {
-        hres = variant_to_jsval(&var, val);
+        hres = variant_to_jsval(ctx, &var, val);
         VariantClear(&var);
     }
     return hres;
@@ -2444,6 +2452,18 @@ HRESULT jsdisp_next_prop(jsdisp_t *obj, DISPID id, enum jsdisp_enum_type enum_ty
     HRESULT hres;
 
     if(id == DISPID_STARTENUM) {
+        if(obj->builtin_info->idx_length) {
+            unsigned i = 0, len = obj->builtin_info->idx_length(obj);
+            WCHAR name[12];
+
+            for(i = 0; i < len; i++) {
+                swprintf(name, ARRAY_SIZE(name), L"%d", i);
+                hres = find_prop_name(obj, string_hash(name), name, &iter);
+                if(FAILED(hres))
+                    return hres;
+            }
+        }
+
         if (enum_type == JSDISP_ENUM_ALL) {
             hres = fill_protrefs(obj);
             if(FAILED(hres))
@@ -2546,6 +2566,7 @@ HRESULT jsdisp_get_own_property(jsdisp_t *obj, const WCHAR *name, BOOL flags_onl
     switch(prop->type) {
     case PROP_BUILTIN:
     case PROP_JSVAL:
+    case PROP_IDX:
         desc->mask |= PROPF_WRITABLE;
         desc->explicit_value = TRUE;
         if(!flags_only) {
