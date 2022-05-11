@@ -37,6 +37,7 @@ struct wg_format
         WG_MAJOR_TYPE_UNKNOWN,
         WG_MAJOR_TYPE_VIDEO,
         WG_MAJOR_TYPE_AUDIO,
+        WG_MAJOR_TYPE_MPEG1_AUDIO,
         WG_MAJOR_TYPE_WMA,
         WG_MAJOR_TYPE_H264,
     } major_type;
@@ -80,16 +81,18 @@ struct wg_format
                 WG_AUDIO_FORMAT_S32LE,
                 WG_AUDIO_FORMAT_F32LE,
                 WG_AUDIO_FORMAT_F64LE,
-
-                WG_AUDIO_FORMAT_MPEG1_LAYER1,
-                WG_AUDIO_FORMAT_MPEG1_LAYER2,
-                WG_AUDIO_FORMAT_MPEG1_LAYER3,
             } format;
 
             uint32_t channels;
             uint32_t channel_mask; /* In WinMM format. */
             uint32_t rate;
         } audio;
+        struct
+        {
+            uint32_t layer;
+            uint32_t rate;
+            uint32_t channels;
+        } mpeg1_audio;
         struct
         {
             uint32_t version;
@@ -114,10 +117,16 @@ struct wg_format
 enum wg_sample_flag
 {
     WG_SAMPLE_FLAG_INCOMPLETE = 1,
+    WG_SAMPLE_FLAG_HAS_PTS = 2,
+    WG_SAMPLE_FLAG_HAS_DURATION = 4,
+    WG_SAMPLE_FLAG_SYNC_POINT = 8,
 };
 
 struct wg_sample
 {
+    /* timestamp and duration are in 100-nanosecond units. */
+    UINT64 pts;
+    UINT64 duration;
     UINT32 flags;
     UINT32 max_size;
     UINT32 size;

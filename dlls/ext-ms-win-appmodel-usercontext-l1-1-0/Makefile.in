@@ -1,4 +1,0 @@
-MODULE    = ext-ms-win-appmodel-usercontext-l1-1-0.dll
-
-C_SRCS = \
-	main.c

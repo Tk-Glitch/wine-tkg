@@ -38,6 +38,7 @@
 #include "winternl.h"
 #include "initguid.h"
 #include "audioclient.h"
+#include "mmddk.h"
 
 #include "wine/debug.h"
 #include "wine/unixlib.h"
@@ -108,6 +109,11 @@ static NTSTATUS oss_unlock_result(struct oss_stream *stream,
     *result = value;
     oss_unlock(stream);
     return STATUS_SUCCESS;
+}
+
+static struct oss_stream *handle_get_stream(stream_handle h)
+{
+    return (struct oss_stream *)(UINT_PTR)h;
 }
 
 static NTSTATUS test_connect(void *args)
@@ -220,11 +226,10 @@ static NTSTATUS get_endpoint_ids(void *args)
         WCHAR name[ARRAY_SIZE(ai.name) + ARRAY_SIZE(outW)];
         char device[OSS_DEVNODE_SIZE];
     } *info;
-    unsigned int i, j, num, needed, name_len, device_len, default_idx = 0;
+    unsigned int i, j, num, needed, name_len, device_len, offset, default_idx = 0;
     char default_device[OSS_DEVNODE_SIZE];
     struct endpoint *endpoint;
     int mixer_fd;
-    char *ptr;
 
     mixer_fd = open("/dev/mixer", O_RDONLY, 0);
     if(mixer_fd < 0){
@@ -327,9 +332,8 @@ static NTSTATUS get_endpoint_ids(void *args)
     }
     close(mixer_fd);
 
-    needed = num * sizeof(*params->endpoints);
+    offset = needed = num * sizeof(*params->endpoints);
     endpoint = params->endpoints;
-    ptr = (char *)(endpoint + num);
 
     for(i = 0; i < num; i++){
         name_len = wcslen(info[i].name) + 1;
@@ -337,12 +341,12 @@ static NTSTATUS get_endpoint_ids(void *args)
         needed += name_len * sizeof(WCHAR) + ((device_len + 1) & ~1);
 
         if(needed <= params->size){
-            endpoint->name = (WCHAR *)ptr;
-            memcpy(endpoint->name, info[i].name, name_len * sizeof(WCHAR));
-            ptr += name_len * sizeof(WCHAR);
-            endpoint->device = ptr;
-            memcpy(endpoint->device, info[i].device, device_len);
-            ptr += (device_len + 1) & ~1;
+            endpoint->name = offset;
+            memcpy((char *)params->endpoints + offset, info[i].name, name_len * sizeof(WCHAR));
+            offset += name_len * sizeof(WCHAR);
+            endpoint->device = offset;
+            memcpy((char *)params->endpoints + offset, info[i].device, device_len);
+            offset += (device_len + 1) & ~1;
             endpoint++;
         }
     }
@@ -527,8 +531,17 @@ static HRESULT setup_oss_device(AUDCLNT_SHAREMODE share, int fd,
     }
     free(closest);
 
-    TRACE("returning: %08x\n", ret);
+    TRACE("returning: %08x\n", (unsigned)ret);
     return ret;
+}
+
+static ULONG_PTR zero_bits(void)
+{
+#ifdef _WIN64
+    return !NtCurrentTeb()->WowTebOffset ? 0 : 0x7fffffff;
+#else
+    return 0;
+#endif
 }
 
 static NTSTATUS create_stream(void *args)
@@ -593,8 +606,8 @@ static NTSTATUS create_stream(void *args)
     if(params->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
         stream->bufsize_frames -= stream->bufsize_frames % stream->period_frames;
     size = stream->bufsize_frames * params->fmt->nBlockAlign;
-    if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer, 0, &size,
-                               MEM_COMMIT, PAGE_READWRITE)){
+    if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer, zero_bits(),
+                               &size, MEM_COMMIT, PAGE_READWRITE)){
         params->result = E_OUTOFMEMORY;
         goto exit;
     }
@@ -614,7 +627,7 @@ exit:
         free(stream->fmt);
         free(stream);
     }else{
-        *params->stream = stream;
+        *params->stream = (stream_handle)(UINT_PTR)stream;
     }
 
     return STATUS_SUCCESS;
@@ -623,7 +636,7 @@ exit:
 static NTSTATUS release_stream(void *args)
 {
     struct release_stream_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     SIZE_T size;
 
     if(params->timer_thread){
@@ -652,7 +665,7 @@ static NTSTATUS release_stream(void *args)
 static NTSTATUS start(void *args)
 {
     struct start_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -670,7 +683,7 @@ static NTSTATUS start(void *args)
 static NTSTATUS stop(void *args)
 {
     struct stop_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -686,7 +699,7 @@ static NTSTATUS stop(void *args)
 static NTSTATUS reset(void *args)
 {
     struct reset_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -859,7 +872,7 @@ static void oss_read_data(struct oss_stream *stream)
 static NTSTATUS timer_loop(void *args)
 {
     struct timer_loop_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     LARGE_INTEGER delay, now, next;
     int adjust;
 
@@ -901,7 +914,7 @@ static NTSTATUS timer_loop(void *args)
 static NTSTATUS get_render_buffer(void *args)
 {
     struct get_render_buffer_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT32 write_pos, frames = params->frames;
     BYTE **data = params->data;
     SIZE_T size;
@@ -927,8 +940,8 @@ static NTSTATUS get_render_buffer(void *args)
                 stream->tmp_buffer = NULL;
             }
             size = frames * stream->fmt->nBlockAlign;
-            if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, 0, &size,
-                                       MEM_COMMIT, PAGE_READWRITE)){
+            if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, zero_bits(),
+                                       &size, MEM_COMMIT, PAGE_READWRITE)){
                 stream->tmp_buffer_frames = 0;
                 return oss_unlock_result(stream, &params->result, E_OUTOFMEMORY);
             }
@@ -967,7 +980,7 @@ static void oss_wrap_buffer(struct oss_stream *stream, BYTE *buffer, UINT32 writ
 static NTSTATUS release_render_buffer(void *args)
 {
     struct release_render_buffer_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT32 written_frames = params->written_frames;
     UINT flags = params->flags;
     BYTE *buffer;
@@ -1007,7 +1020,7 @@ static NTSTATUS release_render_buffer(void *args)
 static NTSTATUS get_capture_buffer(void *args)
 {
     struct get_capture_buffer_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT64 *devpos = params->devpos, *qpcpos = params->qpcpos;
     UINT32 *frames = params->frames;
     UINT *flags = params->flags;
@@ -1037,8 +1050,8 @@ static NTSTATUS get_capture_buffer(void *args)
                 stream->tmp_buffer = NULL;
             }
             size = *frames * stream->fmt->nBlockAlign;
-            if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, 0, &size,
-                                       MEM_COMMIT, PAGE_READWRITE)){
+            if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, zero_bits(),
+                                       &size, MEM_COMMIT, PAGE_READWRITE)){
                 stream->tmp_buffer_frames = 0;
                 return oss_unlock_result(stream, &params->result, E_OUTOFMEMORY);
             }
@@ -1073,7 +1086,7 @@ static NTSTATUS get_capture_buffer(void *args)
 static NTSTATUS release_capture_buffer(void *args)
 {
     struct release_capture_buffer_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT32 done = params->done;
 
     oss_lock(stream);
@@ -1230,7 +1243,7 @@ static NTSTATUS get_mix_format(void *args)
 static NTSTATUS get_buffer_size(void *args)
 {
     struct get_buffer_size_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -1242,7 +1255,7 @@ static NTSTATUS get_buffer_size(void *args)
 static NTSTATUS get_latency(void *args)
 {
     struct get_latency_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -1256,7 +1269,7 @@ static NTSTATUS get_latency(void *args)
 static NTSTATUS get_current_padding(void *args)
 {
     struct get_current_padding_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -1268,7 +1281,7 @@ static NTSTATUS get_current_padding(void *args)
 static NTSTATUS get_next_packet_size(void *args)
 {
     struct get_next_packet_size_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT32 *frames = params->frames;
 
     oss_lock(stream);
@@ -1281,7 +1294,7 @@ static NTSTATUS get_next_packet_size(void *args)
 static NTSTATUS get_frequency(void *args)
 {
     struct get_frequency_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT64 *freq = params->frequency;
 
     oss_lock(stream);
@@ -1297,7 +1310,7 @@ static NTSTATUS get_frequency(void *args)
 static NTSTATUS get_position(void *args)
 {
     struct get_position_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
     UINT64 *pos = params->position, *qpctime = params->qpctime;
 
     oss_lock(stream);
@@ -1341,7 +1354,7 @@ static NTSTATUS get_position(void *args)
 static NTSTATUS set_volumes(void *args)
 {
     struct set_volumes_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
     stream->mute = !params->master_volume;
@@ -1353,7 +1366,7 @@ static NTSTATUS set_volumes(void *args)
 static NTSTATUS set_event_handle(void *args)
 {
     struct set_event_handle_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
@@ -1373,11 +1386,228 @@ static NTSTATUS set_event_handle(void *args)
 static NTSTATUS is_started(void *args)
 {
     struct is_started_params *params = args;
-    struct oss_stream *stream = params->stream;
+    struct oss_stream *stream = handle_get_stream(params->stream);
 
     oss_lock(stream);
 
     return oss_unlock_result(stream, &params->result, stream->playing ? S_OK : S_FALSE);
+}
+
+/* Aux driver */
+
+static unsigned int num_aux;
+
+#define MIXER_DEV "/dev/mixer"
+
+static UINT aux_init(void)
+{
+    int mixer;
+
+    TRACE("()\n");
+
+    if ((mixer = open(MIXER_DEV, O_RDWR)) < 0)
+    {
+        WARN("mixer device not available !\n");
+        num_aux = 0;
+    }
+    else
+    {
+        close(mixer);
+        num_aux = 6;
+    }
+    return 0;
+}
+
+static UINT aux_exit(void)
+{
+    TRACE("()\n");
+    return 0;
+}
+
+static UINT aux_get_devcaps(WORD dev_id, AUXCAPSW *caps, UINT size)
+{
+    int mixer, volume;
+    static const WCHAR ini[] = {'O','S','S',' ','A','u','x',' ','#','0',0};
+
+    TRACE("(%04X, %p, %u);\n", dev_id, caps, size);
+    if (caps == NULL) return MMSYSERR_NOTENABLED;
+    if (dev_id >= num_aux) return MMSYSERR_BADDEVICEID;
+    if ((mixer = open(MIXER_DEV, O_RDWR)) < 0)
+    {
+        WARN("mixer device not available !\n");
+        return MMSYSERR_NOTENABLED;
+    }
+    if (ioctl(mixer, SOUND_MIXER_READ_LINE, &volume) == -1)
+    {
+        close(mixer);
+        WARN("unable to read mixer !\n");
+        return MMSYSERR_NOTENABLED;
+    }
+    close(mixer);
+    caps->wMid = 0xAA;
+    caps->wPid = 0x55 + dev_id;
+    caps->vDriverVersion = 0x0100;
+    memcpy(caps->szPname, ini, sizeof(ini));
+    caps->szPname[9] = '0' + dev_id; /* 6  at max */
+    caps->wTechnology = (dev_id == 2) ? AUXCAPS_CDAUDIO : AUXCAPS_AUXIN;
+    caps->wReserved1 = 0;
+    caps->dwSupport = AUXCAPS_VOLUME | AUXCAPS_LRVOLUME;
+
+    return MMSYSERR_NOERROR;
+}
+
+static UINT aux_get_volume(WORD dev_id, UINT *vol)
+{
+    int mixer, volume, left, right, cmd;
+
+    TRACE("(%04X, %p);\n", dev_id, vol);
+    if (vol == NULL) return MMSYSERR_NOTENABLED;
+    if ((mixer = open(MIXER_DEV, O_RDWR)) < 0)
+    {
+        WARN("mixer device not available !\n");
+        return MMSYSERR_NOTENABLED;
+    }
+    switch(dev_id)
+    {
+    case 0:
+        TRACE("SOUND_MIXER_READ_PCM !\n");
+        cmd = SOUND_MIXER_READ_PCM;
+        break;
+    case 1:
+        TRACE("SOUND_MIXER_READ_SYNTH !\n");
+        cmd = SOUND_MIXER_READ_SYNTH;
+        break;
+    case 2:
+        TRACE("SOUND_MIXER_READ_CD !\n");
+        cmd = SOUND_MIXER_READ_CD;
+        break;
+    case 3:
+        TRACE("SOUND_MIXER_READ_LINE !\n");
+        cmd = SOUND_MIXER_READ_LINE;
+        break;
+    case 4:
+        TRACE("SOUND_MIXER_READ_MIC !\n");
+        cmd = SOUND_MIXER_READ_MIC;
+        break;
+    case 5:
+        TRACE("SOUND_MIXER_READ_VOLUME !\n");
+        cmd = SOUND_MIXER_READ_VOLUME;
+        break;
+    default:
+        WARN("invalid device id=%04X !\n", dev_id);
+        close(mixer);
+        return MMSYSERR_NOTENABLED;
+    }
+    if (ioctl(mixer, cmd, &volume) == -1)
+    {
+        WARN("unable to read mixer !\n");
+        close(mixer);
+        return MMSYSERR_NOTENABLED;
+    }
+    close(mixer);
+    left = LOBYTE(LOWORD(volume));
+    right = HIBYTE(LOWORD(volume));
+    TRACE("left=%d right=%d !\n", left, right);
+    *vol = MAKELONG((left * 0xFFFFL) / 100, (right * 0xFFFFL) / 100);
+    return MMSYSERR_NOERROR;
+}
+
+static UINT aux_set_volume(WORD dev_id, UINT vol)
+{
+    int mixer;
+    int volume, left, right;
+    int cmd;
+
+    TRACE("(%04X, %08X);\n", dev_id, vol);
+
+    left   = (LOWORD(vol) * 100) >> 16;
+    right  = (HIWORD(vol) * 100) >> 16;
+    volume = (right << 8) | left;
+
+    if ((mixer = open(MIXER_DEV, O_RDWR)) < 0)
+    {
+        WARN("mixer device not available !\n");
+        return MMSYSERR_NOTENABLED;
+    }
+
+    switch(dev_id)
+    {
+    case 0:
+        TRACE("SOUND_MIXER_WRITE_PCM !\n");
+        cmd = SOUND_MIXER_WRITE_PCM;
+        break;
+    case 1:
+        TRACE("SOUND_MIXER_WRITE_SYNTH !\n");
+        cmd = SOUND_MIXER_WRITE_SYNTH;
+        break;
+    case 2:
+        TRACE("SOUND_MIXER_WRITE_CD !\n");
+        cmd = SOUND_MIXER_WRITE_CD;
+        break;
+    case 3:
+        TRACE("SOUND_MIXER_WRITE_LINE !\n");
+        cmd = SOUND_MIXER_WRITE_LINE;
+        break;
+    case 4:
+        TRACE("SOUND_MIXER_WRITE_MIC !\n");
+        cmd = SOUND_MIXER_WRITE_MIC;
+        break;
+    case 5:
+        TRACE("SOUND_MIXER_WRITE_VOLUME !\n");
+        cmd = SOUND_MIXER_WRITE_VOLUME;
+        break;
+    default:
+        WARN("invalid device id=%04X !\n", dev_id);
+        close(mixer);
+        return MMSYSERR_NOTENABLED;
+    }
+    if (ioctl(mixer, cmd, &volume) == -1)
+    {
+        WARN("unable to set mixer !\n");
+        close(mixer);
+        return MMSYSERR_NOTENABLED;
+    }
+    close(mixer);
+    return MMSYSERR_NOERROR;
+}
+
+static NTSTATUS aux_message(void *args)
+{
+    struct aux_message_params *params = args;
+
+    switch (params->msg)
+    {
+    case DRVM_INIT:
+        *params->err = aux_init();
+        break;
+    case DRVM_EXIT:
+        *params->err = aux_exit();
+        break;
+    case DRVM_ENABLE:
+    case DRVM_DISABLE:
+        /* FIXME: Pretend this is supported */
+        *params->err = 0;
+        break;
+    case AUXDM_GETDEVCAPS:
+        *params->err = aux_get_devcaps(params->dev_id, (AUXCAPSW *)params->param_1, params->param_2);
+        break;
+    case AUXDM_GETNUMDEVS:
+        TRACE("return %d;\n", num_aux);
+        *params->err = num_aux;
+        break;
+    case AUXDM_GETVOLUME:
+        *params->err = aux_get_volume(params->dev_id, (UINT *)params->param_1);
+        break;
+    case AUXDM_SETVOLUME:
+        *params->err = aux_set_volume(params->dev_id, params->param_1);
+        break;
+    default:
+        WARN("unknown message !\n");
+        *params->err = MMSYSERR_NOTSUPPORTED;
+        break;
+    }
+
+    return STATUS_SUCCESS;
 }
 
 unixlib_entry_t __wine_unix_call_funcs[] =
@@ -1405,8 +1635,385 @@ unixlib_entry_t __wine_unix_call_funcs[] =
     set_volumes,
     set_event_handle,
     is_started,
-    midi_init,
+    midi_release,
     midi_out_message,
-
-    midi_seq_open,
+    midi_in_message,
+    midi_notify_wait,
+    aux_message,
 };
+
+#ifdef _WIN64
+
+typedef UINT PTR32;
+
+static NTSTATUS wow64_get_endpoint_ids(void *args)
+{
+    struct
+    {
+        EDataFlow flow;
+        PTR32 endpoints;
+        unsigned int size;
+        HRESULT result;
+        unsigned int num;
+        unsigned int default_idx;
+    } *params32 = args;
+    struct get_endpoint_ids_params params =
+    {
+        .flow = params32->flow,
+        .endpoints = ULongToPtr(params32->endpoints),
+        .size = params32->size
+    };
+    get_endpoint_ids(&params);
+    params32->size = params.size;
+    params32->result = params.result;
+    params32->num = params.num;
+    params32->default_idx = params.default_idx;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_create_stream(void *args)
+{
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        AUDCLNT_SHAREMODE share;
+        UINT flags;
+        REFERENCE_TIME duration;
+        REFERENCE_TIME period;
+        PTR32 fmt;
+        HRESULT result;
+        PTR32 stream;
+    } *params32 = args;
+    struct create_stream_params params =
+    {
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .share = params32->share,
+        .flags = params32->flags,
+        .duration = params32->duration,
+        .period = params32->period,
+        .fmt = ULongToPtr(params32->fmt),
+        .stream = ULongToPtr(params32->stream)
+    };
+    create_stream(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_release_stream(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        PTR32 timer_thread;
+        HRESULT result;
+    } *params32 = args;
+    struct release_stream_params params =
+    {
+        .stream = params32->stream,
+        .timer_thread = ULongToHandle(params32->timer_thread)
+    };
+    release_stream(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_render_buffer(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        UINT32 frames;
+        HRESULT result;
+        PTR32 data;
+    } *params32 = args;
+    BYTE *data = NULL;
+    struct get_render_buffer_params params =
+    {
+        .stream = params32->stream,
+        .frames = params32->frames,
+        .data = &data
+    };
+    get_render_buffer(&params);
+    params32->result = params.result;
+    *(unsigned int *)ULongToPtr(params32->data) = PtrToUlong(data);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_capture_buffer(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 data;
+        PTR32 frames;
+        PTR32 flags;
+        PTR32 devpos;
+        PTR32 qpcpos;
+    } *params32 = args;
+    BYTE *data = NULL;
+    struct get_capture_buffer_params params =
+    {
+        .stream = params32->stream,
+        .data = &data,
+        .frames = ULongToPtr(params32->frames),
+        .flags = ULongToPtr(params32->flags),
+        .devpos = ULongToPtr(params32->devpos),
+        .qpcpos = ULongToPtr(params32->qpcpos)
+    };
+    get_capture_buffer(&params);
+    params32->result = params.result;
+    *(unsigned int *)ULongToPtr(params32->data) = PtrToUlong(data);
+    return STATUS_SUCCESS;
+};
+
+static NTSTATUS wow64_is_format_supported(void *args)
+{
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        AUDCLNT_SHAREMODE share;
+        PTR32 fmt_in;
+        PTR32 fmt_out;
+        HRESULT result;
+    } *params32 = args;
+    struct is_format_supported_params params =
+    {
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .share = params32->share,
+        .fmt_in = ULongToPtr(params32->fmt_in),
+        .fmt_out = ULongToPtr(params32->fmt_out)
+    };
+    is_format_supported(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_mix_format(void *args)
+{
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        PTR32 fmt;
+        HRESULT result;
+    } *params32 = args;
+    struct get_mix_format_params params =
+    {
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .fmt = ULongToPtr(params32->fmt)
+    };
+    get_mix_format(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_buffer_size(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 size;
+    } *params32 = args;
+    struct get_buffer_size_params params =
+    {
+        .stream = params32->stream,
+        .size = ULongToPtr(params32->size)
+    };
+    get_buffer_size(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_latency(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 latency;
+    } *params32 = args;
+    struct get_latency_params params =
+    {
+        .stream = params32->stream,
+        .latency = ULongToPtr(params32->latency)
+    };
+    get_latency(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_current_padding(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 padding;
+    } *params32 = args;
+    struct get_current_padding_params params =
+    {
+        .stream = params32->stream,
+        .padding = ULongToPtr(params32->padding)
+    };
+    get_current_padding(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_next_packet_size(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 frames;
+    } *params32 = args;
+    struct get_next_packet_size_params params =
+    {
+        .stream = params32->stream,
+        .frames = ULongToPtr(params32->frames)
+    };
+    get_next_packet_size(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_frequency(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 frequency;
+    } *params32 = args;
+    struct get_frequency_params params =
+    {
+        .stream = params32->stream,
+        .frequency = ULongToPtr(params32->frequency)
+    };
+    get_frequency(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_get_position(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        HRESULT result;
+        PTR32 position;
+        PTR32 qpctime;
+    } *params32 = args;
+    struct get_position_params params =
+    {
+        .stream = params32->stream,
+        .position = ULongToPtr(params32->position),
+        .qpctime = ULongToPtr(params32->qpctime)
+    };
+    get_position(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_set_volumes(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        float master_volume;
+        PTR32 volumes;
+        PTR32 session_volumes;
+    } *params32 = args;
+    struct set_volumes_params params =
+    {
+        .stream = params32->stream,
+        .master_volume = params32->master_volume,
+        .volumes = ULongToPtr(params32->volumes),
+        .session_volumes = ULongToPtr(params32->session_volumes)
+    };
+    return set_volumes(&params);
+}
+
+static NTSTATUS wow64_set_event_handle(void *args)
+{
+    struct
+    {
+        stream_handle stream;
+        PTR32 event;
+        HRESULT result;
+    } *params32 = args;
+    struct set_event_handle_params params =
+    {
+        .stream = params32->stream,
+        .event = ULongToHandle(params32->event)
+    };
+
+    set_event_handle(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wow64_aux_message(void *args)
+{
+    struct
+    {
+        UINT dev_id;
+        UINT msg;
+        UINT user;
+        UINT param_1;
+        UINT param_2;
+        PTR32 err;
+    } *params32 = args;
+    struct aux_message_params params =
+    {
+        .dev_id = params32->dev_id,
+        .msg = params32->msg,
+        .user = params32->user,
+        .param_1 = params32->param_1,
+        .param_2 = params32->param_2,
+        .err = ULongToPtr(params32->err),
+    };
+    return aux_message(&params);
+}
+
+unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+{
+    test_connect,
+    wow64_get_endpoint_ids,
+    wow64_create_stream,
+    wow64_release_stream,
+    start,
+    stop,
+    reset,
+    timer_loop,
+    wow64_get_render_buffer,
+    release_render_buffer,
+    wow64_get_capture_buffer,
+    release_capture_buffer,
+    wow64_is_format_supported,
+    wow64_get_mix_format,
+    wow64_get_buffer_size,
+    wow64_get_latency,
+    wow64_get_current_padding,
+    wow64_get_next_packet_size,
+    wow64_get_frequency,
+    wow64_get_position,
+    wow64_set_volumes,
+    wow64_set_event_handle,
+    is_started,
+    midi_release,
+    wow64_midi_out_message,
+    wow64_midi_in_message,
+    wow64_midi_notify_wait,
+    wow64_aux_message,
+};
+
+#endif /* _WIN64 */

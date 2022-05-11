@@ -123,10 +123,10 @@ static HKEY open_hkcu(void)
 
     sid = ((TOKEN_USER *)sid_data)->User.Sid;
     len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
-                           MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
+                   (unsigned)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+                                       MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+        len += sprintf( buffer + len, "-%u", (unsigned)sid->SubAuthority[i] );
     ascii_to_unicode( bufferW, buffer, len + 1 );
 
     return reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
@@ -637,7 +637,7 @@ static snd_pcm_format_t alsa_format(const WAVEFORMATEX *fmt)
     return format;
 }
 
-static int alsa_channel_index(DWORD flag)
+static int alsa_channel_index(UINT flag)
 {
     switch(flag){
     case SPEAKER_FRONT_LEFT:
@@ -702,7 +702,7 @@ static HRESULT map_channels(EDataFlow flow, const WAVEFORMATEX *fmt, int *alsa_c
 
     if(flow != eCapture && (fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE || fmt->nChannels > 2) ){
         WAVEFORMATEXTENSIBLE *fmtex = (void*)fmt;
-        DWORD mask, flag = SPEAKER_FRONT_LEFT;
+        UINT mask, flag = SPEAKER_FRONT_LEFT;
         UINT i = 0;
 
         if(fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
@@ -2431,7 +2431,7 @@ static NTSTATUS get_prop_value(void *args)
         return STATUS_SUCCESS;
     }
 
-    TRACE("Unimplemented property %s,%u\n", wine_dbgstr_guid(&prop->fmtid), prop->pid);
+    TRACE("Unimplemented property %s,%u\n", wine_dbgstr_guid(&prop->fmtid), (unsigned)prop->pid);
 
     params->result = E_NOTIMPL;
     return STATUS_SUCCESS;

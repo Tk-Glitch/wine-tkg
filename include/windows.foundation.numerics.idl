@@ -1,7 +1,5 @@
 /*
- * ext-ms-win-appmodel-usercontext-l1-1-0
- *
- * Copyright 2016 Michael Müller
+ * Copyright 2022 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,18 +16,24 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <stdio.h>
+#ifdef __WIDL__
+#pragma winrt ns_prefix
+#endif
 
-#include "windef.h"
-#include "winbase.h"
-#include "winuser.h"
-#include "wine/debug.h"
+import "inspectable.idl";
+import "asyncinfo.idl";
+import "eventtoken.idl";
+import "windowscontracts.idl";
+import "windows.foundation.idl";
 
-WINE_DEFAULT_DEBUG_CHANNEL(usercontext);
+namespace Windows.Foundation.Numerics {
+    typedef struct Vector3 Vector3;
 
-HRESULT WINAPI UserContextExtInitialize(void)
-{
-    FIXME("(): stub\n");
-    return S_OK;
+    [contract(Windows.Foundation.UniversalApiContract, 1.0)]
+    struct Vector3
+    {
+        FLOAT X;
+        FLOAT Y;
+        FLOAT Z;
+    };
 }

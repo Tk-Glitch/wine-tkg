@@ -108,6 +108,7 @@
     SYSCALL_ENTRY( NtLockVirtualMemory ) \
     SYSCALL_ENTRY( NtMakeTemporaryObject ) \
     SYSCALL_ENTRY( NtMapViewOfSection ) \
+    SYSCALL_ENTRY( NtMapViewOfSectionEx ) \
     SYSCALL_ENTRY( NtNotifyChangeDirectoryFile ) \
     SYSCALL_ENTRY( NtNotifyChangeKey ) \
     SYSCALL_ENTRY( NtNotifyChangeMultipleKeys ) \
@@ -236,6 +237,7 @@
     SYSCALL_ENTRY( NtUnlockFile ) \
     SYSCALL_ENTRY( NtUnlockVirtualMemory ) \
     SYSCALL_ENTRY( NtUnmapViewOfSection ) \
+    SYSCALL_ENTRY( NtUnmapViewOfSectionEx ) \
     SYSCALL_ENTRY( NtWaitForAlertByThreadId ) \
     SYSCALL_ENTRY( NtWaitForDebugEvent ) \
     SYSCALL_ENTRY( NtWaitForKeyedEvent ) \

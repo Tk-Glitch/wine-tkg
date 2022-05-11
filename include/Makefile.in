@@ -106,6 +106,7 @@ SOURCES = \
 	d2d1_1.idl \
 	d2d1_2.idl \
 	d2d1_3.idl \
+	d2d1effectauthor.idl \
 	d2d1effects.idl \
 	d2d1effects_1.idl \
 	d2d1effects_2.idl \
@@ -688,6 +689,7 @@ SOURCES = \
 	slerror.h \
 	slpublic.h \
 	snmp.h \
+	socketapi.h \
 	softpub.h \
 	spatialaudioclient.idl \
 	specstrings.h \
@@ -793,11 +795,13 @@ SOURCES = \
 	windows.foundation.collections.idl \
 	windows.foundation.idl \
 	windows.foundation.metadata.idl \
+	windows.foundation.numerics.idl \
 	windows.gaming.input.custom.idl \
 	windows.gaming.input.forcefeedback.idl \
 	windows.gaming.input.idl \
 	windows.globalization.idl \
 	windows.h \
+	windows.media.closedcaptioning.idl \
 	windows.media.devices.idl \
 	windows.media.idl \
 	windows.media.speechrecognition.idl \
@@ -808,6 +812,7 @@ SOURCES = \
 	windows.system.idl \
 	windows.system.power.idl \
 	windows.system.userprofile.idl \
+	windows.ui.idl \
 	windowscontracts.idl \
 	windowsx.h \
 	wine/debug.h \

@@ -199,9 +199,9 @@ extern "C" {
 #endif
 
 #if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
-#define __WINE_ALLOC_SIZE(x) __attribute__((__alloc_size__(x)))
+#define __WINE_ALLOC_SIZE(...) __attribute__((__alloc_size__(__VA_ARGS__)))
 #else
-#define __WINE_ALLOC_SIZE(x)
+#define __WINE_ALLOC_SIZE(...)
 #endif
 
 /* Anonymous union/struct handling */
@@ -6377,6 +6377,10 @@ static FORCEINLINE void MemoryBarrier(void)
 }
 
 #elif defined(__aarch64__)
+
+#pragma intrinsic(_InterlockedExchangeAdd64)
+
+long long _InterlockedExchangeAdd64(long long volatile *, long long);
 
 static FORCEINLINE void MemoryBarrier(void)
 {

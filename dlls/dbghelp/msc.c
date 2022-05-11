@@ -1461,7 +1461,7 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
                  */
                 if (!func || addr >= func->address + func->size)
                 {
-                    func = (struct symt_function*)symt_find_nearest(msc_dbg->module, addr);
+                    func = (struct symt_function*)symt_find_symbol_at(msc_dbg->module, addr);
                     /* FIXME: at least labels support line numbers */
                     if (!symt_check_tag(&func->symt, SymTagFunction) && !symt_check_tag(&func->symt, SymTagInlineSite))
                     {
@@ -1534,7 +1534,7 @@ static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const 
                 lines = CV_RECORD_AFTER(files_hdr);
                 for (i = 0; i < files_hdr->nLines; i++)
                 {
-                    func = (struct symt_function*)symt_find_nearest(msc_dbg->module, lineblk_base + lines[i].offset);
+                    func = (struct symt_function*)symt_find_symbol_at(msc_dbg->module, lineblk_base + lines[i].offset);
                     /* FIXME: at least labels support line numbers */
                     if (!symt_check_tag(&func->symt, SymTagFunction) && !symt_check_tag(&func->symt, SymTagInlineSite))
                     {
@@ -1619,7 +1619,7 @@ static inline void codeview_add_variable(const struct msc_debug_info* msc_dbg,
         loc.kind = in_tls ? loc_tlsrel : loc_absolute;
         loc.reg = 0;
         loc.offset = in_tls ? offset : codeview_get_address(msc_dbg, segment, offset);
-        if (force || in_tls || !symt_find_nearest(msc_dbg->module, loc.offset))
+        if (force || in_tls || !symt_find_symbol_at(msc_dbg->module, loc.offset))
         {
             symt_new_global_variable(msc_dbg->module, compiland,
                                      name, is_local, loc, 0,
@@ -2501,7 +2501,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             if (!top_func)
             {
                 ULONG_PTR parent_addr = codeview_get_address(msc_dbg, sym->sepcode_v3.sectParent, sym->sepcode_v3.offParent);
-                struct symt_ht* parent = symt_find_nearest(msc_dbg->module, parent_addr);
+                struct symt_ht* parent = symt_find_symbol_at(msc_dbg->module, parent_addr);
                 if (symt_check_tag(&parent->symt, SymTagFunction))
                 {
                     struct symt_function* pfunc = (struct symt_function*)parent;
@@ -2856,7 +2856,7 @@ static void pdb_free_file(struct pdb_file_info* pdb_file)
     HeapFree(GetProcessHeap(), 0, pdb_file->stream_dict);
 }
 
-static void pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const char* str, unsigned cb)
+static BOOL pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const char* str, unsigned cb)
 {
     DWORD*      pdw;
     DWORD*      ok_bits;
@@ -2869,7 +2869,7 @@ static void pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const cha
     count = *pdw++;
 
     pdb_file->stream_dict = HeapAlloc(GetProcessHeap(), 0, (numok + 1) * sizeof(struct pdb_stream_name) + cb);
-    if (!pdb_file->stream_dict) return;
+    if (!pdb_file->stream_dict) return FALSE;
     cpstr = (char*)(pdb_file->stream_dict + numok + 1);
     memcpy(cpstr, str, cb);
 
@@ -2879,7 +2879,7 @@ static void pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const cha
     if (*pdw++ != 0)
     {
         FIXME("unexpected value\n");
-        return;
+        return FALSE;
     }
 
     for (i = j = 0; i < count; i++)
@@ -2895,6 +2895,7 @@ static void pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const cha
     /* add sentinel */
     pdb_file->stream_dict[numok].name = NULL;
     pdb_file->fpoext_stream = -1;
+    return TRUE;
 }
 
 static unsigned pdb_get_stream_by_name(const struct pdb_file_info* pdb_file, const char* name)
@@ -3169,8 +3170,7 @@ static BOOL pdb_init(const struct pdb_lookup* pdb_lookup, struct pdb_file_info* 
                   pdb_lookup->filename, root->Age, pdb_lookup->age);
         TRACE("found JG for %s: age=%x timestamp=%x\n",
               pdb_lookup->filename, root->Age, root->TimeDateStamp);
-        pdb_load_stream_name_table(pdb_file, &root->names[0], root->cbNames);
-
+        ret = pdb_load_stream_name_table(pdb_file, &root->names[0], root->cbNames);
         pdb_free(root);
     }
     else if (!memcmp(image, PDB_DS_IDENT, sizeof(PDB_DS_IDENT)))
@@ -3206,7 +3206,7 @@ static BOOL pdb_init(const struct pdb_lookup* pdb_lookup, struct pdb_file_info* 
                   pdb_lookup->filename, root->Age, pdb_lookup->age);
         TRACE("found DS for %s: age=%x guid=%s\n",
               pdb_lookup->filename, root->Age, debugstr_guid(&root->guid));
-        pdb_load_stream_name_table(pdb_file, &root->names[0], root->cbNames);
+        ret = pdb_load_stream_name_table(pdb_file, &root->names[0], root->cbNames);
 
         pdb_free(root);
     }
@@ -3377,7 +3377,8 @@ static BOOL pdb_process_internal(const struct process* pcs,
             break;
         default:
             FIXME("Unknown PDB_STREAM_INDEXES size (%u)\n", symbols.stream_index_size);
-            break;
+            pdb_free(symbols_image);
+            return FALSE;
         }
         files_image = pdb_read_strings(pdb_file);
         if (files_image) files_size = *(const DWORD*)(files_image + 8);

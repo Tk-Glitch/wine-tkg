@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Michael Müller
+ * Copyright 2022 Zhiyi Zhang for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,16 +16,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
+#ifndef SOCKETAPI_H
+#define SOCKETAPI_H
 
-#include "windef.h"
-#include "winbase.h"
-#include "wine/debug.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-WINE_DEFAULT_DEBUG_CHANNEL(iertutil);
+HRESULT WINAPI SetSocketMediaStreamingMode(BOOL value);
 
-BOOL WINAPI IERTUTIL_811(void *unknown)
-{
-    FIXME("(%p): stub\n", unknown);
-    return FALSE;
+#ifdef __cplusplus
 }
+#endif
+
+#endif /* SOCKETAPI_H */

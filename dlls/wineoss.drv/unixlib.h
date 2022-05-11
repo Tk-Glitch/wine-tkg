@@ -18,7 +18,7 @@
 
 #include "mmdeviceapi.h"
 
-struct stream_oss;
+typedef UINT64 stream_handle;
 
 /* From <dlls/mmdevapi/mmdevapi.h> */
 enum DriverPriority
@@ -36,8 +36,8 @@ struct test_connect_params
 
 struct endpoint
 {
-    WCHAR *name;
-    char *device;
+    unsigned int name;
+    unsigned int device;
 };
 
 struct get_endpoint_ids_params
@@ -60,42 +60,42 @@ struct create_stream_params
     REFERENCE_TIME period;
     const WAVEFORMATEX *fmt;
     HRESULT result;
-    struct oss_stream **stream;
+    stream_handle *stream;
 };
 
 struct release_stream_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HANDLE timer_thread;
     HRESULT result;
 };
 
 struct start_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
 };
 
 struct stop_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
 };
 
 struct reset_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
 };
 
 struct timer_loop_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
 };
 
 struct get_render_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     UINT32 frames;
     HRESULT result;
     BYTE **data;
@@ -103,7 +103,7 @@ struct get_render_buffer_params
 
 struct release_render_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     UINT32 written_frames;
     UINT flags;
     HRESULT result;
@@ -111,7 +111,7 @@ struct release_render_buffer_params
 
 struct get_capture_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     BYTE **data;
     UINT32 *frames;
@@ -122,7 +122,7 @@ struct get_capture_buffer_params
 
 struct release_capture_buffer_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     UINT32 done;
     HRESULT result;
 };
@@ -147,42 +147,42 @@ struct get_mix_format_params
 
 struct get_buffer_size_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT32 *size;
 };
 
 struct get_latency_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     REFERENCE_TIME *latency;
 };
 
 struct get_current_padding_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT32 *padding;
 };
 
 struct get_next_packet_size_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT32 *frames;
 };
 
 struct get_frequency_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT64 *frequency;
 };
 
 struct get_position_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
     UINT64 *position;
     UINT64 *qpctime;
@@ -190,7 +190,7 @@ struct get_position_params
 
 struct set_volumes_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     float master_volume;
     const float *volumes;
     const float *session_volumes;
@@ -198,52 +198,15 @@ struct set_volumes_params
 
 struct set_event_handle_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HANDLE event;
     HRESULT result;
 };
 
 struct is_started_params
 {
-    struct oss_stream *stream;
+    stream_handle stream;
     HRESULT result;
-};
-
-#include <mmddk.h> /* temporary */
-
-typedef struct midi_src
-{
-    int                 state; /* -1 disabled, 0 is no recording started, 1 in recording, bit 2 set if in sys exclusive recording */
-    MIDIOPENDESC        midiDesc;
-    WORD                wFlags;
-    MIDIHDR            *lpQueueHdr;
-    unsigned char       incoming[3];
-    unsigned char       incPrev;
-    char                incLen;
-    UINT                startTime;
-    MIDIINCAPSW         caps;
-    int                 fd;
-} WINE_MIDIIN;
-
-typedef struct midi_dest
-{
-    BOOL                bEnabled;
-    MIDIOPENDESC        midiDesc;
-    WORD                wFlags;
-    MIDIHDR            *lpQueueHdr;
-    void               *lpExtra; /* according to port type (MIDI, FM...), extra data when needed */
-    MIDIOUTCAPSW        caps;
-    int                 fd;
-} WINE_MIDIOUT;
-
-struct midi_init_params
-{
-    UINT *err;
-    unsigned int num_dests;
-    unsigned int num_srcs;
-    unsigned int num_synths;
-    struct midi_dest *dests;
-    struct midi_src *srcs;
 };
 
 struct notify_context
@@ -270,10 +233,31 @@ struct midi_out_message_params
     struct notify_context *notify;
 };
 
-struct midi_seq_open_params
+struct midi_in_message_params
 {
-    int close;
-    int fd;
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
+    struct notify_context *notify;
+};
+
+struct midi_notify_wait_params
+{
+    BOOL *quit;
+    struct notify_context *notify;
+};
+
+struct aux_message_params
+{
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
 };
 
 enum oss_funcs
@@ -301,15 +285,23 @@ enum oss_funcs
     oss_set_volumes,
     oss_set_event_handle,
     oss_is_started,
-    oss_midi_init,
+    oss_midi_release,
     oss_midi_out_message,
-
-    oss_midi_seq_open, /* temporary */
+    oss_midi_in_message,
+    oss_midi_notify_wait,
+    oss_aux_message,
 };
 
-NTSTATUS midi_init(void *args) DECLSPEC_HIDDEN;
+NTSTATUS midi_release(void *args) DECLSPEC_HIDDEN;
 NTSTATUS midi_out_message(void *args) DECLSPEC_HIDDEN;
-NTSTATUS midi_seq_open(void *args) DECLSPEC_HIDDEN;
+NTSTATUS midi_in_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS midi_notify_wait(void *args) DECLSPEC_HIDDEN;
+
+#ifdef _WIN64
+NTSTATUS wow64_midi_out_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS wow64_midi_in_message(void *args) DECLSPEC_HIDDEN;
+NTSTATUS wow64_midi_notify_wait(void *args) DECLSPEC_HIDDEN;
+#endif
 
 extern unixlib_handle_t oss_handle;
 

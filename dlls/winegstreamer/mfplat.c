@@ -661,6 +661,7 @@ IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format)
     {
         case WG_MAJOR_TYPE_H264:
         case WG_MAJOR_TYPE_WMA:
+        case WG_MAJOR_TYPE_MPEG1_AUDIO:
             FIXME("Format %u not implemented!\n", format->major_type);
             /* fallthrough */
         case WG_MAJOR_TYPE_UNKNOWN:
@@ -903,6 +904,8 @@ HRESULT mf_create_wg_sample(IMFSample *sample, struct wg_sample **out)
 {
     DWORD current_length, max_length;
     struct mf_sample *mf_sample;
+    LONGLONG time, duration;
+    UINT32 value;
     BYTE *buffer;
     HRESULT hr;
 
@@ -912,6 +915,19 @@ HRESULT mf_create_wg_sample(IMFSample *sample, struct wg_sample **out)
         goto out;
     if (FAILED(hr = IMFMediaBuffer_Lock(mf_sample->media_buffer, &buffer, &max_length, &current_length)))
         goto out;
+
+    if (SUCCEEDED(IMFSample_GetSampleTime(sample, &time)))
+    {
+        mf_sample->wg_sample.flags |= WG_SAMPLE_FLAG_HAS_PTS;
+        mf_sample->wg_sample.pts = time;
+    }
+    if (SUCCEEDED(IMFSample_GetSampleDuration(sample, &duration)))
+    {
+        mf_sample->wg_sample.flags |= WG_SAMPLE_FLAG_HAS_DURATION;
+        mf_sample->wg_sample.duration = duration;
+    }
+    if (SUCCEEDED(IMFSample_GetUINT32(sample, &MFSampleExtension_CleanPoint, &value)) && value)
+        mf_sample->wg_sample.flags |= WG_SAMPLE_FLAG_SYNC_POINT;
 
     IMFSample_AddRef((mf_sample->sample = sample));
     mf_sample->wg_sample.data = buffer;
@@ -936,6 +952,13 @@ void mf_destroy_wg_sample(struct wg_sample *wg_sample)
     IMFMediaBuffer_Unlock(mf_sample->media_buffer);
     IMFMediaBuffer_SetCurrentLength(mf_sample->media_buffer, wg_sample->size);
     IMFMediaBuffer_Release(mf_sample->media_buffer);
+
+    if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_PTS)
+        IMFSample_SetSampleTime(mf_sample->sample, wg_sample->pts);
+    if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_DURATION)
+        IMFSample_SetSampleDuration(mf_sample->sample, wg_sample->duration);
+    if (wg_sample->flags & WG_SAMPLE_FLAG_SYNC_POINT)
+        IMFSample_SetUINT32(mf_sample->sample, &MFSampleExtension_CleanPoint, 1);
 
     IMFSample_Release(mf_sample->sample);
     free(mf_sample);

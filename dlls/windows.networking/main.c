@@ -1,7 +1,5 @@
 /*
- * ext-ms-win-xaml-pal-l1-1-0
- *
- * Copyright 2016 Michael Müller
+ * Copyright 2022 Zhiyi Zhang for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,26 +16,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <stdio.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "winuser.h"
+#include <windef.h>
+#include <winnt.h>
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(xaml);
+WINE_DEFAULT_DEBUG_CHANNEL(winsock);
 
-BOOL WINAPI XamlBehaviorEnabled(void *unknown)
+HRESULT WINAPI SetSocketMediaStreamingMode(BOOL value)
 {
-    FIXME("(%p): stub\n", unknown);
-    return TRUE;
-}
-
-HRESULT WINAPI GetThemeServices(void **interface)
-{
-    FIXME("(%p): stub\n", interface);
-
-    *interface = NULL;
-    return E_NOTIMPL;
+    FIXME("value %d stub!\n", value);
+    return S_OK;
 }

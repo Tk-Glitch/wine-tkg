@@ -507,8 +507,8 @@ static const enum afd_poll_bit event_bitorder[] =
     AFD_POLL_BIT_CONNECT_ERR,
     AFD_POLL_BIT_ACCEPT,
     AFD_POLL_BIT_OOB,
-    AFD_POLL_BIT_WRITE,
     AFD_POLL_BIT_READ,
+    AFD_POLL_BIT_WRITE,
     AFD_POLL_BIT_RESET,
     AFD_POLL_BIT_HUP,
     AFD_POLL_BIT_CLOSE,
@@ -569,7 +569,7 @@ void sock_init(void)
     }
 }
 
-static int sock_reselect( struct sock *sock )
+static void sock_reselect( struct sock *sock )
 {
     int ev = sock_get_poll_events( sock->fd );
 
@@ -577,7 +577,6 @@ static int sock_reselect( struct sock *sock )
         fprintf(stderr,"sock_reselect(%p): new mask %x\n", sock, ev);
 
     set_fd_events( sock->fd, ev );
-    return ev;
 }
 
 static unsigned int afd_poll_flag_to_win32( unsigned int flags )
@@ -993,6 +992,7 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
             if (req->iosb->status == STATUS_PENDING && !req->accepted)
             {
                 complete_async_accept( sock, req );
+                event &= ~POLLIN;
                 break;
             }
         }
@@ -1004,17 +1004,23 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
     if ((event & POLLOUT) && sock->connect_req && sock->connect_req->iosb->status == STATUS_PENDING)
         complete_async_connect( sock );
 
-    if (event & (POLLIN | POLLPRI) && async_waiting( &sock->read_q ))
+    if ((event & (POLLIN | POLLPRI)) && async_queued( &sock->read_q ))
     {
-        if (debug_level) fprintf( stderr, "activating read queue for socket %p\n", sock );
-        async_wake_up( &sock->read_q, STATUS_ALERTED );
+        if (async_waiting( &sock->read_q ))
+        {
+            if (debug_level) fprintf( stderr, "activating read queue for socket %p\n", sock );
+            async_wake_up( &sock->read_q, STATUS_ALERTED );
+        }
         event &= ~(POLLIN | POLLPRI);
     }
 
-    if (event & POLLOUT && async_waiting( &sock->write_q ))
+    if ((event & POLLOUT) && async_queued( &sock->write_q ))
     {
-        if (debug_level) fprintf( stderr, "activating write queue for socket %p\n", sock );
-        async_wake_up( &sock->write_q, STATUS_ALERTED );
+        if (async_waiting( &sock->write_q ))
+        {
+            if (debug_level) fprintf( stderr, "activating write queue for socket %p\n", sock );
+            async_wake_up( &sock->write_q, STATUS_ALERTED );
+        }
         event &= ~POLLOUT;
     }
 
@@ -1108,9 +1114,6 @@ static void sock_poll_event( struct fd *fd, int event )
     if (debug_level)
         fprintf(stderr, "socket %p select event: %x\n", sock, event);
 
-    /* we may change event later, remove from loop here */
-    if (event & (POLLERR|POLLHUP)) set_fd_events( sock->fd, -1 );
-
     switch (sock->state)
     {
     case SOCK_UNCONNECTED:
@@ -1182,10 +1185,9 @@ static void sock_poll_event( struct fd *fd, int event )
         break;
     }
 
-    complete_async_polls( sock, event, error );
-
     event = sock_dispatch_asyncs( sock, event, error );
     sock_dispatch_events( sock, prevstate, event, error );
+    complete_async_polls( sock, event, error );
 
     sock_reselect( sock );
 }
@@ -1233,6 +1235,18 @@ static int sock_get_poll_events( struct fd *fd )
     if (!sock->type) /* not initialized yet */
         return -1;
 
+    LIST_FOR_EACH_ENTRY( req, &poll_list, struct poll_req, entry )
+    {
+        unsigned int i;
+
+        for (i = 0; i < req->count; ++i)
+        {
+            if (req->sockets[i].sock != sock) continue;
+
+            ev |= poll_flags_from_afd( sock, req->sockets[i].mask );
+        }
+    }
+
     switch (sock->state)
     {
     case SOCK_UNCONNECTED:
@@ -1275,7 +1289,15 @@ static int sock_get_poll_events( struct fd *fd )
         }
         else if (async_queued( &sock->read_q ))
         {
-            if (async_waiting( &sock->read_q )) ev |= POLLIN | POLLPRI;
+            /* Clear POLLIN and POLLPRI if we have an alerted async, even if
+             * we're polling this socket for READ or OOB. We can't signal the
+             * poll if the pending async will read all of the data [cf. the
+             * matching logic in sock_dispatch_asyncs()], but we also don't
+             * want to spin polling for POLLIN if we're not going to use it. */
+            if (async_waiting( &sock->read_q ))
+                ev |= POLLIN | POLLPRI;
+            else
+                ev &= ~(POLLIN | POLLPRI);
         }
         else
         {
@@ -1296,7 +1318,12 @@ static int sock_get_poll_events( struct fd *fd )
 
         if (async_queued( &sock->write_q ))
         {
-            if (async_waiting( &sock->write_q )) ev |= POLLOUT;
+            /* As with read asyncs above, clear POLLOUT if we have an alerted
+             * async. */
+            if (async_waiting( &sock->write_q ))
+                ev |= POLLOUT;
+            else
+                ev &= ~POLLOUT;
         }
         else if (!sock->wr_shutdown && (mask & AFD_POLL_WRITE))
         {
@@ -1304,18 +1331,6 @@ static int sock_get_poll_events( struct fd *fd )
         }
 
         break;
-    }
-
-    LIST_FOR_EACH_ENTRY( req, &poll_list, struct poll_req, entry )
-    {
-        unsigned int i;
-
-        for (i = 0; i < req->count; ++i)
-        {
-            if (req->sockets[i].sock != sock) continue;
-
-            ev |= poll_flags_from_afd( sock, req->sockets[i].mask );
-        }
     }
 
     return ev;
@@ -2519,7 +2534,7 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         for (i = 0; i < ARRAY_SIZE( params.status ); ++i)
             params.status[i] = sock_get_ntstatus( sock->errors[i] );
 
-        sock->pending_events = 0;
+        sock->pending_events &= ~sock->mask;
         sock_reselect( sock );
 
         set_reply_data( &params, sizeof(params) );

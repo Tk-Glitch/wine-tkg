@@ -37,6 +37,7 @@ enum seq_index {
     PARENT_SEQ_INDEX,
     PARENT_FULL_SEQ_INDEX,
     PARENT_CD_SEQ_INDEX,
+    PARENT_ODSTATECHANGED_SEQ_INDEX,
     LISTVIEW_SEQ_INDEX,
     EDITBOX_SEQ_INDEX,
     COMBINED_SEQ_INDEX,
@@ -254,6 +255,14 @@ static const struct message ownerdata_deselect_all_parent_seq[] = {
     { 0 }
 };
 
+static const struct message ownerdata_multiselect_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ODSTATECHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
 static const struct message change_all_parent_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
@@ -462,6 +471,30 @@ static const struct message listview_end_label_edit_kill_focus[] = {
     { 0 }
 };
 
+static void hold_key(int vk)
+{
+    BYTE kstate[256];
+    BOOL res;
+
+    res = GetKeyboardState(kstate);
+    ok(res, "GetKeyboardState failed.\n");
+    kstate[vk] |= 0x80;
+    res = SetKeyboardState(kstate);
+    ok(res, "SetKeyboardState failed.\n");
+}
+
+static void release_key(int vk)
+{
+    BYTE kstate[256];
+    BOOL res;
+
+    res = GetKeyboardState(kstate);
+    ok(res, "GetKeyboardState failed.\n");
+    kstate[vk] &= ~0x80;
+    res = SetKeyboardState(kstate);
+    ok(res, "SetKeyboardState failed.\n");
+}
+
 static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     static LONG defwndproc_counter = 0;
@@ -499,6 +532,10 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
         add_message(sequences, PARENT_SEQ_INDEX, &msg);
         add_message(sequences, COMBINED_SEQ_INDEX, &msg);
     }
+    /* log change messages for single and multiple items changing in ownerdata listviews */
+    if (message == WM_NOTIFY && (msg.id == LVN_ITEMCHANGED || msg.id == LVN_ODSTATECHANGED))
+        add_message(sequences, PARENT_ODSTATECHANGED_SEQ_INDEX, &msg);
+
     add_message(sequences, PARENT_FULL_SEQ_INDEX, &msg);
 
     switch (message)
@@ -2356,7 +2393,6 @@ static void test_multiselect(void)
     int i, j;
     static const int items=5;
     DWORD item_count;
-    BYTE kstate[256];
     select_task task;
     LONG_PTR style;
     LVITEMA item;
@@ -2423,10 +2459,7 @@ static void test_multiselect(void)
 	selected_count = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
 	ok(selected_count == 1, "expected 1, got %ld\n", selected_count);
 
-	/* Set SHIFT key pressed */
-        GetKeyboardState(kstate);
-        kstate[VK_SHIFT]=0x80;
-        SetKeyboardState(kstate);
+        hold_key(VK_SHIFT);
 
 	for (j=1;j<=(task.count == -1 ? item_count : task.count);j++) {
 	    r = SendMessageA(hwnd, WM_KEYDOWN, task.loopVK, 0);
@@ -2441,10 +2474,7 @@ static void test_multiselect(void)
             "Failed multiple selection %s. There should be %ld selected items (is %ld)\n",
             task.descr, item_count, selected_count);
 
-	/* Set SHIFT key released */
-	GetKeyboardState(kstate);
-        kstate[VK_SHIFT]=0x00;
-        SetKeyboardState(kstate);
+        release_key(VK_SHIFT);
     }
     DestroyWindow(hwnd);
 
@@ -3510,6 +3540,70 @@ static void test_ownerdata(void)
 
     res = SendMessageA(hwnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
     expect(-1, res);
+    DestroyWindow(hwnd);
+}
+
+static void test_ownerdata_multiselect(void)
+{
+    HWND hwnd;
+    DWORD res;
+    LVITEMA item;
+
+    hwnd = create_listview_control(LVS_OWNERDATA | LVS_REPORT);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    res = SendMessageA(hwnd, LVM_SETITEMCOUNT, 20, 0);
+    expect(1, res);
+    res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+    expect(0, res);
+
+    memset(&item, 0, sizeof(item));
+    item.state = LVIS_SELECTED | LVIS_FOCUSED;
+    item.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+    expect(1, res);
+
+    res = SendMessageA(hwnd, LVM_SETSELECTIONMARK, 0, 0);
+    expect(0, res);
+
+    hold_key(VK_SHIFT);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    res = SendMessageA(hwnd, WM_KEYDOWN, VK_DOWN, 0);
+    expect(0, res);
+
+    ok_sequence(sequences, PARENT_ODSTATECHANGED_SEQ_INDEX,
+                ownerdata_multiselect_odstatechanged_seq,
+                "ownerdata select multiple notification", TRUE);
+
+    res = SendMessageA(hwnd, WM_KEYUP, VK_DOWN, 0);
+    expect(0, res);
+
+    res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+    expect(2, res);
+
+    hold_key(VK_CONTROL);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    res = SendMessageA(hwnd, WM_KEYDOWN, VK_DOWN, 0);
+    expect(0, res);
+
+    ok_sequence(sequences, PARENT_ODSTATECHANGED_SEQ_INDEX,
+                ownerdata_multiselect_odstatechanged_seq,
+                "ownerdata select multiple notification", TRUE);
+
+    res = SendMessageA(hwnd, WM_KEYUP, VK_DOWN, 0);
+    expect(0, res);
+
+    release_key(VK_CONTROL);
+    release_key(VK_SHIFT);
+
+    res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+    expect(3, res);
+
     DestroyWindow(hwnd);
 }
 
@@ -6861,6 +6955,7 @@ START_TEST(listview)
     test_subitem_rect();
     test_sorting();
     test_ownerdata();
+    test_ownerdata_multiselect();
     test_norecompute();
     test_nosortheader();
     test_setredraw();
@@ -6920,6 +7015,7 @@ START_TEST(listview)
     test_columns();
     test_sorting();
     test_ownerdata();
+    test_ownerdata_multiselect();
     test_norecompute();
     test_nosortheader();
     test_indentation();

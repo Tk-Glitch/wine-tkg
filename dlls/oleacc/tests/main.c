@@ -27,6 +27,7 @@
 #include <ole2.h>
 #include <commctrl.h>
 #include <oleacc.h>
+#include <servprov.h>
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -1409,6 +1410,30 @@ static LRESULT WINAPI test_query_class(HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return 0;
 }
 
+#define check_acc_proxy_service( acc ) \
+        check_acc_proxy_service_( (acc), __LINE__)
+static void check_acc_proxy_service_(IAccessible *acc, int line)
+{
+    IServiceProvider *service = NULL;
+    IUnknown *unk = NULL;
+    HRESULT hr;
+
+    hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void **)&service);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IServiceProvider_QueryService(service, &IIS_IsOleaccProxy, &IID_IUnknown, (void **)&unk);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(!!unk, "unk == NULL\n");
+    ok(iface_cmp(unk, (IUnknown*)acc), "unk != acc\n");
+    IUnknown_Release(unk);
+
+    unk = (IUnknown*)0xdeadbeef;
+    hr = IServiceProvider_QueryService(service, &IID_IUnknown, &IID_IUnknown, (void **)&unk);
+    ok(hr == E_INVALIDARG, "got %#lx\n", hr);
+    ok(!unk, "unk != NULL\n");
+    IServiceProvider_Release(service);
+}
+
 static void test_CreateStdAccessibleObject_classes(void)
 {
     static const struct {
@@ -1463,6 +1488,7 @@ static void test_CreateStdAccessibleObject_classes(void)
         ok(hr == S_OK, "CreateStdAccessibleObject failed %lx\n", hr);
         if (tests[i].client)
             CHECK_CALLED(winproc_GETOBJECT);
+        check_acc_proxy_service(acc);
         IAccessible_Release(acc);
 
         if (tests[i].window)
@@ -1471,6 +1497,7 @@ static void test_CreateStdAccessibleObject_classes(void)
         ok(hr == S_OK, "CreateStdAccessibleObject failed %lx\n", hr);
         if (tests[i].window)
             CHECK_CALLED(winproc_GETOBJECT);
+        check_acc_proxy_service(acc);
         IAccessible_Release(acc);
 
         SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)win_proc);

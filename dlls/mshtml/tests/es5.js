@@ -28,6 +28,7 @@ var JS_E_REGEXP_EXPECTED = 0x800a1398;
 var JS_E_INVALID_WRITABLE_PROP_DESC = 0x800a13ac;
 var JS_E_NONCONFIGURABLE_REDEFINED = 0x800a13d6;
 var JS_E_NONWRITABLE_MODIFIED = 0x800a13d7;
+var JS_E_WRONG_THIS = 0x800a13fc;
 
 var tests = [];
 
@@ -68,6 +69,116 @@ sync_test("toISOString", function() {
     expect_exception(function() { new Date(31494784780800001).toISOString(); });
 });
 
+sync_test("Array toLocaleString", function() {
+    var r = Array.prototype.toLocaleString.length, old = Number.prototype.toLocaleString;
+    var s = external.listSeparator + ' ';
+    ok(r === 0, "length = " + r);
+
+    r = [5];
+    r.toLocaleString = function(a, b, c) { return a + " " + b + " " + c; };
+    Number.prototype.toLocaleString = function() { return "aBc"; };
+
+    r = [new Number(3), r, new Number(12)].toLocaleString("foo", "bar", "baz");
+    ok(r === "aBc"+s+"undefined undefined undefined"+s+"aBc", "toLocaleString returned " + r);
+
+    r = [3].toLocaleString();  /* primitive number value not affected */
+    if(external.isEnglish)
+        ok(r === "3.00", "[3].toLocaleString returned " + r);
+    else
+        ok(r !== "aBc", "[3].toLocaleString returned " + r);
+    Number.prototype.toLocaleString = old;
+
+    r = Object.create(null);
+    r.toString = function() { return "foo"; }
+    try {
+        Array.prototype.toLocaleString.call([r]);
+        ok(false, "expected exception calling it on array with object without toLocaleString");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_FUNCTION_EXPECTED, "called on array with object without toLocaleString threw " + n);
+    }
+
+    r = { length: 2 };
+    r[0] = { toLocaleString: function() { return "foo"; } }
+    r[1] = { toLocaleString: function() { return "bar"; } }
+    r = Array.prototype.toLocaleString.call(r);
+    ok(r === "foo"+s+"bar", "toLocaleString on array-like object returned " + r);
+
+    r = Array.prototype.toLocaleString.call({});
+    ok(r === "", "toLocaleString on {} returned " + r);
+
+    r = Array.prototype.toLocaleString.call("ab");
+    ok(r === "a"+s+"b", "toLocaleString on 'ab' returned " + r);
+
+    try {
+        Array.prototype.toLocaleString.call(undefined);
+        ok(false, "expected exception calling it on undefined");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "called on undefined threw " + n);
+    }
+    try {
+        Array.prototype.toLocaleString.call(null);
+        ok(false, "expected exception calling it on null");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "called on null threw " + n);
+    }
+    try {
+        Array.prototype.toLocaleString.call(external.nullDisp);
+        ok(false, "expected exception calling it on nullDisp");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "called on nullDisp threw " + n);
+    }
+});
+
+sync_test("Number toLocaleString", function() {
+    var r = Number.prototype.toLocaleString.length;
+    ok(r === 0, "length = " + r);
+    var tests = [
+        [ 0.0,          "0" ],
+        [ 1234.5,       "1,234.5" ],
+        [ -1337.7331,   "-1,337.733" ],
+        [ -0.0123,      "-0.012" ],
+        [-0.0198,       "-0.02" ],
+        [ 0.004,        "0.004" ],
+        [ 99.004,       "99.004" ],
+        [ 99.0004,      "99" ],
+        [ 65536.5,      "65,536.5" ],
+        [ NaN,          "NaN" ]
+    ];
+
+    if(external.isEnglish) {
+        for(var i = 0; i < tests.length; i++) {
+            r = Number.prototype.toLocaleString.call(tests[i][0]);
+            ok(r === tests[i][1], "[" + i + "] got " + r);
+        }
+    }
+
+    try {
+        Number.prototype.toLocaleString.call("50");
+        ok(false, "expected exception calling it on string");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_WRONG_THIS, "called on string threw " + n);
+    }
+    try {
+        Number.prototype.toLocaleString.call(undefined);
+        ok(false, "expected exception calling it on undefined");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_WRONG_THIS, "called on undefined threw " + n);
+    }
+    try {
+        Number.prototype.toLocaleString.call(external.nullDisp);
+        ok(false, "expected exception calling it on nullDisp");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_WRONG_THIS, "called on nullDisp threw " + n);
+    }
+});
+
 sync_test("indexOf", function() {
     function expect(array, args, exr) {
         var r = Array.prototype.indexOf.apply(array, args);
@@ -92,6 +203,97 @@ sync_test("indexOf", function() {
     expect({"4": 4, length: 3}, [4], -1);
     expect({"test": true}, [true], -1);
     expect([1,2,3], [2, 1.9], 1);
+});
+
+sync_test("lastIndexOf", function() {
+    function expect(array, args, exr) {
+        var r = Array.prototype.lastIndexOf.apply(array, args);
+        ok(r == exr, "lastIndexOf returned " + r + " expected " + exr);
+    }
+
+    ok(Array.prototype.lastIndexOf.length == 1, "lastIndexOf.length = " + Array.prototype.lastIndexOf.length);
+
+    expect([1,2,3], [2], 1);
+    expect([1,undefined,3], [undefined], 1);
+    expect([1,undefined,3], [], 1);
+    expect([1,,3], [undefined], -1);
+    expect([1,undefined,undefined], [undefined], 2);
+    expect([1,2,3,2,5,6], [2, 2], 1);
+    expect([1,2,3,2,5,6], [2], 3);
+    expect([1,2,3,2,5,6], [2, -3], 3);
+    expect([1,2,3,2,5,6], [2, -4], 1);
+    expect([1,2,3,2,5,6], [1, -100], -1);
+    expect([1,2,3,2,5,6], [2, 100], 3);
+    expect("abcba", ["b"], 3);
+    expect(true, [true], -1);
+    expect({"4": 4, length: 5}, [4], 4);
+    expect({"4": 4, length: 5}, [undefined], -1);
+    expect({"4": 4, length: 3}, [4], -1);
+    expect({"test": true}, [true], -1);
+    expect([1,2,3], [2, 1.9], 1);
+    expect([1,2,3], [2, 0.9], -1);
+});
+
+sync_test("filter", function() {
+    ok(Array.prototype.filter.length === 1, "filter.length = " + Array.prototype.filter.length);
+
+    var arr = ["a","foobar",true,"b",42,0,Math,null,undefined,[1,2,3,"4"]];
+    delete arr[1];
+
+    function test(expect, fn, expect_this) {
+        var mismatch = false, r = function(v, i, a) {
+            ok(a === arr, "unexpected array " + arr);
+            ok(v === arr[i], "value = " + v + ", expected " + arr[i]);
+            ok(this === (expect_this ? expect_this : window), "this = " + this + ", expected " + expect_this);
+            return fn(v);
+        };
+        r = expect_this ? Array.prototype.filter.call(arr, r, expect_this) : Array.prototype.filter.call(arr, r);
+        ok(r.length === expect.length, "filtered array length = " + r.length + ", expected " + expect.length);
+        for(var i = 0; i < r.length; i++)
+            if(r[i] !== expect[i])
+                mismatch = true;
+        ok(!mismatch, "filtered array = " + r + ", expected " + expect);
+    }
+
+    test([], function(v) { return false; });
+    test(["a",true,"b",42,0,Math,null,undefined,arr[9]], function(v) { if(arr[1] === "foobar") delete arr[1]; return true; });
+    test(["a","b"], function(v) { if(v === "b") delete arr[0]; return typeof v === "string"; });
+    test(["b"], function(v) { if(arr[arr.length - 1] !== "c") arr.push("c"); return typeof v === "string"; });
+    test([true,"b",42,Math,arr[9],"c"], function(v) { return v; }, Object);
+});
+
+sync_test("every & some", function() {
+    ok(Array.prototype.every.length === 1, "every.length = " + Array.prototype.every.length);
+    ok(Array.prototype.some.length === 1, "some.length = " + Array.prototype.some.length);
+    var arr = ["foobar"];
+
+    function test(expect_every, expect_some, fn, expect_this) {
+        var cb = function(v, i, a) {
+            ok(a === arr, "unexpected array " + arr);
+            ok(v === arr[i], "value = " + v + ", expected " + arr[i]);
+            ok(this === (expect_this ? expect_this : window), "this = " + this + ", expected " + expect_this);
+            return fn(v);
+        };
+        r = expect_this ? Array.prototype.every.call(arr, cb, expect_this) : Array.prototype.every.call(arr, cb);
+        ok(r === expect_every, "'every' = " + r);
+        r = expect_this ? Array.prototype.some.call(arr, cb, expect_this) : Array.prototype.some.call(arr, cb);
+        ok(r === expect_some, "'some' = " + r);
+    }
+
+    delete arr[0];
+    test(true, false, function(v) { return false; });
+    test(true, false, function(v) { return true; });
+
+    arr = [1,"2",3];
+    test(true, true, function(v) { return true; });
+    test(true, true, function(v) { if(arr[1] === "2") delete arr[1]; return typeof v === "number"; });
+    test(true, true, function(v) { if(arr[arr.length - 1] !== "a") arr.push("a"); return typeof v === "number"; }, Object);
+    test(false, true, function(v) { return typeof v === "number"; }, Object);
+
+    arr = [0,null,undefined,false];
+    test(false, false, function(v) { return v; });
+    arr.push(1);
+    test(false, true, function(v) { return v; });
 });
 
 sync_test("forEach", function() {

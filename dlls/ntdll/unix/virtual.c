@@ -4814,6 +4814,18 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
                                 offset_ptr, size_ptr, alloc_type, protect );
 }
 
+/***********************************************************************
+ *             NtMapViewOfSectionEx   (NTDLL.@)
+ *             ZwMapViewOfSectionEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtMapViewOfSectionEx( HANDLE handle, HANDLE process, PVOID *addr_ptr, const LARGE_INTEGER *offset_ptr,
+        SIZE_T *size_ptr, ULONG alloc_type, ULONG protect, MEM_EXTENDED_PARAMETER *params, ULONG params_count )
+{
+    if (params)
+        FIXME("Ignoring extended parameters.\n");
+
+    return NtMapViewOfSection( handle, process, addr_ptr, 0, 0, offset_ptr, size_ptr, ViewShare, alloc_type, protect );
+}
 
 /***********************************************************************
  *             NtUnmapViewOfSection   (NTDLL.@)
@@ -4876,6 +4888,15 @@ NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
     return status;
 }
 
+/***********************************************************************
+ *             NtUnmapViewOfSectionEx   (NTDLL.@)
+ *             ZwUnmapViewOfSectionEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtUnmapViewOfSectionEx( HANDLE process, PVOID addr, ULONG flags )
+{
+    if (flags) FIXME("Ignoring flags %#x.\n", flags);
+    return NtUnmapViewOfSection( process, addr );
+}
 
 /******************************************************************************
  *             virtual_fill_image_information

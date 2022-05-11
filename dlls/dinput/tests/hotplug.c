@@ -133,6 +133,7 @@ static BOOL test_input_lost( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
@@ -526,8 +527,8 @@ static HRESULT WINAPI controller_handler_Invoke( IEventHandler_RawGameController
     trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
 
     ok( sender == NULL, "got sender %p\n", sender );
-    SetEvent( impl->event );
     impl->invoked = TRUE;
+    SetEvent( impl->event );
 
     return S_OK;
 }
@@ -923,7 +924,6 @@ static LRESULT CALLBACK windows_gaming_input_wndproc( HWND hwnd, UINT msg, WPARA
         {
             ok( wparam == DBT_DEVICEREMOVECOMPLETE, "got wparam %#Ix\n", wparam );
             ok( controller_added.invoked, "controller added handler not invoked\n" );
-            ok( controller_removed.invoked, "controller removed handler not invoked\n" );
         }
         else
         {

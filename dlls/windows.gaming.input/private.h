@@ -25,6 +25,7 @@
 #include "winbase.h"
 #include "winstring.h"
 #include "objbase.h"
+#include "dinput.h"
 
 #include "activation.h"
 
@@ -63,6 +64,12 @@ extern void manager_on_provider_removed( IGameControllerProvider *provider );
 extern HRESULT event_handlers_append( struct list *list, IEventHandler_IInspectable *handler, EventRegistrationToken *token );
 extern HRESULT event_handlers_remove( struct list *list, EventRegistrationToken *token );
 extern void event_handlers_notify( struct list *list, IInspectable *element );
+
+extern HRESULT force_feedback_motor_create( IDirectInputDevice8W *device, IForceFeedbackMotor **out );
+
+typedef HRESULT (WINAPI *async_operation_callback)( IUnknown *invoker, IUnknown *param, PROPVARIANT *result );
+extern HRESULT async_operation_boolean_create( IUnknown *invoker, IUnknown *param, async_operation_callback callback,
+                                               IAsyncOperation_boolean **out );
 
 #define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
     static inline impl_type *impl_from( iface_type *iface )                                        \

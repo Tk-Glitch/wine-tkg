@@ -4503,6 +4503,8 @@ struct get_token_groups_request
 {
     struct request_header __header;
     obj_handle_t    handle;
+    unsigned int    attr_mask;
+    char __pad_20[4];
 };
 struct get_token_groups_reply
 {
@@ -6513,7 +6515,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 752
+#define SERVER_PROTOCOL_VERSION 753
 
 /* ### protocol_version end ### */
 

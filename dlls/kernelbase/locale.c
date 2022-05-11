@@ -49,9 +49,12 @@ static HMODULE kernelbase_handle;
 struct registry_entry
 {
     const WCHAR                         *value;
+    const WCHAR                         *subkey;
     enum { NOT_CACHED, CACHED, MISSING } status;
     WCHAR                                data[80];
 };
+
+static const WCHAR world_subkey[] = { 0xd83c, 0xdf0e, 0xd83c, 0xdf0f, 0xd83c, 0xdf0d, 0 }; /* 🌎🌏🌍 */
 
 static struct registry_entry entry_icalendartype      = { L"iCalendarType" };
 static struct registry_entry entry_icountry           = { L"iCountry" };
@@ -71,6 +74,7 @@ static struct registry_entry entry_s2359              = { L"s2359" };
 static struct registry_entry entry_scurrency          = { L"sCurrency" };
 static struct registry_entry entry_sdecimal           = { L"sDecimal" };
 static struct registry_entry entry_sgrouping          = { L"sGrouping" };
+static struct registry_entry entry_sintlsymbol        = { L"Currencies", world_subkey };
 static struct registry_entry entry_slist              = { L"sList" };
 static struct registry_entry entry_slongdate          = { L"sLongDate" };
 static struct registry_entry entry_smondecimalsep     = { L"sMonDecimalSep" };
@@ -253,6 +257,21 @@ static const struct geo_index
 static unsigned int geo_ids_count;
 static unsigned int geo_index_count;
 
+enum charmaps
+{
+    CHARMAP_FOLDDIGITS,
+    CHARMAP_COMPAT,
+    CHARMAP_HIRAGANA,
+    CHARMAP_KATAKANA,
+    CHARMAP_HALFWIDTH,
+    CHARMAP_FULLWIDTH,
+    CHARMAP_TRADITIONAL,
+    CHARMAP_SIMPLIFIED,
+    NB_CHARMAPS
+};
+
+static const USHORT *charmaps[NB_CHARMAPS];
+
 /* NLS normalization file */
 struct norm_table
 {
@@ -366,6 +385,8 @@ static void load_locale_nls(void)
     } *geo_header;
 
     LARGE_INTEGER dummy;
+    const USHORT *map_ptr;
+    unsigned int i;
 
     RtlGetLocaleFileMappingAddress( (void **)&header, &system_lcid, &dummy );
     locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
@@ -377,6 +398,8 @@ static void load_locale_nls(void)
     geo_index = (const struct geo_index *)((char *)geo_header + geo_header->index_offset);
     geo_ids_count = geo_header->ids_count;
     geo_index_count = geo_header->index_count;
+    map_ptr = (const USHORT *)((char *)header + header->charmaps);
+    for (i = 0; i < NB_CHARMAPS; i++, map_ptr += *map_ptr) charmaps[i] = map_ptr + 1;
 }
 
 
@@ -636,7 +659,7 @@ static BOOL set_registry_entry( struct registry_entry *entry, const WCHAR *data 
     TRACE( "setting %s to %s\n", debugstr_w(entry->value), debugstr_w(data) );
 
     RtlEnterCriticalSection( &locale_section );
-    if (!(ret = RegSetValueExW( intl_key, entry->value, 0, REG_SZ, (BYTE *)data, size )))
+    if (!(ret = RegSetKeyValueW( intl_key, entry->subkey, entry->value, REG_SZ, (BYTE *)data, size )))
     {
         wcscpy( entry->data, data );
         entry->status = CACHED;
@@ -660,7 +683,17 @@ static int locale_return_reg_string( struct registry_entry *entry, LCTYPE type, 
     {
     case NOT_CACHED:
         size = sizeof(entry->data);
-        res = RegQueryValueExW( intl_key, entry->value, NULL, NULL, (BYTE *)entry->data, &size );
+        if (entry->subkey)
+        {
+            HKEY key;
+            if (!(res = RegOpenKeyExW( intl_key, entry->subkey, 0, KEY_READ, &key )))
+            {
+                res = RegQueryValueExW( key, entry->value, NULL, NULL, (BYTE *)entry->data, &size );
+                RegCloseKey( key );
+            }
+        }
+        else res = RegQueryValueExW( intl_key, entry->value, NULL, NULL, (BYTE *)entry->data, &size );
+
         if (res)
         {
             entry->status = MISSING;
@@ -1046,6 +1079,7 @@ static int get_locale_info( const NLS_LOCALE_DATA *locale, LCID lcid, LCTYPE typ
         return locale_return_string( locale->scurrency, type, buffer, len );
 
     case LOCALE_SINTLSYMBOL:
+        if ((ret = locale_return_reg_string( &entry_sintlsymbol, type, buffer, len )) != -1) return ret;
         return locale_return_string( locale->sintlsymbol, type, buffer, len );
 
     case LOCALE_SMONDECIMALSEP:
@@ -1685,11 +1719,11 @@ static int get_geo_info( const struct geo_id *geo, enum SYSGEOTYPE type,
 
 
 /* update a registry value based on the current user locale info */
-static void update_registry_value( UINT type, const WCHAR *value )
+static void update_registry_value( UINT type, const WCHAR *subkey, const WCHAR *value )
 {
     WCHAR buffer[80];
     UINT len = get_locale_info( user_locale, user_lcid, type, buffer, ARRAY_SIZE(buffer) );
-    if (len) RegSetValueExW( intl_key, value, 0, REG_SZ, (BYTE *)buffer, len * sizeof(WCHAR) );
+    if (len) RegSetKeyValueW( intl_key, subkey, value, REG_SZ, (BYTE *)buffer, len * sizeof(WCHAR) );
 }
 
 
@@ -1702,46 +1736,49 @@ static void update_locale_registry(void)
     len = swprintf( buffer, ARRAY_SIZE(buffer), L"%08x", GetUserDefaultLCID() );
     RegSetValueExW( intl_key, L"Locale", 0, REG_SZ, (BYTE *)buffer, (len + 1) * sizeof(WCHAR) );
 
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ICALENDARTYPE, entry_icalendartype.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ICOUNTRY, entry_icountry.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ICURRDIGITS, entry_icurrdigits.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ICURRENCY, entry_icurrency.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IDIGITS, entry_idigits.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IDIGITSUBSTITUTION, entry_idigitsubstitution.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IFIRSTDAYOFWEEK, entry_ifirstdayofweek.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IFIRSTWEEKOFYEAR, entry_ifirstweekofyear.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ILZERO, entry_ilzero.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IMEASURE, entry_imeasure.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_INEGCURR, entry_inegcurr.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_INEGNUMBER, entry_inegnumber.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IPAPERSIZE, entry_ipapersize.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_S1159, entry_s1159.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_S2359, entry_s2359.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SCURRENCY, entry_scurrency.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SDECIMAL, entry_sdecimal.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SGROUPING, entry_sgrouping.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SLIST, entry_slist.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SLONGDATE, entry_slongdate.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SMONDECIMALSEP, entry_smondecimalsep.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SMONGROUPING, entry_smongrouping.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SMONTHOUSANDSEP, entry_smonthousandsep.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SNATIVEDIGITS, entry_snativedigits.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SNEGATIVESIGN, entry_snegativesign.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SPOSITIVESIGN, entry_spositivesign.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SSHORTDATE, entry_sshortdate.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SSHORTTIME, entry_sshorttime.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_STHOUSAND, entry_sthousand.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_STIMEFORMAT, entry_stimeformat.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SYEARMONTH, entry_syearmonth.value );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IDATE, L"iDate" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ITIME, L"iTime" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ITIMEMARKPOSN, L"iTimePrefix" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ITLZERO, L"iTLZero" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SDATE, L"sDate" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_STIME, L"sTime" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SABBREVLANGNAME, L"sLanguage" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SCOUNTRY, L"sCountry" );
-    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SNAME, L"LocaleName" );
+#define UPDATE(val,entry) update_registry_value( LOCALE_NOUSEROVERRIDE | (val), (entry).subkey, (entry).value )
+    UPDATE( LOCALE_ICALENDARTYPE, entry_icalendartype );
+    UPDATE( LOCALE_ICOUNTRY, entry_icountry );
+    UPDATE( LOCALE_ICURRDIGITS, entry_icurrdigits );
+    UPDATE( LOCALE_ICURRENCY, entry_icurrency );
+    UPDATE( LOCALE_IDIGITS, entry_idigits );
+    UPDATE( LOCALE_IDIGITSUBSTITUTION, entry_idigitsubstitution );
+    UPDATE( LOCALE_IFIRSTDAYOFWEEK, entry_ifirstdayofweek );
+    UPDATE( LOCALE_IFIRSTWEEKOFYEAR, entry_ifirstweekofyear );
+    UPDATE( LOCALE_ILZERO, entry_ilzero );
+    UPDATE( LOCALE_IMEASURE, entry_imeasure );
+    UPDATE( LOCALE_INEGCURR, entry_inegcurr );
+    UPDATE( LOCALE_INEGNUMBER, entry_inegnumber );
+    UPDATE( LOCALE_IPAPERSIZE, entry_ipapersize );
+    UPDATE( LOCALE_S1159, entry_s1159 );
+    UPDATE( LOCALE_S2359, entry_s2359 );
+    UPDATE( LOCALE_SCURRENCY, entry_scurrency );
+    UPDATE( LOCALE_SDECIMAL, entry_sdecimal );
+    UPDATE( LOCALE_SGROUPING, entry_sgrouping );
+    UPDATE( LOCALE_SINTLSYMBOL, entry_sintlsymbol );
+    UPDATE( LOCALE_SLIST, entry_slist );
+    UPDATE( LOCALE_SLONGDATE, entry_slongdate );
+    UPDATE( LOCALE_SMONDECIMALSEP, entry_smondecimalsep );
+    UPDATE( LOCALE_SMONGROUPING, entry_smongrouping );
+    UPDATE( LOCALE_SMONTHOUSANDSEP, entry_smonthousandsep );
+    UPDATE( LOCALE_SNATIVEDIGITS, entry_snativedigits );
+    UPDATE( LOCALE_SNEGATIVESIGN, entry_snegativesign );
+    UPDATE( LOCALE_SPOSITIVESIGN, entry_spositivesign );
+    UPDATE( LOCALE_SSHORTDATE, entry_sshortdate );
+    UPDATE( LOCALE_SSHORTTIME, entry_sshorttime );
+    UPDATE( LOCALE_STHOUSAND, entry_sthousand );
+    UPDATE( LOCALE_STIMEFORMAT, entry_stimeformat );
+    UPDATE( LOCALE_SYEARMONTH, entry_syearmonth );
+#undef UPDATE
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_IDATE, NULL, L"iDate" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ITIME, NULL, L"iTime" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ITIMEMARKPOSN, NULL, L"iTimePrefix" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_ITLZERO, NULL, L"iTLZero" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SDATE, NULL, L"sDate" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_STIME, NULL, L"sTime" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SABBREVLANGNAME, NULL, L"sLanguage" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SCOUNTRY, NULL, L"sCountry" );
+    update_registry_value( LOCALE_NOUSEROVERRIDE | LOCALE_SNAME, NULL, L"LocaleName" );
     SetUserGeoID( user_locale->igeoid );
 }
 
@@ -1834,12 +1871,6 @@ void init_locale( HMODULE module )
         RegSetValueExW( hkey, L"MACCP", 0, REG_SZ, (BYTE *)bufferW, (count + 1) * sizeof(WCHAR) );
         RegCloseKey( hkey );
     }
-}
-
-
-static inline USHORT get_table_entry( const USHORT *table, WCHAR ch )
-{
-    return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
 
@@ -2053,17 +2084,12 @@ static NTSTATUS expand_ligatures( const WCHAR *src, int srclen, WCHAR *dst, int 
 
 static NTSTATUS fold_digits( const WCHAR *src, int srclen, WCHAR *dst, int *dstlen )
 {
-    extern const WCHAR wine_digitmap[] DECLSPEC_HIDDEN;
     int i, len = *dstlen;
 
     *dstlen = srclen;
     if (!len) return STATUS_SUCCESS;
     if (srclen > len) return STATUS_BUFFER_TOO_SMALL;
-    for (i = 0; i < srclen; i++)
-    {
-        WCHAR digit = get_table_entry( wine_digitmap, src[i] );
-        dst[i] = digit ? digit : src[i];
-    }
+    for (i = 0; i < srclen; i++) dst[i] = casemap( charmaps[CHARMAP_FOLDDIGITS], src[i] );
     return STATUS_SUCCESS;
 }
 
@@ -3041,42 +3067,9 @@ static int wcstombs_codepage( const CPTABLEINFO *info, DWORD flags, const WCHAR 
 }
 
 /* compose a full-width katakana. return consumed source characters. */
-static int compose_katakana( const WCHAR *src, int srclen, WCHAR *dst )
+static int map_to_fullwidth( const WCHAR *src, int srclen, WCHAR *dst )
 {
-    static const BYTE katakana_map[] =
-    {
-        /* */ 0x02, 0x0c, 0x0d, 0x01, 0xfb, 0xf2, 0xa1, /* U+FF61- */
-        0xa3, 0xa5, 0xa7, 0xa9, 0xe3, 0xe5, 0xe7, 0xc3, /* U+FF68- */
-        0xfc, 0xa2, 0xa4, 0xa6, 0xa8, 0xaa, 0xab, 0xad, /* U+FF70- */
-        0xaf, 0xb1, 0xb3, 0xb5, 0xb7, 0xb9, 0xbb, 0xbd, /* U+FF78- */
-        0xbf, 0xc1, 0xc4, 0xc6, 0xc8, 0xca, 0xcb, 0xcc, /* U+FF80- */
-        0xcd, 0xce, 0xcf, 0xd2, 0xd5, 0xd8, 0xdb, 0xde, /* U+FF88- */
-        0xdf, 0xe0, 0xe1, 0xe2, 0xe4, 0xe6, 0xe8, 0xe9, /* U+FF90- */
-        0xea, 0xeb, 0xec, 0xed, 0xef, 0xf3, 0x99, 0x9a, /* U+FF98- */
-    };
-    WCHAR dummy;
-    int shift;
-
-    if (!dst) dst = &dummy;
-
-    switch (*src)
-    {
-    case 0x309b:
-    case 0x309c:
-        *dst = *src - 2;
-        return 1;
-    case 0x30f0:
-    case 0x30f1:
-    case 0x30fd:
-        *dst = *src;
-        break;
-    default:
-        shift = *src - 0xff61;
-        if (shift < 0 || shift >= ARRAY_SIZE( katakana_map )) return 0;
-        *dst = katakana_map[shift] | 0x3000;
-        break;
-    }
-
+    *dst = casemap( charmaps[CHARMAP_FULLWIDTH], *src );
     if (srclen <= 1) return 1;
 
     switch (src[1])
@@ -3109,141 +3102,36 @@ static int compose_katakana( const WCHAR *src, int srclen, WCHAR *dst )
     return 2;
 }
 
-/* map one or two half-width characters to one full-width character */
-static int map_to_fullwidth( const WCHAR *src, int srclen, WCHAR *dst )
-{
-    INT n;
-
-    if (*src <= '~' && *src > ' ' && *src != '\\')
-        *dst = *src - 0x20 + 0xff00;
-    else if (*src == ' ')
-        *dst = 0x3000;
-    else if (*src <= 0x00af && *src >= 0x00a2)
-    {
-        static const BYTE misc_symbols_table[] =
-        {
-            0xe0, 0xe1, 0x00, 0xe5, 0xe4, 0x00, 0x00, /* U+00A2- */
-            0x00, 0x00, 0x00, 0xe2, 0x00, 0x00, 0xe3  /* U+00A9- */
-        };
-        if (misc_symbols_table[*src - 0x00a2])
-            *dst = misc_symbols_table[*src - 0x00a2] | 0xff00;
-        else
-            *dst = *src;
-    }
-    else if (*src == 0x20a9) /* WON SIGN */
-        *dst = 0xffe6;
-    else if ((n = compose_katakana(src, srclen, dst)) > 0)
-        return n;
-    else if (*src >= 0xffa0 && *src <= 0xffdc)
-    {
-        static const BYTE hangul_mapping_table[] =
-        {
-            0x64, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,  /* U+FFA0- */
-            0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,  /* U+FFA8- */
-            0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,  /* U+FFB0- */
-            0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x00,  /* U+FFB8- */
-            0x00, 0x00, 0x4f, 0x50, 0x51, 0x52, 0x53, 0x54,  /* U+FFC0- */
-            0x00, 0x00, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a,  /* U+FFC8- */
-            0x00, 0x00, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0x60,  /* U+FFD0- */
-            0x00, 0x00, 0x61, 0x62, 0x63                     /* U+FFD8- */
-        };
-
-        if (hangul_mapping_table[*src - 0xffa0])
-            *dst = hangul_mapping_table[*src - 0xffa0] | 0x3100;
-        else
-            *dst = *src;
-    }
-    else
-        *dst = *src;
-
-    return 1;
-}
-
-/* decompose a full-width katakana character into one or two half-width characters. */
-static int decompose_katakana( WCHAR c, WCHAR *dst, int dstlen )
-{
-    static const BYTE katakana_map[] =
-    {
-        /* */ 0x9e, 0x9f, 0x9e, 0x9f, 0x00, 0x00, 0x00, /* U+3099- */
-        0x00, 0x67, 0x71, 0x68, 0x72, 0x69, 0x73, 0x6a, /* U+30a1- */
-        0x74, 0x6b, 0x75, 0x76, 0x01, 0x77, 0x01, 0x78, /* U+30a8- */
-        0x01, 0x79, 0x01, 0x7a, 0x01, 0x7b, 0x01, 0x7c, /* U+30b0- */
-        0x01, 0x7d, 0x01, 0x7e, 0x01, 0x7f, 0x01, 0x80, /* U+30b8- */
-        0x01, 0x81, 0x01, 0x6f, 0x82, 0x01, 0x83, 0x01, /* U+30c0- */
-        0x84, 0x01, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, /* U+30c8- */
-        0x01, 0x02, 0x8b, 0x01, 0x02, 0x8c, 0x01, 0x02, /* U+30d0- */
-        0x8d, 0x01, 0x02, 0x8e, 0x01, 0x02, 0x8f, 0x90, /* U+30d8- */
-        0x91, 0x92, 0x93, 0x6c, 0x94, 0x6d, 0x95, 0x6e, /* U+30e0- */
-        0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x00, 0x9c, /* U+30e8- */
-        0x00, 0x00, 0x66, 0x9d, 0x4e, 0x00, 0x00, 0x08, /* U+30f0- */
-        0x58, 0x58, 0x08, 0x65, 0x70, 0x00, 0x51        /* U+30f8- */
-    };
-    int len = 0, shift = c - 0x3099;
-    BYTE k;
-
-    if (shift < 0 || shift >= ARRAY_SIZE( katakana_map )) return 0;
-
-    k = katakana_map[shift];
-    if (!k)
-    {
-        if (dstlen > 0) *dst = c;
-        len++;
-    }
-    else if (k > 0x60)
-    {
-        if (dstlen > 0) *dst = k | 0xff00;
-        len++;
-    }
-    else
-    {
-        if (dstlen >= 2)
-        {
-            dst[0] = (k > 0x50) ? (c - (k & 0xf)) : (katakana_map[shift - k] | 0xff00);
-            dst[1] = (k == 2) ? 0xff9f : 0xff9e;
-        }
-        len += 2;
-    }
-    return len;
-}
-
 /* map single full-width character to single or double half-width characters. */
 static int map_to_halfwidth( WCHAR c, WCHAR *dst, int dstlen )
 {
-    int n = decompose_katakana( c, dst, dstlen );
-    if (n > 0) return n;
-
-    if (c == 0x3000)
-        *dst = ' ';
-    else if (c == 0x3001)
-        *dst = 0xff64;
-    else if (c == 0x3002)
-        *dst = 0xff61;
-    else if (c == 0x300c || c == 0x300d)
-        *dst = (c - 0x300c) + 0xff62;
-    else if (c >= 0x3131 && c <= 0x3163)
+    static const BYTE katakana_map[] =
     {
-        *dst = c - 0x3131 + 0xffa1;
-        if (*dst >= 0xffbf) *dst += 3;
-        if (*dst >= 0xffc8) *dst += 2;
-        if (*dst >= 0xffd0) *dst += 2;
-        if (*dst >= 0xffd8) *dst += 2;
-    }
-    else if (c == 0x3164)
-        *dst = 0xffa0;
-    else if (c == 0x2019)
-        *dst = '\'';
-    else if (c == 0x201d)
-        *dst = '"';
-    else if (c > 0xff00 && c < 0xff5f && c != 0xff3c)
-        *dst = c - 0xff00 + 0x20;
-    else if (c >= 0xffe0 && c <= 0xffe6)
-    {
-        static const WCHAR misc_symbol_map[] = { 0x00a2, 0x00a3, 0x00ac, 0x00af, 0x00a6, 0x00a5, 0x20a9 };
-        *dst = misc_symbol_map[c - 0xffe0];
-    }
-    else
-        *dst = c;
+                                0x01, 0x00, 0x01, 0x00, /* U+30a8- */
+        0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, /* U+30b0- */
+        0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, /* U+30b8- */
+        0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, /* U+30c0- */
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* U+30c8- */
+        0x01, 0x02, 0x00, 0x01, 0x02, 0x00, 0x01, 0x02, /* U+30d0- */
+        0x00, 0x01, 0x02, 0x00, 0x01, 0x02, 0x00, 0x00, /* U+30d8- */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* U+30e0- */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* U+30e8- */
+        0x00, 0x00, 0x00, 0x00, 0x4e, 0x00, 0x00, 0x08, /* U+30f0- */
+        0x08, 0x08, 0x08, 0x00, 0x00, 0x00, 0x01        /* U+30f8- */
+    };
+    USHORT shift = c - 0x30ac;
+    BYTE k;
 
+    if (shift < ARRAY_SIZE(katakana_map) && (k = katakana_map[shift]))
+    {
+        if (dstlen >= 2)
+        {
+            dst[0] = casemap( charmaps[CHARMAP_HALFWIDTH], c - k );
+            dst[1] = (k == 2) ? 0xff9f : 0xff9e;
+        }
+        return 2;
+    }
+    if (dstlen >= 1) dst[0] = casemap( charmaps[CHARMAP_HALFWIDTH], c );
     return 1;
 }
 
@@ -4343,8 +4231,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH Internal_EnumUILanguages( UILANGUAGE_ENUMPROCW pro
         if (!lcnames_index[i].name) continue;  /* skip invariant locale */
         if (lcnames_index[i].id & 0x80000000) continue;  /* skip aliases */
         if (!get_locale_data( lcnames_index[i].idx )->inotneutral) continue;  /* skip neutral locales */
-        if (!SORTIDFROMLCID( lcnames_index[i].id ) != !(flags & LCID_ALTERNATE_SORTS))
-            continue;  /* skip alternate sorts */
+        if (SORTIDFROMLCID( lcnames_index[i].id )) continue;  /* skip alternate sorts */
         if (flags & MUI_LANGUAGE_NAME)
         {
             const WCHAR *str = locale_strings + lcnames_index[i].name;
@@ -6262,9 +6149,10 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
         }
         else if (flags & LCMAP_FULLWIDTH)
         {
+            WCHAR wch;
             for (len = 0; srclen; src++, srclen--, len++)
             {
-                if (compose_katakana( src, srclen, NULL ) == 2)
+                if (map_to_fullwidth( src, srclen, &wch ) == 2)
                 {
                     src++;
                     srclen--;
@@ -6277,11 +6165,8 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
             {
                 WCHAR wch = *src;
                 /* map Hiragana to Katakana before decomposition if needed */
-                if ((flags & LCMAP_KATAKANA) &&
-                    ((wch >= 0x3041 && wch <= 0x3096) || wch == 0x309D || wch == 0x309E))
-                    wch += 0x60;
-
-                if (decompose_katakana( wch, NULL, 0 ) == 2) len++;
+                if (flags & LCMAP_KATAKANA) wch = casemap( charmaps[CHARMAP_KATAKANA], wch );
+                if (map_to_halfwidth( wch, NULL, 0 ) == 2) len++;
             }
         }
         else len = srclen;
@@ -6306,6 +6191,17 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
         goto done;
     }
 
+    if (flags & LCMAP_TRADITIONAL_CHINESE)
+    {
+        for (len = dstlen, dst_ptr = dst; srclen && len; srclen--, len--)
+            *dst_ptr++ = casemap( charmaps[CHARMAP_TRADITIONAL], *src++ );
+    }
+    if (flags & LCMAP_SIMPLIFIED_CHINESE)
+    {
+        for (len = dstlen, dst_ptr = dst; srclen && len; srclen--, len--)
+            *dst_ptr++ = casemap( charmaps[CHARMAP_SIMPLIFIED], *src++ );
+    }
+
     if (flags & (LCMAP_FULLWIDTH | LCMAP_HALFWIDTH | LCMAP_HIRAGANA | LCMAP_KATAKANA))
     {
         for (len = dstlen, dst_ptr = dst; len && srclen; src++, srclen--, len--, dst_ptr++)
@@ -6323,18 +6219,8 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringEx( const WCHAR *locale, DWORD flags, co
             }
             else wch = *src;
 
-            if (flags & LCMAP_KATAKANA)
-            {
-                /* map hiragana to katakana, e.g. U+3041 -> U+30A1.
-                   we can't use C3_HIRAGANA as some characters can't map to katakana */
-                if ((wch >= 0x3041 && wch <= 0x3096) || wch == 0x309D || wch == 0x309E) wch += 0x60;
-            }
-            else if (flags & LCMAP_HIRAGANA)
-            {
-                /* map katakana to hiragana, e.g. U+30A1 -> U+3041.
-                   we can't use C3_KATAKANA as some characters can't map to hiragana */
-                if ((wch >= 0x30A1 && wch <= 0x30F6) || wch == 0x30FD || wch == 0x30FE) wch -= 0x60;
-            }
+            if (flags & LCMAP_KATAKANA) wch = casemap( charmaps[CHARMAP_KATAKANA], wch );
+            else if (flags & LCMAP_HIRAGANA) wch = casemap( charmaps[CHARMAP_HIRAGANA], wch );
 
             if (flags & LCMAP_HALFWIDTH)
             {
@@ -6556,10 +6442,41 @@ INT WINAPI DECLSPEC_HOTPATCH NormalizeString(NORM_FORM form, const WCHAR *src, I
  */
 INT WINAPI DECLSPEC_HOTPATCH ResolveLocaleName( LPCWSTR name, LPWSTR buffer, INT len )
 {
-    FIXME( "stub: %s, %p, %d\n", wine_dbgstr_w(name), buffer, len );
+    LCID lcid;
+    UINT pos, datalen;
+    const NLS_LOCALE_DATA *locale = get_locale_by_name( name, &lcid );
 
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return 0;
+    if (!locale)
+    {
+        static const WCHAR valid[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        WCHAR *p, tmp[LOCALE_NAME_MAX_LENGTH];
+
+        if (wcsspn( name, valid ) < wcslen( name ))
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+        lstrcpynW( tmp, name, LOCALE_NAME_MAX_LENGTH );
+        while (!locale)
+        {
+            for (p = tmp + wcslen(tmp) - 1; p >= tmp; p--) if (*p == '-' || *p == '_') break;
+            if (p <= tmp) break;
+            *p = 0;
+            locale = get_locale_by_name( tmp, &lcid );
+        }
+    }
+
+    pos = locale ? (locale->inotneutral ? locale->sname : locale->ssortlocale) : 0;
+    datalen = locale_strings[pos] + 1;
+
+    if (!len) return datalen;
+    lstrcpynW( buffer, locale_strings + pos + 1, len );
+    if (datalen > len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return 0;
+    }
+    return datalen;
 }
 
 
@@ -6613,8 +6530,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetLocaleInfoW( LCID lcid, LCTYPE lctype, const WC
         /* fall through */
     case LOCALE_SSHORTDATE:
         if (!set_registry_entry( &entry_sshortdate, data )) return FALSE;
-        update_registry_value( LOCALE_IDATE, L"iDate" );
-        update_registry_value( LOCALE_SDATE, L"sDate" );
+        update_registry_value( LOCALE_IDATE, NULL, L"iDate" );
+        update_registry_value( LOCALE_SDATE, NULL, L"sDate" );
         return TRUE;
 
     case LOCALE_STIME:
@@ -6623,10 +6540,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetLocaleInfoW( LCID lcid, LCTYPE lctype, const WC
         /* fall through */
     case LOCALE_STIMEFORMAT:
         if (!set_registry_entry( &entry_stimeformat, data )) return FALSE;
-        update_registry_value( LOCALE_ITIME, L"iTime" );
-        update_registry_value( LOCALE_ITIMEMARKPOSN, L"iTimePrefix" );
-        update_registry_value( LOCALE_ITLZERO, L"iTLZero" );
-        update_registry_value( LOCALE_STIME, L"sTime" );
+        update_registry_value( LOCALE_ITIME, NULL, L"iTime" );
+        update_registry_value( LOCALE_ITIMEMARKPOSN, NULL, L"iTimePrefix" );
+        update_registry_value( LOCALE_ITLZERO, NULL, L"iTLZero" );
+        update_registry_value( LOCALE_STIME, NULL, L"sTime" );
         return TRUE;
 
     case LOCALE_ITIME:
@@ -6634,11 +6551,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetLocaleInfoW( LCID lcid, LCTYPE lctype, const WC
         if (!(str = find_format( tmp, L"Hh" ))) break;
         while (*str == 'h' || *str == 'H') *str++ = (*data == '0' ? 'h' : 'H');
         if (!set_registry_entry( &entry_stimeformat, tmp )) break;
-        update_registry_value( LOCALE_ITIME, L"iTime" );
+        update_registry_value( LOCALE_ITIME, NULL, L"iTime" );
         return TRUE;
 
     case LOCALE_SINTLSYMBOL:
-        /* FIXME: also store sintlsymbol */
+        if (!set_registry_entry( &entry_sintlsymbol, data )) return FALSE;
+        /* if restoring the original value, restore the original LOCALE_SCURRENCY as well */
+        if (!wcsicmp( data, locale_strings + user_locale->sintlsymbol + 1 ))
+            data = locale_strings + user_locale->scurrency + 1;
         set_registry_entry( &entry_scurrency, data );
         return TRUE;
     }
@@ -6913,4 +6833,847 @@ BOOL WINAPI SetUserGeoName(PWSTR geo_name)
         return FALSE;
     }
     return SetUserGeoID( geo->id );
+}
+
+
+static void grouping_to_string( UINT grouping, WCHAR *buffer )
+{
+    WCHAR tmp[10], *p = tmp;
+
+    while (grouping)
+    {
+        *p++ = '0' + grouping % 10;
+        grouping /= 10;
+    }
+    while (p > tmp)
+    {
+        *buffer++ = *(--p);
+        if (p > tmp) *buffer++ = ';';
+    }
+    *buffer = 0;
+}
+
+
+static WCHAR *prepend_str( WCHAR *end, const WCHAR *str )
+{
+    UINT len = wcslen( str );
+    return memcpy( end - len, str, len * sizeof(WCHAR) );
+}
+
+
+/* format a positive number with decimal part; helper for get_number_format */
+static WCHAR *format_number( WCHAR *end, const WCHAR *value, const WCHAR *decimal_sep,
+                             const WCHAR *thousand_sep, const WCHAR *grouping, UINT digits, BOOL lzero )
+{
+    const WCHAR *frac = NULL;
+    BOOL round = FALSE;
+    UINT i, len = 0;
+
+    *(--end) = 0;
+
+    for (i = 0; value[i]; i++)
+    {
+        if (value[i] >= '0' && value[i] <= '9') continue;
+        if (value[i] != '.') return NULL;
+        if (frac) return NULL;
+        frac = value + i + 1;
+    }
+
+    /* format fractional part */
+
+    len = frac ? wcslen( frac ) : 0;
+
+    if (len > digits)
+    {
+        round = frac[digits] >= '5';
+        len = digits;
+    }
+    while (digits > len)
+    {
+        (*--end) = '0';
+        digits--;
+    }
+    while (len)
+    {
+        WCHAR ch = frac[--len];
+        if (round)
+        {
+            if (ch != '9')
+            {
+                ch++;
+                round = FALSE;
+            }
+            else ch = '0';
+        }
+        *(--end) = ch;
+    }
+    if (*end) end = prepend_str( end, decimal_sep );
+
+    /* format integer part */
+
+    len = frac ? frac - value - 1 : wcslen( value );
+
+    while (len && *value == '0')
+    {
+        value++;
+        len--;
+    }
+    if (len) lzero = FALSE;
+
+    while (len)
+    {
+        UINT limit = *grouping == '0' ? ~0u : *grouping - '0';
+        while (len && limit--)
+        {
+            WCHAR ch = value[--len];
+            if (round)
+            {
+                if (ch != '9')
+                {
+                    ch++;
+                    round = FALSE;
+                }
+                else ch = '0';
+            }
+            *(--end) = ch;
+        }
+        if (len) end = prepend_str( end, thousand_sep );
+        if (grouping[1] == ';') grouping += 2;
+    }
+    if (round) *(--end) = '1';
+    else if (lzero) *(--end) = '0';
+    return end;
+}
+
+
+static int get_number_format( const NLS_LOCALE_DATA *locale, DWORD flags, const WCHAR *value,
+                              const NUMBERFMTW *format, WCHAR *buffer, int len )
+{
+    WCHAR *num, fmt_decimal[4], fmt_thousand[4], fmt_neg[5], grouping[20], output[256];
+    const WCHAR *decimal_sep = fmt_decimal, *thousand_sep = fmt_thousand;
+    DWORD digits, lzero, order;
+    int ret = 0;
+    BOOL negative = (*value == '-');
+
+    flags &= LOCALE_NOUSEROVERRIDE;
+
+    if (!format)
+    {
+        get_locale_info( locale, 0, LOCALE_SGROUPING | flags, grouping, ARRAY_SIZE(grouping) );
+        get_locale_info( locale, 0, LOCALE_SDECIMAL | flags, fmt_decimal, ARRAY_SIZE(fmt_decimal) );
+        get_locale_info( locale, 0, LOCALE_STHOUSAND | flags, fmt_thousand, ARRAY_SIZE(fmt_thousand) );
+        get_locale_info( locale, 0, LOCALE_IDIGITS | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&digits, sizeof(DWORD)/sizeof(WCHAR) );
+        get_locale_info( locale, 0, LOCALE_ILZERO | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&lzero, sizeof(DWORD)/sizeof(WCHAR) );
+        get_locale_info( locale, 0, LOCALE_INEGNUMBER | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&order, sizeof(DWORD)/sizeof(WCHAR) );
+    }
+    else
+    {
+        if (flags)
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
+        decimal_sep = format->lpDecimalSep;
+        thousand_sep = format->lpThousandSep;
+        grouping_to_string( format->Grouping, grouping );
+        digits = format->NumDigits;
+        lzero = format->LeadingZero;
+        order = format->NegativeOrder;
+        if (!decimal_sep || !thousand_sep)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+    }
+
+    if (negative)
+    {
+        value++;
+        get_locale_info( locale, 0, LOCALE_SNEGATIVESIGN | flags, fmt_neg, ARRAY_SIZE(fmt_neg) );
+    }
+
+    if (!(num = format_number( output + ARRAY_SIZE(output) - 6, value,
+                               decimal_sep, thousand_sep, grouping, digits, lzero )))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    if (negative)
+    {
+        switch (order)
+        {
+        case 0:  /* (1.1) */
+            num = prepend_str( num, L"(" );
+            wcscat( num, L")" );
+            break;
+        case 2:  /* - 1.1 */
+            num = prepend_str( num, L" " );
+            /* fall through */
+        case 1:  /* -1.1 */
+            num = prepend_str( num, fmt_neg );
+            break;
+        case 4:  /* 1.1 - */
+            wcscat( num, L" " );
+            /* fall through */
+        case 3:  /* 1.1- */
+            wcscat( num, fmt_neg );
+            break;
+        default:
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+    }
+
+    ret = wcslen( num ) + 1;
+    if (!len) return ret;
+    lstrcpynW( buffer, num, len );
+    if (ret > len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return 0;
+    }
+    return ret;
+}
+
+
+static int get_currency_format( const NLS_LOCALE_DATA *locale, DWORD flags, const WCHAR *value,
+                                const CURRENCYFMTW *format, WCHAR *buffer, int len )
+{
+    WCHAR *num, fmt_decimal[4], fmt_thousand[4], fmt_symbol[13], fmt_neg[5], grouping[20], output[256];
+    const WCHAR *decimal_sep = fmt_decimal, *thousand_sep = fmt_thousand, *symbol = fmt_symbol;
+    DWORD digits, lzero, pos_order, neg_order;
+    int ret = 0;
+    BOOL negative = (*value == '-');
+
+    flags &= LOCALE_NOUSEROVERRIDE;
+
+    if (!format)
+    {
+        get_locale_info( locale, 0, LOCALE_SCURRENCY | flags, fmt_symbol, ARRAY_SIZE(fmt_symbol) );
+        get_locale_info( locale, 0, LOCALE_SMONGROUPING | flags, grouping, ARRAY_SIZE(grouping) );
+        get_locale_info( locale, 0, LOCALE_SMONDECIMALSEP | flags, fmt_decimal, ARRAY_SIZE(fmt_decimal) );
+        get_locale_info( locale, 0, LOCALE_SMONTHOUSANDSEP | flags, fmt_thousand, ARRAY_SIZE(fmt_thousand) );
+        get_locale_info( locale, 0, LOCALE_ICURRDIGITS | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&digits, sizeof(DWORD)/sizeof(WCHAR) );
+        get_locale_info( locale, 0, LOCALE_ILZERO | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&lzero, sizeof(DWORD)/sizeof(WCHAR) );
+        get_locale_info( locale, 0, LOCALE_ICURRENCY | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&pos_order, sizeof(DWORD)/sizeof(WCHAR) );
+        get_locale_info( locale, 0, LOCALE_INEGCURR | LOCALE_RETURN_NUMBER | flags,
+                         (WCHAR *)&neg_order, sizeof(DWORD)/sizeof(WCHAR) );
+    }
+    else
+    {
+        if (flags)
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
+        decimal_sep = format->lpDecimalSep;
+        thousand_sep = format->lpThousandSep;
+        symbol = format->lpCurrencySymbol;
+        grouping_to_string( format->Grouping, grouping );
+        digits = format->NumDigits;
+        lzero = format->LeadingZero;
+        pos_order = format->PositiveOrder;
+        neg_order = format->NegativeOrder;
+        if (!decimal_sep || !thousand_sep || !symbol)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+    }
+
+    if (negative)
+    {
+        value++;
+        get_locale_info( locale, 0, LOCALE_SNEGATIVESIGN | flags, fmt_neg, ARRAY_SIZE(fmt_neg) );
+    }
+
+    if (!(num = format_number( output + ARRAY_SIZE(output) - 20, value,
+                               decimal_sep, thousand_sep, grouping, digits, lzero )))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    if (negative)
+    {
+        switch (neg_order)
+        {
+        case 14:  /* ($ 1.1) */
+            num = prepend_str( num, L" " );
+            /* fall through */
+        case 0:  /* ($1.1) */
+            num = prepend_str( num, symbol );
+            num = prepend_str( num, L"(" );
+            wcscat( num, L")" );
+            break;
+        case 9:  /* -$ 1.1 */
+            num = prepend_str( num, L" " );
+            /* fall through */
+        case 1:  /* -$1.1 */
+            num = prepend_str( num, symbol );
+            num = prepend_str( num, fmt_neg );
+            break;
+        case 2:  /* $-1.1 */
+            num = prepend_str( num, fmt_neg );
+            num = prepend_str( num, symbol );
+            break;
+        case 11:  /* $ 1.1- */
+            num = prepend_str( num, L" " );
+            /* fall through */
+        case 3:  /* $1.1- */
+            num = prepend_str( num, symbol );
+            wcscat( num, fmt_neg );
+            break;
+        case 15:  /* (1.1 $) */
+            wcscat( num, L" " );
+            /* fall through */
+        case 4:  /* (1.1$) */
+            wcscat( num, symbol );
+            num = prepend_str( num, L"(" );
+            wcscat( num, L")" );
+            break;
+        case 8:  /* -1.1 $ */
+            wcscat( num, L" " );
+            /* fall through */
+        case 5:  /* -1.1$ */
+            num = prepend_str( num, fmt_neg );
+            wcscat( num, symbol );
+            break;
+        case 6:  /* 1.1-$ */
+            wcscat( num, fmt_neg );
+            wcscat( num, symbol );
+            break;
+        case 10:  /* 1.1 $- */
+            wcscat( num, L" " );
+            /* fall through */
+        case 7:  /* 1.1$- */
+            wcscat( num, symbol );
+            wcscat( num, fmt_neg );
+            break;
+        case 12:  /* $ -1.1 */
+            num = prepend_str( num, fmt_neg );
+            num = prepend_str( num, L" " );
+            num = prepend_str( num, symbol );
+            break;
+        case 13:  /* 1.1- $ */
+            wcscat( num, fmt_neg );
+            wcscat( num, L" " );
+            wcscat( num, symbol );
+            break;
+        default:
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+    }
+    else
+    {
+        switch (pos_order)
+        {
+        case 2: /* $ 1.1 */
+            num = prepend_str( num, L" " );
+            /* fall through */
+        case 0: /* $1.1 */
+            num = prepend_str( num, symbol );
+            break;
+        case 3: /* 1.1 $ */
+            wcscat( num, L" " );
+            /* fall through */
+        case 1: /* 1.1$ */
+            wcscat( num, symbol );
+            break;
+        default:
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+    }
+
+    ret = wcslen( num ) + 1;
+    if (!len) return ret;
+    lstrcpynW( buffer, num, len );
+    if (ret > len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return 0;
+    }
+    return ret;
+}
+
+
+/* get the length of a date/time formatting pattern */
+static int get_pattern_len( const WCHAR *pattern, const WCHAR *accept )
+{
+    int i;
+
+    if (*pattern == '\'')
+    {
+        for (i = 1; pattern[i]; i++)
+        {
+            if (pattern[i] != '\'') continue;
+            if (pattern[++i] != '\'') return i;
+        }
+        return i;
+    }
+    if (!wcschr( accept, *pattern )) return 1;
+    for (i = 1; pattern[i]; i++) if (pattern[i] != pattern[0]) break;
+    return i;
+}
+
+
+static int get_date_format( const NLS_LOCALE_DATA *locale, DWORD flags, const SYSTEMTIME *systime,
+                            const WCHAR *format, WCHAR *buffer, int len )
+{
+    DWORD override = flags & LOCALE_NOUSEROVERRIDE;
+    DWORD genitive = 0;
+    WCHAR *p, fmt[80], output[256];
+    SYSTEMTIME time;
+    int ret, val, count, i;
+
+    if (!format)
+    {
+        if (flags & DATE_USE_ALT_CALENDAR) FIXME( "alt calendar not supported\n" );
+        switch (flags & (DATE_SHORTDATE | DATE_LONGDATE | DATE_YEARMONTH | DATE_MONTHDAY))
+        {
+        case 0:
+        case DATE_SHORTDATE:
+            get_locale_info( locale, 0, LOCALE_SSHORTDATE | override, fmt, ARRAY_SIZE(fmt) );
+            break;
+        case DATE_LONGDATE:
+            get_locale_info( locale, 0, LOCALE_SLONGDATE | override, fmt, ARRAY_SIZE(fmt) );
+            break;
+        case DATE_YEARMONTH:
+            get_locale_info( locale, 0, LOCALE_SYEARMONTH | override, fmt, ARRAY_SIZE(fmt) );
+            break;
+        case DATE_MONTHDAY:
+            get_locale_info( locale, 0, LOCALE_SMONTHDAY | override, fmt, ARRAY_SIZE(fmt) );
+            break;
+        default:
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
+        format = fmt;
+    }
+    else if (override || (flags & (DATE_SHORTDATE | DATE_LONGDATE | DATE_YEARMONTH | DATE_MONTHDAY)))
+    {
+        SetLastError( ERROR_INVALID_FLAGS );
+        return 0;
+    }
+
+    if (systime)
+    {
+        FILETIME ft;
+
+        time = *systime;
+        time.wHour = time.wMinute = time.wSecond = time.wMilliseconds = 0;
+        if (!SystemTimeToFileTime( &time, &ft ) || !FileTimeToSystemTime( &ft, &time )) return 0;
+    }
+    else GetLocalTime( &time );
+
+    for (p = output; *format; format += count)
+    {
+        count = get_pattern_len( format, L"yMd" );
+
+        switch (*format)
+        {
+        case '\'':
+            for (i = 1; i < count; i++)
+            {
+                if (format[i] == '\'') i++;
+                if (i < count) *p++ = format[i];
+            }
+            break;
+
+        case 'y':
+            p += swprintf( p, output + ARRAY_SIZE(output) - p, L"%02u",
+                           (count <= 2) ? time.wYear % 100 : time.wYear );
+            break;
+
+        case 'M':
+            if (count <= 2)
+            {
+                p += swprintf( p, output + ARRAY_SIZE(output) - p, L"%.*u", count, time.wMonth );
+                break;
+            }
+            val = (count == 3 ? LOCALE_SABBREVMONTHNAME1 : LOCALE_SMONTHNAME1) + time.wMonth - 1;
+            if (!genitive)
+            {
+                for (i = count; format[i]; i += get_pattern_len( format, L"yMd" ))
+                {
+                    if (format[i] != 'd') continue;
+                    if (format[i + 1] != 'd' || format[i + 2] != 'd')
+                        genitive = LOCALE_RETURN_GENITIVE_NAMES;
+                    break;
+                }
+            }
+            p += get_locale_info( locale, 0, val | override | genitive,
+                                  p, output + ARRAY_SIZE(output) - p ) - 1;
+            break;
+
+        case 'd':
+            if (count <= 2)
+            {
+                genitive = LOCALE_RETURN_GENITIVE_NAMES;
+                p += swprintf( p, output + ARRAY_SIZE(output) - p, L"%.*u", count, time.wDay );
+                break;
+            }
+            genitive = 0;
+            val = (count == 3 ? LOCALE_SABBREVDAYNAME1 : LOCALE_SDAYNAME1) + (time.wDayOfWeek + 6) % 7;
+            p += get_locale_info( locale, 0, val | override, p, output + ARRAY_SIZE(output) - p ) - 1;
+            break;
+
+        case 'g':
+            p += locale_return_string( count >= 2 ? locale->serastring : locale->sabbreverastring,
+                                       override, p, output + ARRAY_SIZE(output) - p ) - 1;
+            break;
+
+        default:
+            *p++ = *format;
+            break;
+        }
+    }
+    *p++ = 0;
+    ret = p - output;
+
+    if (!len) return ret;
+    lstrcpynW( buffer, output, len );
+    if (ret > len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return 0;
+    }
+    return ret;
+}
+
+
+static int get_time_format( const NLS_LOCALE_DATA *locale, DWORD flags, const SYSTEMTIME *systime,
+                            const WCHAR *format, WCHAR *buffer, int len )
+{
+    DWORD override = flags & LOCALE_NOUSEROVERRIDE;
+    WCHAR *p, *last, fmt[80], output[256];
+    SYSTEMTIME time;
+    int i, ret, val, count;
+    BOOL skip = FALSE;
+
+    if (!format)
+    {
+        get_locale_info( locale, 0, LOCALE_STIMEFORMAT | override, fmt, ARRAY_SIZE(fmt) );
+        format = fmt;
+    }
+    else if (override)
+    {
+        SetLastError( ERROR_INVALID_FLAGS );
+        return 0;
+    }
+
+    if (systime)
+    {
+        time = *systime;
+        if (time.wMilliseconds > 999 || time.wSecond > 59 || time.wMinute > 59 || time.wHour > 23)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+    }
+    else GetLocalTime( &time );
+
+    for (p = last = output; *format; format += count)
+    {
+        count = get_pattern_len( format, L"Hhmst" );
+
+        switch (*format)
+        {
+        case '\'':
+            for (i = 1; i < count; i++)
+            {
+                if (format[i] == '\'') i++;
+                if (!skip && i < count) *p++ = format[i];
+            }
+            continue;
+
+        case 'H':
+            val = time.wHour;
+            break;
+
+        case 'h':
+            val = time.wHour;
+            if (!(flags & TIME_FORCE24HOURFORMAT))
+            {
+                val %= 12;
+                if (!val) val = 12;
+            }
+            break;
+
+        case 'm':
+            if (flags & TIME_NOMINUTESORSECONDS)
+            {
+                p = last;
+                skip = TRUE;
+                continue;
+            }
+            val = time.wMinute;
+            break;
+
+        case 's':
+            if (flags & (TIME_NOMINUTESORSECONDS | TIME_NOSECONDS))
+            {
+                p = last;
+                skip = TRUE;
+                continue;
+            }
+            val = time.wSecond;
+            break;
+
+        case 't':
+            if (flags & TIME_NOTIMEMARKER)
+            {
+                p = last;
+                skip = TRUE;
+                continue;
+            }
+            val = time.wHour < 12 ? LOCALE_S1159 : LOCALE_S2359;
+            ret = get_locale_info( locale, 0, val | override, p, output + ARRAY_SIZE(output) - p );
+            p += (count > 1) ? ret - 1 : 1;
+            skip = FALSE;
+            continue;
+
+        default:
+            if (!skip || *format == ' ') *p++ = *format;
+            continue;
+        }
+
+        p += swprintf( p, output + ARRAY_SIZE(output) - p, L"%.*u", min( 2, count ), val );
+        last = p;
+        skip = FALSE;
+    }
+    *p++ = 0;
+    ret = p - output;
+
+    if (!len) return ret;
+    lstrcpynW( buffer, output, len );
+    if (ret > len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return 0;
+    }
+    return ret;
+}
+
+
+/**************************************************************************
+ *	GetNumberFormatW  (kernelbase.@)
+ */
+int WINAPI GetNumberFormatW( LCID lcid, DWORD flags, const WCHAR *value,
+                             const NUMBERFMTW *format, WCHAR *buffer, int len )
+{
+    const NLS_LOCALE_DATA *locale = NlsValidateLocale( &lcid, 0 );
+
+    if (len < 0 || (len && !buffer) || !value || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%04lx,%lx,%s,%p,%p,%d)\n", lcid, flags, debugstr_w(value), format, buffer, len );
+    return get_number_format( locale, flags, value, format, buffer, len );
+}
+
+
+/**************************************************************************
+ *	GetNumberFormatEx  (kernelbase.@)
+ */
+int WINAPI GetNumberFormatEx( const WCHAR *name, DWORD flags, const WCHAR *value,
+                              const NUMBERFMTW *format, WCHAR *buffer, int len )
+{
+    LCID lcid;
+    const NLS_LOCALE_DATA *locale = get_locale_by_name( name, &lcid );
+
+    if (len < 0 || (len && !buffer) || !value || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%s,%lx,%s,%p,%p,%d)\n", debugstr_w(name), flags, debugstr_w(value), format, buffer, len );
+    return get_number_format( locale, flags, value, format, buffer, len );
+}
+
+
+/***********************************************************************
+ *	GetCurrencyFormatW  (kernelbase.@)
+ */
+int WINAPI GetCurrencyFormatW( LCID lcid, DWORD flags, const WCHAR *value,
+                               const CURRENCYFMTW *format, WCHAR *buffer, int len )
+{
+    const NLS_LOCALE_DATA *locale = NlsValidateLocale( &lcid, 0 );
+
+    if (len < 0 || (len && !buffer) || !value || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%04lx,%lx,%s,%p,%p,%d)\n", lcid, flags, debugstr_w(value), format, buffer, len );
+    return get_currency_format( locale, flags, value, format, buffer, len );
+}
+
+
+/***********************************************************************
+ *	GetCurrencyFormatEx  (kernelbase.@)
+ */
+int WINAPI GetCurrencyFormatEx( const WCHAR *name, DWORD flags, const WCHAR *value,
+                                const CURRENCYFMTW *format, WCHAR *buffer, int len )
+{
+    LCID lcid;
+    const NLS_LOCALE_DATA *locale = get_locale_by_name( name, &lcid );
+
+    if (len < 0 || (len && !buffer) || !value || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%s,%lx,%s,%p,%p,%d)\n", debugstr_w(name), flags, debugstr_w(value), format, buffer, len );
+    return get_currency_format( locale, flags, value, format, buffer, len );
+}
+
+
+/******************************************************************************
+ *           GetDateFormatA (KERNEL32.@)
+ */
+int WINAPI GetDateFormatA( LCID lcid, DWORD flags, const SYSTEMTIME *time,
+                           const char *format, char *buffer, int len )
+{
+    UINT cp = get_lcid_codepage( lcid, flags );
+    WCHAR formatW[128], output[128];
+    int ret;
+
+    TRACE( "(0x%04lx,0x%08lx,%p,%s,%p,%d)\n", lcid, flags, time, debugstr_a(format), buffer, len );
+
+    if (len < 0 || (len && !buffer))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if (format)
+    {
+        MultiByteToWideChar( cp, 0, format, -1, formatW, ARRAY_SIZE(formatW) );
+        ret = GetDateFormatW( lcid, flags, time, formatW, output, ARRAY_SIZE(output) );
+    }
+    else ret = GetDateFormatW( lcid, flags, time, NULL, output, ARRAY_SIZE(output) );
+
+    if (ret) ret = WideCharToMultiByte( cp, 0, output, -1, buffer, len, 0, 0 );
+    return ret;
+}
+
+
+/***********************************************************************
+ *	GetDateFormatW  (kernelbase.@)
+ */
+int WINAPI GetDateFormatW( LCID lcid, DWORD flags, const SYSTEMTIME *systime,
+                           const WCHAR *format, WCHAR *buffer, int len )
+{
+    const NLS_LOCALE_DATA *locale = NlsValidateLocale( &lcid, 0 );
+
+    if (len < 0 || (len && !buffer) || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%04lx,%lx,%p,%s,%p,%d)\n", lcid, flags, systime, debugstr_w(format), buffer, len );
+    return get_date_format( locale, flags, systime, format, buffer, len );
+}
+
+
+/***********************************************************************
+ *	GetDateFormatEx  (kernelbase.@)
+ */
+int WINAPI GetDateFormatEx( const WCHAR *name, DWORD flags, const SYSTEMTIME *systime,
+                            const WCHAR *format, WCHAR *buffer, int len, const WCHAR *calendar )
+{
+    LCID lcid;
+    const NLS_LOCALE_DATA *locale = get_locale_by_name( name, &lcid );
+
+    if (len < 0 || (len && !buffer) || !locale || calendar)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%s,%lx,%p,%s,%p,%d)\n", debugstr_w(name), flags, systime, debugstr_w(format), buffer, len );
+    return get_date_format( locale, flags, systime, format, buffer, len );
+}
+
+
+/******************************************************************************
+ *	GetTimeFormatA  (kernelbase.@)
+ */
+int WINAPI GetTimeFormatA( LCID lcid, DWORD flags, const SYSTEMTIME *time,
+                           const char *format, char *buffer, int len )
+{
+    UINT cp = get_lcid_codepage( lcid, flags );
+    WCHAR formatW[128], output[128];
+    int ret;
+
+    TRACE( "(0x%04lx,0x%08lx,%p,%s,%p,%d)\n", lcid, flags, time, debugstr_a(format), buffer, len );
+
+    if (len < 0 || (len && !buffer))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if (format)
+    {
+        MultiByteToWideChar( cp, 0, format, -1, formatW, ARRAY_SIZE(formatW) );
+        ret = GetTimeFormatW( lcid, flags, time, formatW, output, ARRAY_SIZE(output) );
+    }
+    else ret = GetTimeFormatW( lcid, flags, time, NULL, output, ARRAY_SIZE(output) );
+
+    if (ret) ret = WideCharToMultiByte( cp, 0, output, -1, buffer, len, 0, 0 );
+    return ret;
+}
+
+
+/***********************************************************************
+ *	GetTimeFormatW  (kernelbase.@)
+ */
+int WINAPI GetTimeFormatW( LCID lcid, DWORD flags, const SYSTEMTIME *systime,
+                            const WCHAR *format, WCHAR *buffer, int len )
+{
+    const NLS_LOCALE_DATA *locale = NlsValidateLocale( &lcid, 0 );
+
+    if (len < 0 || (len && !buffer) || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%04lx,%lx,%p,%s,%p,%d)\n", lcid, flags, systime, debugstr_w(format), buffer, len );
+    return get_time_format( locale, flags, systime, format, buffer, len );
+}
+
+
+/***********************************************************************
+ *	GetTimeFormatEx  (kernelbase.@)
+ */
+int WINAPI GetTimeFormatEx( const WCHAR *name, DWORD flags, const SYSTEMTIME *systime,
+                            const WCHAR *format, WCHAR *buffer, int len )
+{
+    LCID lcid;
+    const NLS_LOCALE_DATA *locale = get_locale_by_name( name, &lcid );
+
+    if (len < 0 || (len && !buffer) || !locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    TRACE( "(%s,%lx,%p,%s,%p,%d)\n", debugstr_w(name), flags, systime, debugstr_w(format), buffer, len );
+    return get_time_format( locale, flags, systime, format, buffer, len );
 }

@@ -176,16 +176,13 @@ static HRESULT WINAPI async_operation_get_Completed( IAsyncOperation_IInspectabl
                                                      IAsyncOperationCompletedHandler_IInspectable **handler )
 {
     struct async_operation *impl = impl_from_IAsyncOperation_IInspectable(iface);
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     FIXME("iface %p, handler %p semi stub!\n", iface, handler);
 
     EnterCriticalSection(&impl->cs);
     if (impl->status == Closed)
         hr = E_ILLEGAL_METHOD_CALL;
-    else
-        hr = S_OK;
-
     *handler = (impl->handler != HANDLER_NOT_SET) ? impl->handler : NULL;
     LeaveCriticalSection(&impl->cs);
 
@@ -201,16 +198,16 @@ static HRESULT WINAPI async_operation_GetResults( IAsyncOperation_IInspectable *
     TRACE("iface %p, results %p.\n", iface, results);
 
     EnterCriticalSection(&impl->cs);
-    if (impl->status == Closed)
+    if (impl->status != Completed && impl->status != Error)
         hr = E_ILLEGAL_METHOD_CALL;
-    else if (impl->status > Started && impl->result)
+    else if (!impl->result)
+        hr = E_UNEXPECTED;
+    else
     {
         *results = impl->result;
         impl->result = NULL; /* NOTE: AsyncOperation gives up it's reference to result here! */
-        hr = S_OK;
+        hr = impl->hr;
     }
-    else
-        hr = E_UNEXPECTED;
     LeaveCriticalSection(&impl->cs);
 
     return hr;
@@ -249,16 +246,13 @@ static HRESULT WINAPI async_operation_info_get_Id( IAsyncInfo *iface, UINT32 *id
 static HRESULT WINAPI async_operation_info_get_Status( IAsyncInfo *iface, AsyncStatus *status )
 {
     struct async_operation *impl = impl_from_IAsyncInfo(iface);
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     TRACE("iface %p, status %p.\n", iface, status);
 
     EnterCriticalSection(&impl->cs);
     if (impl->status == Closed)
         hr = E_ILLEGAL_METHOD_CALL;
-    else
-        hr = S_OK;
-
     *status = impl->status;
     LeaveCriticalSection(&impl->cs);
 
@@ -268,22 +262,26 @@ static HRESULT WINAPI async_operation_info_get_Status( IAsyncInfo *iface, AsyncS
 static HRESULT WINAPI async_operation_info_get_ErrorCode( IAsyncInfo *iface, HRESULT *error_code )
 {
     struct async_operation *impl = impl_from_IAsyncInfo(iface);
+    HRESULT hr = S_OK;
+
     TRACE("iface %p, error_code %p.\n", iface, error_code);
 
     EnterCriticalSection(&impl->cs);
-    *error_code = impl->hr;
+    if (impl->status == Closed)
+        *error_code = hr = E_ILLEGAL_METHOD_CALL;
+    else
+        *error_code = impl->hr;
     LeaveCriticalSection(&impl->cs);
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI async_operation_info_Cancel( IAsyncInfo *iface )
 {
     struct async_operation *impl = impl_from_IAsyncInfo(iface);
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     TRACE("iface %p.\n", iface);
-    hr = S_OK;
 
     EnterCriticalSection(&impl->cs);
     if (impl->status == Closed)
@@ -298,26 +296,22 @@ static HRESULT WINAPI async_operation_info_Cancel( IAsyncInfo *iface )
 static HRESULT WINAPI async_operation_info_Close( IAsyncInfo *iface )
 {
     struct async_operation *impl = impl_from_IAsyncInfo(iface);
+    HRESULT hr = S_OK;
 
     TRACE("iface %p.\n", iface);
 
     EnterCriticalSection(&impl->cs);
     if (impl->status == Started)
-    {
-        LeaveCriticalSection(&impl->cs);
-        return E_ILLEGAL_STATE_CHANGE;
-    }
-
-    if (impl->async_run_work)
+        hr = E_ILLEGAL_STATE_CHANGE;
+    else if (impl->status != Closed)
     {
         CloseThreadpoolWork(impl->async_run_work);
         impl->async_run_work = NULL;
+        impl->status = Closed;
     }
-
-    impl->status = Closed;
     LeaveCriticalSection(&impl->cs);
 
-    return S_OK;
+    return hr;
 }
 
 static const struct IAsyncInfoVtbl async_operation_info_vtbl =
@@ -372,16 +366,9 @@ static void CALLBACK async_run_cb(TP_CALLBACK_INSTANCE *instance, void *data, TP
 HRESULT async_operation_create( const GUID *iid, IInspectable *invoker, async_operation_callback callback, IAsyncOperation_IInspectable **out )
 {
     struct async_operation *impl;
-    HRESULT hr;
 
     *out = NULL;
-
-    if (!(impl = calloc(1, sizeof(*impl))))
-    {
-        hr = E_OUTOFMEMORY;
-        goto error;
-    }
-
+    if (!(impl = calloc(1, sizeof(*impl)))) return E_OUTOFMEMORY;
     impl->IAsyncOperation_IInspectable_iface.lpVtbl = &async_operation_vtbl;
     impl->IAsyncInfo_iface.lpVtbl = &async_operation_info_vtbl;
     impl->iid = iid;
@@ -391,11 +378,10 @@ HRESULT async_operation_create( const GUID *iid, IInspectable *invoker, async_op
     impl->callback = callback;
     impl->status = Started;
 
-    IAsyncOperation_IInspectable_AddRef(&impl->IAsyncOperation_IInspectable_iface); /* AddRef to keep the obj alive in the callback. */
     if (!(impl->async_run_work = CreateThreadpoolWork(async_run_cb, &impl->IAsyncOperation_IInspectable_iface, NULL)))
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
-        goto error;
+        free(impl);
+        return HRESULT_FROM_WIN32(GetLastError());
     }
 
     if (invoker) IInspectable_AddRef((impl->invoker = invoker));
@@ -403,13 +389,11 @@ HRESULT async_operation_create( const GUID *iid, IInspectable *invoker, async_op
     InitializeCriticalSection(&impl->cs);
     impl->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": async_operation.cs");
 
+    /* AddRef to keep the obj alive in the callback. */
+    IAsyncOperation_IInspectable_AddRef(&impl->IAsyncOperation_IInspectable_iface);
     SubmitThreadpoolWork(impl->async_run_work);
 
     *out = &impl->IAsyncOperation_IInspectable_iface;
     TRACE("created %p\n", *out);
     return S_OK;
-
-error:
-    free(impl);
-    return hr;
 }
