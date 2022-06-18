@@ -822,6 +822,95 @@ static unsigned int get_bpp_from_format(DXGI_FORMAT format)
     }
 }
 
+static HRESULT WINAPI D3DX10ThreadPump_QueryInterface(ID3DX10ThreadPump *iface, REFIID riid, void **out)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static ULONG WINAPI D3DX10ThreadPump_AddRef(ID3DX10ThreadPump *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI D3DX10ThreadPump_Release(ID3DX10ThreadPump *iface)
+{
+    return 1;
+}
+
+static int add_work_item_count = 1;
+
+static HRESULT WINAPI D3DX10ThreadPump_AddWorkItem(ID3DX10ThreadPump *iface, ID3DX10DataLoader *loader,
+        ID3DX10DataProcessor *processor, HRESULT *result, void **object)
+{
+    SIZE_T size;
+    void *data;
+    HRESULT hr;
+
+    ok(!add_work_item_count++, "unexpected call\n");
+
+    hr = ID3DX10DataLoader_Load(loader);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataLoader_Decompress(loader, &data, &size);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_Process(processor, data, size);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_CreateDeviceObject(processor, object);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_Destroy(processor);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataLoader_Destroy(loader);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    if (result) *result = S_OK;
+    return S_OK;
+}
+
+static UINT WINAPI D3DX10ThreadPump_GetWorkItemCount(ID3DX10ThreadPump *iface)
+{
+    ok(0, "unexpected call\n");
+    return 0;
+}
+
+static HRESULT WINAPI D3DX10ThreadPump_WaitForAllItems(ID3DX10ThreadPump *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI D3DX10ThreadPump_ProcessDeviceWorkItems(ID3DX10ThreadPump *iface, UINT count)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI D3DX10ThreadPump_PurgeAllItems(ID3DX10ThreadPump *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI D3DX10ThreadPump_GetQueueStatus(ID3DX10ThreadPump *iface, UINT *queue,
+        UINT *processqueue, UINT *devicequeue)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static ID3DX10ThreadPumpVtbl D3DX10ThreadPumpVtbl =
+{
+    D3DX10ThreadPump_QueryInterface,
+    D3DX10ThreadPump_AddRef,
+    D3DX10ThreadPump_Release,
+    D3DX10ThreadPump_AddWorkItem,
+    D3DX10ThreadPump_GetWorkItemCount,
+    D3DX10ThreadPump_WaitForAllItems,
+    D3DX10ThreadPump_ProcessDeviceWorkItems,
+    D3DX10ThreadPump_PurgeAllItems,
+    D3DX10ThreadPump_GetQueueStatus
+};
+static ID3DX10ThreadPump thread_pump = { &D3DX10ThreadPumpVtbl };
+
 static ULONG get_refcount(void *iface)
 {
     IUnknown *unknown = iface;
@@ -1871,6 +1960,111 @@ static void test_D3DX10CreateAsyncResourceLoader(void)
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
 }
 
+static void test_D3DX10CreateAsyncTextureInfoProcessor(void)
+{
+    ID3DX10DataProcessor *dp;
+    D3DX10_IMAGE_INFO info;
+    HRESULT hr;
+    int i;
+
+    CoInitialize(NULL);
+
+    hr = D3DX10CreateAsyncTextureInfoProcessor(NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateAsyncTextureInfoProcessor(&info, &dp);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10DataProcessor_Process(dp, (void *)test_image[0].data, 0);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_Process(dp, NULL, test_image[0].size);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(test_image); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        hr = ID3DX10DataProcessor_Process(dp, (void *)test_image[i].data, test_image[i].size);
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+            check_image_info(&info, test_image + i, __LINE__);
+
+        winetest_pop_context();
+    }
+
+    hr = ID3DX10DataProcessor_CreateDeviceObject(dp, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10DataProcessor_Destroy(dp);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    CoUninitialize();
+}
+
+static void test_D3DX10CreateAsyncTextureProcessor(void)
+{
+    ID3DX10DataProcessor *dp;
+    ID3D10Resource *resource;
+    ID3D10Device *device;
+    HRESULT hr;
+    int i;
+
+    device = create_device();
+    if (!device)
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    CoInitialize(NULL);
+
+    hr = D3DX10CreateAsyncTextureProcessor(device, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateAsyncTextureProcessor(NULL, NULL, &dp);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateAsyncTextureProcessor(device, NULL, &dp);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_Process(dp, (void *)test_image[0].data, 0);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_Process(dp, NULL, test_image[0].size);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ID3DX10DataProcessor_Destroy(dp);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(test_image); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        hr = D3DX10CreateAsyncTextureProcessor(device, NULL, &dp);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+        hr = ID3DX10DataProcessor_Process(dp, (void *)test_image[i].data, test_image[i].size);
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+        {
+            hr = ID3DX10DataProcessor_CreateDeviceObject(dp, (void **)&resource);
+            ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+            check_resource_info(resource, test_image + i, __LINE__);
+            check_resource_data(resource, test_image + i, __LINE__);
+            ID3D10Resource_Release(resource);
+        }
+
+        hr = ID3DX10DataProcessor_Destroy(dp);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+        winetest_pop_context();
+    }
+
+    CoUninitialize();
+
+    ID3D10Device_Release(device);
+}
+
 static void test_get_image_info(void)
 {
     static const WCHAR test_resource_name[] = L"resource.data";
@@ -1880,53 +2074,82 @@ static void test_get_image_info(void)
     WCHAR path[MAX_PATH];
     unsigned int i;
     DWORD dword;
-    HRESULT hr;
+    HRESULT hr, hr2;
 
     CoInitialize(NULL);
 
-    hr = D3DX10GetImageInfoFromMemory(test_image[0].data, 0, NULL, &image_info, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromMemory(test_image[0].data, 0, NULL, &image_info, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromMemory(NULL, test_image[0].size, NULL, &image_info, NULL);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromMemory(NULL, test_image[0].size, NULL, &image_info, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromMemory(&dword, sizeof(dword), NULL, &image_info, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    dword = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromMemory(&dword, sizeof(dword), NULL, &image_info, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
 
-        hr = D3DX10GetImageInfoFromMemory(test_image[i].data, test_image[i].size, NULL, &image_info, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10GetImageInfoFromMemory(test_image[i].data, test_image[i].size, NULL, &image_info, &hr2);
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
             check_image_info(&image_info, test_image + i, __LINE__);
 
         winetest_pop_context();
     }
 
-    hr = D3DX10GetImageInfoFromFileW(NULL, NULL, &image_info, NULL);
+    hr2 = 0xdeadbeef;
+    add_work_item_count = 0;
+    hr = D3DX10GetImageInfoFromMemory(test_image[0].data, test_image[0].size, &thread_pump, &image_info, &hr2);
+    ok(add_work_item_count == 1, "Got unexpected add_work_item_count %u.\n", add_work_item_count);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
+    check_image_info(&image_info, test_image, __LINE__);
+
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromFileW(NULL, NULL, &image_info, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromFileW(L"deadbeaf", NULL, &image_info, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromFileW(L"deadbeaf", NULL, &image_info, &hr2);
     ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromFileA(NULL, NULL, &image_info, NULL);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromFileA(NULL, NULL, &image_info, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromFileA("deadbeaf", NULL, &image_info, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromFileA("deadbeaf", NULL, &image_info, &hr2);
     ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
         create_file(test_filename, test_image[i].data, test_image[i].size, path);
 
-        hr = D3DX10GetImageInfoFromFileW(path, NULL, &image_info, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10GetImageInfoFromFileW(path, NULL, &image_info, &hr2);
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
             check_image_info(&image_info, test_image + i, __LINE__);
 
-        hr = D3DX10GetImageInfoFromFileA(get_str_a(path), NULL, &image_info, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10GetImageInfoFromFileA(get_str_a(path), NULL, &image_info, &hr2);
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
             check_image_info(&image_info, test_image + i, __LINE__);
 
@@ -1937,31 +2160,48 @@ static void test_get_image_info(void)
 
     /* D3DX10GetImageInfoFromResource tests */
 
-    hr = D3DX10GetImageInfoFromResourceW(NULL, NULL, NULL, &image_info, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromResourceW(NULL, NULL, NULL, &image_info, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromResourceW(NULL, L"deadbeaf", NULL, &image_info, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromResourceW(NULL, L"deadbeaf", NULL, &image_info, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromResourceA(NULL, NULL, NULL, &image_info, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromResourceA(NULL, NULL, NULL, &image_info, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10GetImageInfoFromResourceA(NULL, "deadbeaf", NULL, &image_info, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10GetImageInfoFromResourceA(NULL, "deadbeaf", NULL, &image_info, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
         resource_module = create_resource_module(test_resource_name, test_image[i].data, test_image[i].size);
 
-        hr = D3DX10GetImageInfoFromResourceW(resource_module, test_resource_name, NULL, &image_info, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10GetImageInfoFromResourceW(resource_module, L"deadbeef", NULL, &image_info, &hr2);
+        ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+        ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+
+        hr2 = 0xdeadbeef;
+        hr = D3DX10GetImageInfoFromResourceW(resource_module, test_resource_name, NULL, &image_info, &hr2);
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP)
                 || broken(hr == D3DX10_ERR_INVALID_DATA) /* Vista */,
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
             check_image_info(&image_info, test_image + i, __LINE__);
 
-        hr = D3DX10GetImageInfoFromResourceA(resource_module, get_str_a(test_resource_name), NULL, &image_info, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10GetImageInfoFromResourceA(resource_module, get_str_a(test_resource_name), NULL, &image_info, &hr2);
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP)
                 || broken(hr == D3DX10_ERR_INVALID_DATA) /* Vista */,
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
             check_image_info(&image_info, test_image + i, __LINE__);
 
@@ -1980,8 +2220,8 @@ static void test_create_texture(void)
     HMODULE resource_module;
     ID3D10Device *device;
     WCHAR path[MAX_PATH];
+    HRESULT hr, hr2;
     unsigned int i;
-    HRESULT hr;
 
     device = create_device();
     if (!device)
@@ -1995,30 +2235,47 @@ static void test_create_texture(void)
     /* D3DX10CreateTextureFromMemory tests */
 
     resource = (ID3D10Resource *)0xdeadbeef;
-    hr = D3DX10CreateTextureFromMemory(device, NULL, 0, NULL, NULL, &resource, NULL);
-    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromMemory(NULL, test_bmp_1bpp, sizeof(test_bmp_1bpp), NULL, NULL, &resource, &hr2);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
     ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
 
     resource = (ID3D10Resource *)0xdeadbeef;
-    hr = D3DX10CreateTextureFromMemory(device, NULL, sizeof(test_bmp_1bpp), NULL, NULL, &resource, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromMemory(device, NULL, 0, NULL, NULL, &resource, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
     ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
 
     resource = (ID3D10Resource *)0xdeadbeef;
-    hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, 0, NULL, NULL, &resource, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromMemory(device, NULL, sizeof(test_bmp_1bpp), NULL, NULL, &resource, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
     ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
 
     resource = (ID3D10Resource *)0xdeadbeef;
-    hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, sizeof(test_bmp_1bpp) - 1, NULL, NULL, &resource, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, 0, NULL, NULL, &resource, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, sizeof(test_bmp_1bpp) - 1, NULL, NULL, &resource, &hr2);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
     ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
 
-        hr = D3DX10CreateTextureFromMemory(device, test_image[i].data, test_image[i].size, NULL, NULL, &resource, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10CreateTextureFromMemory(device, test_image[i].data, test_image[i].size, NULL, NULL, &resource, &hr2);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
@@ -2032,23 +2289,44 @@ static void test_create_texture(void)
         winetest_pop_context();
     }
 
+    hr2 = 0xdeadbeef;
+    add_work_item_count = 0;
+    hr = D3DX10CreateTextureFromMemory(device, test_image[0].data, test_image[0].size,
+            NULL, &thread_pump, &resource, &hr2);
+    ok(add_work_item_count == 1, "Got unexpected add_work_item_count %u.\n", add_work_item_count);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
+    check_resource_info(resource, test_image, __LINE__);
+    check_resource_data(resource, test_image, __LINE__);
+    ID3D10Resource_Release(resource);
+
     /* D3DX10CreateTextureFromFile tests */
 
-    hr = D3DX10CreateTextureFromFileW(device, NULL, NULL, NULL, &resource, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromFileW(device, NULL, NULL, NULL, &resource, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10CreateTextureFromFileW(device, L"deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromFileW(device, L"deadbeef", NULL, NULL, &resource, &hr2);
     ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10CreateTextureFromFileA(device, NULL, NULL, NULL, &resource, NULL);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromFileA(device, NULL, NULL, NULL, &resource, &hr2);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10CreateTextureFromFileA(device, "deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromFileA(device, "deadbeef", NULL, NULL, &resource, &hr2);
     ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
+    ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
         create_file(test_filename, test_image[i].data, test_image[i].size, path);
 
-        hr = D3DX10CreateTextureFromFileW(device, path, NULL, NULL, &resource, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10CreateTextureFromFileW(device, path, NULL, NULL, &resource, &hr2);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
@@ -2059,7 +2337,9 @@ static void test_create_texture(void)
             ID3D10Resource_Release(resource);
         }
 
-        hr = D3DX10CreateTextureFromFileA(device, get_str_a(path), NULL, NULL, &resource, NULL);
+        hr2 = 0xdeadbeef;
+        hr = D3DX10CreateTextureFromFileA(device, get_str_a(path), NULL, NULL, &resource, &hr2);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
@@ -2076,25 +2356,40 @@ static void test_create_texture(void)
 
     /* D3DX10CreateTextureFromResource tests */
 
-    hr = D3DX10CreateTextureFromResourceW(device, NULL, NULL, NULL, NULL, &resource, NULL);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromResourceW(device, NULL, NULL, NULL, NULL, &resource, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10CreateTextureFromResourceW(device, NULL, L"deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromResourceW(device, NULL, L"deadbeef", NULL, NULL, &resource, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10CreateTextureFromResourceA(device, NULL, NULL, NULL, NULL, &resource, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromResourceA(device, NULL, NULL, NULL, NULL, &resource, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
-    hr = D3DX10CreateTextureFromResourceA(device, NULL, "deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+    hr2 = 0xdeadbeef;
+    hr = D3DX10CreateTextureFromResourceA(device, NULL, "deadbeef", NULL, NULL, &resource, &hr2);
     ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+    ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
         resource_module = create_resource_module(test_resource_name, test_image[i].data, test_image[i].size);
 
+        hr2 = 0xdeadbeef;
+        hr = D3DX10CreateTextureFromResourceW(device, resource_module, L"deadbeef", NULL, NULL, &resource, &hr2);
+        ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+        ok(hr2 == 0xdeadbeef, "Got unexpected hr2 %#x.\n", hr2);
+
+        hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromResourceW(device, resource_module,
-                test_resource_name, NULL, NULL, &resource, NULL);
+                test_resource_name, NULL, NULL, &resource, &hr2);
         todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
         {
             check_resource_info(resource, test_image + i, __LINE__);
@@ -2102,11 +2397,13 @@ static void test_create_texture(void)
             ID3D10Resource_Release(resource);
         }
 
+        hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromResourceA(device, resource_module,
-                get_str_a(test_resource_name), NULL, NULL, &resource, NULL);
+                get_str_a(test_resource_name), NULL, NULL, &resource, &hr2);
         todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#x.\n", hr);
+        ok(hr == hr2, "Got unexpected hr2 %#x.\n", hr2);
         if (hr == S_OK)
         {
             check_resource_info(resource, test_image + i, __LINE__);
@@ -3273,6 +3570,8 @@ START_TEST(d3dx10)
     test_D3DX10CreateAsyncMemoryLoader();
     test_D3DX10CreateAsyncFileLoader();
     test_D3DX10CreateAsyncResourceLoader();
+    test_D3DX10CreateAsyncTextureInfoProcessor();
+    test_D3DX10CreateAsyncTextureProcessor();
     test_get_image_info();
     test_create_texture();
     test_font();

@@ -2171,6 +2171,8 @@ static void test_async_reader_streaming(void)
 
     hr = IWMReader_Stop(reader);
     ok(hr == E_UNEXPECTED, "Got hr %#lx.\n", hr);
+    hr = IWMReader_Start(reader, 0, 0, 1.0, NULL);
+    ok(hr == NS_E_INVALID_REQUEST, "Got hr %#lx.\n", hr);
 
     hr = IWMReaderAdvanced2_OpenStream(advanced, &stream.IStream_iface, &callback.IWMReaderCallback_iface, (void **)0xdeadbeef);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
@@ -2178,6 +2180,9 @@ static void test_async_reader_streaming(void)
     ok(callback.refcount > 1, "Got refcount %ld.\n", callback.refcount);
     ret = WaitForSingleObject(callback.got_opened, 1000);
     ok(!ret, "Wait timed out.\n");
+
+    hr = IWMReaderAdvanced2_OpenStream(advanced, &stream.IStream_iface, &callback.IWMReaderCallback_iface, (void **)0xdeadbee0);
+    ok(hr == E_UNEXPECTED, "Got hr %#lx.\n", hr);
 
     count = 0xdeadbeef;
     hr = IWMReader_GetOutputCount(reader, &count);
@@ -2538,6 +2543,9 @@ static void test_async_reader_file(void)
     ok(callback.refcount > 1, "Got refcount %ld.\n", callback.refcount);
     ret = WaitForSingleObject(callback.got_opened, 1000);
     ok(!ret, "Wait timed out.\n");
+
+    hr = IWMReader_Open(reader, filename, &callback.IWMReaderCallback_iface, (void **)0xdeadbee0);
+    ok(hr == E_UNEXPECTED, "Got hr %#lx.\n", hr);
 
     count = 0xdeadbeef;
     hr = IWMReader_GetOutputCount(reader, &count);

@@ -7,15 +7,18 @@ EXTRAINCL = $(GSTREAMER_CFLAGS)
 EXTRALIBS = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
 
 C_SRCS = \
-	audioconvert.c \
+	color_convert.c \
 	h264_decoder.c \
 	main.c \
 	media_source.c \
 	mfplat.c \
 	quartz_parser.c \
 	quartz_transform.c \
+	resampler.c \
+	wg_allocator.c \
 	wg_format.c \
 	wg_parser.c \
+	wg_sample.c \
 	wg_transform.c \
 	wm_asyncreader.c \
 	wm_reader.c \

@@ -34,6 +34,8 @@ static BOOL (WINAPI *pCompareObjectHandles)(HANDLE, HANDLE);
 static LPVOID (WINAPI *pMapViewOfFile3)(HANDLE, HANDLE, PVOID, ULONG64 offset, SIZE_T size,
         ULONG, ULONG, MEM_EXTENDED_PARAMETER *, ULONG);
 static LPVOID (WINAPI *pVirtualAlloc2)(HANDLE, void *, SIZE_T, DWORD, DWORD, MEM_EXTENDED_PARAMETER *, ULONG);
+static LPVOID (WINAPI *pVirtualAlloc2FromApp)(HANDLE, void *, SIZE_T, DWORD, DWORD, MEM_EXTENDED_PARAMETER *, ULONG);
+static PVOID (WINAPI *pVirtualAllocFromApp)(PVOID, SIZE_T, DWORD, DWORD);
 
 static void test_CompareObjectHandles(void)
 {
@@ -126,10 +128,23 @@ static void test_MapViewOfFile3(void)
     ok(ret, "Failed to delete a test file.\n");
 }
 
+#define check_region_size(p, s) check_region_size_(p, s, __LINE__)
+static void check_region_size_(void *p, SIZE_T s, unsigned int line)
+{
+    MEMORY_BASIC_INFORMATION info;
+    SIZE_T ret;
+
+    memset(&info, 0, sizeof(info));
+    ret = VirtualQuery(p, &info, sizeof(info));
+    ok_(__FILE__,line)(ret == sizeof(info), "Unexpected return value.\n");
+    ok_(__FILE__,line)(info.RegionSize == s, "Unexpected size %Iu, expected %Iu.\n", info.RegionSize, s);
+}
+
 static void test_VirtualAlloc2(void)
 {
     void *placeholder1, *placeholder2, *view1, *view2, *addr;
     MEMORY_BASIC_INFORMATION info;
+    char *p, *p1, *p2;
     HANDLE section;
     SIZE_T size;
     BOOL ret;
@@ -192,22 +207,143 @@ static void test_VirtualAlloc2(void)
 
     VirtualFree(placeholder1, 0, MEM_RELEASE);
     VirtualFree(placeholder2, 0, MEM_RELEASE);
+
+    /* Split in three regions. */
+    p = pVirtualAlloc2(NULL, NULL, 2 * size, MEM_RESERVE_PLACEHOLDER | MEM_RESERVE, PAGE_NOACCESS, NULL, 0);
+    ok(!!p, "Failed to create a placeholder range.\n");
+
+    p1 = p + size / 2;
+    p2 = p1 + size / 4;
+    ret = VirtualFree(p1, size / 4, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(ret, "Failed to split a placeholder.\n");
+    check_region_size(p, size / 2);
+    check_region_size(p1, size / 4);
+    check_region_size(p2, 2 * size - size / 2 - size / 4);
+    ret = VirtualFree(p, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+    ret = VirtualFree(p1, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+    ret = VirtualFree(p2, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+
+    /* Split in two regions, specifying lower part. */
+    p = pVirtualAlloc2(NULL, NULL, 2 * size, MEM_RESERVE_PLACEHOLDER | MEM_RESERVE, PAGE_NOACCESS, NULL, 0);
+    ok(!!p, "Failed to create a placeholder range.\n");
+
+    p1 = p;
+    p2 = p + size / 2;
+    ret = VirtualFree(p1, size / 2, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(ret, "Failed to split a placeholder.\n");
+    check_region_size(p1, size / 2);
+    check_region_size(p2, 2 * size - size / 2);
+    ret = VirtualFree(p1, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+    ret = VirtualFree(p2, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+
+    /* Split in two regions, specifying second half. */
+    p = pVirtualAlloc2(NULL, NULL, 2 * size, MEM_RESERVE_PLACEHOLDER | MEM_RESERVE, PAGE_NOACCESS, NULL, 0);
+    ok(!!p, "Failed to create a placeholder range.\n");
+
+    p1 = p;
+    p2 = p + size;
+    ret = VirtualFree(p2, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(ret, "Failed to split a placeholder.\n");
+    check_region_size(p1, size);
+    check_region_size(p2, size);
+    ret = VirtualFree(p1, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+    ret = VirtualFree(p2, 0, MEM_RELEASE);
+    ok(ret, "Failed to release a region.\n");
+}
+
+static void test_VirtualAllocFromApp(void)
+{
+    static const DWORD prot[] =
+    {
+        PAGE_EXECUTE,
+        PAGE_EXECUTE_READ,
+        PAGE_EXECUTE_READWRITE,
+        PAGE_EXECUTE_WRITECOPY,
+    };
+    unsigned int i;
+    BOOL ret;
+    void *p;
+
+    if (!pVirtualAllocFromApp)
+    {
+        win_skip("VirtualAllocFromApp is not available.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    p = pVirtualAllocFromApp(NULL, 0x1000, MEM_RESERVE, PAGE_READWRITE);
+    ok(p && GetLastError() == 0xdeadbeef, "Got unexpected mem %p, GetLastError() %lu.\n", p, GetLastError());
+    ret = VirtualFree(p, 0, MEM_RELEASE);
+    ok(ret, "Got unexpected ret %#x, GetLastError() %lu.\n", ret, GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(prot); ++i)
+    {
+        SetLastError(0xdeadbeef);
+        p = pVirtualAllocFromApp(NULL, 0x1000, MEM_RESERVE, prot[i]);
+        ok(!p && GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected mem %p, GetLastError() %lu.\n",
+                p, GetLastError());
+    }
+}
+
+static void test_VirtualAlloc2FromApp(void)
+{
+    static const DWORD prot[] =
+    {
+        PAGE_EXECUTE,
+        PAGE_EXECUTE_READ,
+        PAGE_EXECUTE_READWRITE,
+        PAGE_EXECUTE_WRITECOPY,
+    };
+    unsigned int i;
+    void *addr;
+    BOOL ret;
+
+    if (!pVirtualAlloc2FromApp)
+    {
+        win_skip("VirtualAlloc2FromApp is not available.\n");
+        return;
+    }
+
+    addr = pVirtualAlloc2FromApp(NULL, NULL, 0x1000, MEM_COMMIT, PAGE_READWRITE, NULL, 0);
+    ok(!!addr, "Failed to allocate, error %lu.\n", GetLastError());
+    ret = VirtualFree(addr, 0, MEM_RELEASE);
+    ok(ret, "Unexpected return value %d, error %lu.\n", ret, GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(prot); ++i)
+    {
+        SetLastError(0xdeadbeef);
+        addr = pVirtualAlloc2FromApp(NULL, NULL, 0x1000, MEM_COMMIT, prot[i], NULL, 0);
+        ok(!addr && GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected mem %p, GetLastError() %lu.\n",
+                addr, GetLastError());
+    }
+}
+
+static void init_funcs(void)
+{
+    HMODULE hmod = GetModuleHandleA("kernelbase.dll");
+
+#define X(f) { p##f = (void*)GetProcAddress(hmod, #f); }
+    X(CompareObjectHandles);
+    X(MapViewOfFile3);
+    X(VirtualAlloc2);
+    X(VirtualAlloc2FromApp);
+    X(VirtualAllocFromApp);
+#undef X
 }
 
 START_TEST(process)
 {
-    HMODULE hmod;
-
-    hmod = GetModuleHandleA("kernel32.dll");
-    pCompareObjectHandles = (void *)GetProcAddress(hmod, "CompareObjectHandles");
-    ok(!pCompareObjectHandles, "expected CompareObjectHandles only in kernelbase.dll\n");
-
-    hmod = GetModuleHandleA("kernelbase.dll");
-    pCompareObjectHandles = (void *)GetProcAddress(hmod, "CompareObjectHandles");
-    pMapViewOfFile3 = (void *)GetProcAddress(hmod, "MapViewOfFile3");
-    pVirtualAlloc2 = (void *)GetProcAddress(hmod, "VirtualAlloc2");
+    init_funcs();
 
     test_CompareObjectHandles();
     test_MapViewOfFile3();
     test_VirtualAlloc2();
+    test_VirtualAllocFromApp();
+    test_VirtualAlloc2FromApp();
 }

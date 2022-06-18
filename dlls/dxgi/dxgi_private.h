@@ -194,21 +194,22 @@ HRESULT d3d12_swapchain_create(IWineDXGIFactory *factory, ID3D12CommandQueue *qu
 
 BOOL dxgi_validate_swapchain_desc(const DXGI_SWAP_CHAIN_DESC1 *desc) DECLSPEC_HIDDEN;
 
-/* IDXGISurface */
-struct dxgi_surface
+/* IDXGISurface/IDXGIResource */
+struct dxgi_resource
 {
     IDXGISurface1 IDXGISurface1_iface;
+    IDXGIResource IDXGIResource_iface;
     IUnknown IUnknown_iface;
     IUnknown *outer_unknown;
     LONG refcount;
     struct wined3d_private_store private_store;
     IDXGIDevice *device;
-    struct wined3d_texture *wined3d_texture;
+    struct wined3d_resource *wined3d_resource;
     HDC dc;
 };
 
-HRESULT dxgi_surface_init(struct dxgi_surface *surface, IDXGIDevice *device,
-        IUnknown *outer, struct wined3d_texture *wined3d_texture) DECLSPEC_HIDDEN;
+HRESULT dxgi_resource_init(struct dxgi_resource *resource, IDXGIDevice *device,
+        IUnknown *outer, BOOL needs_surface, struct wined3d_resource *wined3d_resource) DECLSPEC_HIDDEN;
 
 HRESULT get_re8_dxgi_factory(REFIID riid, void **factory) DECLSPEC_HIDDEN;
 

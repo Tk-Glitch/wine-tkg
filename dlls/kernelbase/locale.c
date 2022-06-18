@@ -1992,6 +1992,36 @@ static inline WCHAR casemap( const USHORT *table, WCHAR ch )
 }
 
 
+static inline unsigned int casemap_high( const USHORT *table, WCHAR high, WCHAR low )
+{
+    unsigned int off = table[table[256 + (high - 0xd800)] + ((low >> 5) & 0x1f)] + 2 * (low & 0x1f);
+    return 0x10000 + ((high - 0xd800) << 10) + (low - 0xdc00) + MAKELONG( table[off], table[off+1] );
+}
+
+
+static inline BOOL table_has_high_planes( const USHORT *table )
+{
+    return table[0] >= 0x500;
+}
+
+
+static inline int put_utf16( WCHAR *dst, int pos, int dstlen, unsigned int ch )
+{
+    if (ch >= 0x10000)
+    {
+        if (pos < dstlen - 1)
+        {
+            ch -= 0x10000;
+            dst[pos] = 0xd800 | (ch >> 10);
+            dst[pos + 1] = 0xdc00 | (ch & 0x3ff);
+        }
+        return 2;
+    }
+    if (pos < dstlen) dst[pos] = ch;
+    return 1;
+}
+
+
 static inline WORD get_char_type( DWORD type, WCHAR ch )
 {
     const BYTE *ptr = sort.ctype_idx + ((const WORD *)sort.ctype_idx)[ch >> 8];
@@ -2008,11 +2038,37 @@ static inline void map_byterev( const WCHAR *src, int len, WCHAR *dst )
 
 static int casemap_string( const USHORT *table, const WCHAR *src, int srclen, WCHAR *dst, int dstlen )
 {
-    int pos, ret = srclen;
+    if (table_has_high_planes( table ))
+    {
+        unsigned int ch;
+        int pos = 0;
 
-    for (pos = 0; pos < dstlen && srclen; pos++, src++, srclen--)
-        dst[pos] = casemap( table, *src );
-    return ret;
+        while (srclen)
+        {
+            if (srclen > 1 && IS_SURROGATE_PAIR( src[0], src[1] ))
+            {
+                ch = casemap_high( table, src[0], src[1] );
+                src += 2;
+                srclen -= 2;
+            }
+            else
+            {
+                ch = casemap( table, *src );
+                src++;
+                srclen--;
+            }
+            pos += put_utf16( dst, pos, dstlen, ch );
+        }
+        return pos;
+    }
+    else
+    {
+        int pos, ret = srclen;
+
+        for (pos = 0; pos < dstlen && srclen; pos++, src++, srclen--)
+            dst[pos] = casemap( table, *src );
+        return ret;
+    }
 }
 
 
@@ -3912,16 +3968,29 @@ static int find_substring( const struct sortguid *sortid, DWORD flags, const WCH
 /* map buffer to full-width katakana */
 static int map_to_fullwidth( const USHORT *table, const WCHAR *src, int srclen, WCHAR *dst, int dstlen )
 {
-    int pos;
+    int pos, len;
 
-    for (pos = 0; srclen; pos++, src++, srclen--)
+    for (pos = 0; srclen; pos++, src += len, srclen -= len)
     {
-        WCHAR wch = casemap( charmaps[CHARMAP_FULLWIDTH], *src );
+        unsigned int wch = casemap( charmaps[CHARMAP_FULLWIDTH], *src );
+
+        len = 1;
         if (srclen > 1)
         {
-            switch (src[1])
+            if (table_has_high_planes( charmaps[CHARMAP_FULLWIDTH] ) && IS_SURROGATE_PAIR( src[0], src[1] ))
             {
-            case 0xff9e:  /* dakuten (voiced sound) */
+                len = 2;
+                wch = casemap_high( charmaps[CHARMAP_FULLWIDTH], src[0], src[1] );
+                if (wch >= 0x10000)
+                {
+                    put_utf16( dst, pos, dstlen, wch );
+                    pos++;
+                    continue;
+                }
+            }
+            else if (src[1] == 0xff9e)  /* dakuten (voiced sound) */
+            {
+                len = 2;
                 if ((*src >= 0xff76 && *src <= 0xff84) ||
                     (*src >= 0xff8a && *src <= 0xff8e) ||
                     *src == 0x30fd)
@@ -3937,26 +4006,68 @@ static int map_to_fullwidth( const USHORT *table, const WCHAR *src, int srclen, 
                 else if (*src == 0xff66)
                     wch = 0x30fa; /* KATAKANA LETTER VO */
                 else
-                    break;
-                src++;
-                srclen--;
-                break;
-            case 0xff9f:  /* handakuten (semi-voiced sound) */
+                    len = 1;
+            }
+            else if (src[1] == 0xff9f)  /* handakuten (semi-voiced sound) */
+            {
                 if (*src >= 0xff8a && *src <= 0xff8e)
                 {
                     wch += 2;
-                    src++;
-                    srclen--;
+                    len = 2;
                 }
-                break;
-            default:
-                break;
             }
         }
+
         if (pos < dstlen) dst[pos] = table ? casemap( table, wch ) : wch;
     }
     return pos;
 }
+
+
+static inline int nonspace_ignored( WCHAR ch )
+{
+    if (get_char_type( CT_CTYPE2, ch ) != C2_OTHERNEUTRAL) return FALSE;
+    return (get_char_type( CT_CTYPE3, ch ) & (C3_NONSPACING | C3_DIACRITIC));
+}
+
+/* remove ignored chars for NORM_IGNORENONSPACE/NORM_IGNORESYMBOLS */
+static int map_remove_ignored( DWORD flags, const WCHAR *src, int srclen, WCHAR *dst, int dstlen )
+{
+    int pos;
+
+    for (pos = 0; srclen; src++, srclen--)
+    {
+        if (flags & NORM_IGNORESYMBOLS)
+        {
+            if (get_char_type( CT_CTYPE1, *src ) & C1_PUNCT) continue;
+            if (get_char_type( CT_CTYPE3, *src ) & C3_SYMBOL) continue;
+        }
+        if (flags & NORM_IGNORENONSPACE)
+        {
+            WCHAR buffer[8];
+            const WCHAR *decomp;
+            unsigned int i, j, len;
+
+            if ((decomp = get_decomposition( *src, &len )) && len > 1)
+            {
+                for (i = j = 0; i < len; i++)
+                    if (!nonspace_ignored( decomp[i] )) buffer[j++] = decomp[i];
+
+                if (i > j)  /* something was removed */
+                {
+                    if (pos + j <= dstlen) memcpy( dst + pos, buffer, j * sizeof(WCHAR) );
+                    pos += j;
+                    continue;
+                }
+            }
+            else if (nonspace_ignored( *src )) continue;
+        }
+        if (pos < dstlen) dst[pos] = *src;
+        pos++;
+    }
+    return pos;
+}
+
 
 /* map full-width characters to single or double half-width characters. */
 static int map_to_halfwidth( const USHORT *table, const WCHAR *src, int srclen, WCHAR *dst, int dstlen )
@@ -4059,13 +4170,7 @@ static int lcmap_string( const struct sortguid *sortid, DWORD flags,
             SetLastError( ERROR_INVALID_FLAGS );
             return 0;
         }
-        for (ret = 0; srclen; src++, srclen--)
-        {
-            if ((flags & NORM_IGNORESYMBOLS) && (get_char_type( CT_CTYPE1, *src ) & (C1_PUNCT | C1_SPACE)))
-                continue;
-            if (ret < dstlen) dst[ret] = *src;
-            ret++;
-        }
+        ret = map_remove_ignored( flags, src, srclen, dst, dstlen );
         break;
     case 0:
         if (case_table)
@@ -5352,6 +5457,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageW( DWORD flags, const void *source, 
     if (flags & FORMAT_MESSAGE_ALLOCATE_BUFFER)
     {
         WCHAR *result;
+        va_list args_copy;
         ULONG alloc = max( size * sizeof(WCHAR), 65536 );
 
         for (;;)
@@ -5361,9 +5467,17 @@ DWORD WINAPI DECLSPEC_HOTPATCH FormatMessageW( DWORD flags, const void *source, 
                 status = STATUS_NO_MEMORY;
                 break;
             }
-            status = RtlFormatMessage( src, width, !!(flags & FORMAT_MESSAGE_IGNORE_INSERTS),
-                                       FALSE, !!(flags & FORMAT_MESSAGE_ARGUMENT_ARRAY), args,
-                                       result, alloc, &retsize );
+            if (args && !(flags & FORMAT_MESSAGE_ARGUMENT_ARRAY))
+            {
+                va_copy( args_copy, *args );
+                status = RtlFormatMessage( src, width, !!(flags & FORMAT_MESSAGE_IGNORE_INSERTS),
+                                           FALSE, FALSE, &args_copy, result, alloc, &retsize );
+                va_end( args_copy );
+            }
+            else
+                status = RtlFormatMessage( src, width, !!(flags & FORMAT_MESSAGE_IGNORE_INSERTS),
+                                           FALSE, TRUE, args, result, alloc, &retsize );
+
             if (!status)
             {
                 if (retsize <= sizeof(WCHAR)) HeapFree( GetProcessHeap(), 0, result );
@@ -6362,6 +6476,47 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsValidLocaleName( const WCHAR *locale )
 {
     if (locale == LOCALE_NAME_USER_DEFAULT) return FALSE;
     return !!find_lcname_entry( locale );
+}
+
+
+/******************************************************************************
+ *	IsNLSDefinedString   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH IsNLSDefinedString( NLS_FUNCTION func, DWORD flags, NLSVERSIONINFO *info,
+                                                  const WCHAR *str, int len )
+{
+    int i;
+
+    if (func != COMPARE_STRING)
+    {
+        SetLastError( ERROR_INVALID_FLAGS );
+        return FALSE;
+    }
+    if (info)
+    {
+        if (info->dwNLSVersionInfoSize != sizeof(*info) &&
+            (info->dwNLSVersionInfoSize != offsetof( NLSVERSIONINFO, dwEffectiveId )))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+    }
+
+    if (len < 0) len = lstrlenW( str ) + 1;
+
+    for (i = 0; i < len; i++)
+    {
+        if (is_private_use_area_char( str[i] )) return FALSE;
+        if (IS_LOW_SURROGATE( str[i] )) return FALSE;
+        if (IS_HIGH_SURROGATE( str[i] ))
+        {
+            if (++i == len) return FALSE;
+            if (!IS_LOW_SURROGATE( str[i] )) return FALSE;
+            continue;
+        }
+        if (!(get_char_type( CT_CTYPE1, str[i] ) & C1_DEFINED)) return FALSE;
+    }
+    return TRUE;
 }
 
 

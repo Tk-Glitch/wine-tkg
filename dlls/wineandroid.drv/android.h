@@ -24,6 +24,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <jni.h>
 #include <android/log.h>
 #include <android/input.h>
@@ -31,9 +32,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
+#include "ntgdi.h"
 #include "wine/gdi_driver.h"
+#include "unixlib.h"
 #include "android_native.h"
 
 
@@ -52,6 +53,7 @@ DECL_FUNCPTR( ANativeWindow_release );
  * OpenGL driver
  */
 
+extern pthread_mutex_t drawable_mutex DECLSPEC_HIDDEN;
 extern void update_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 extern struct opengl_funcs *get_wgl_driver( UINT version ) DECLSPEC_HIDDEN;
@@ -80,32 +82,46 @@ extern int ioctl_set_cursor( int id, int width, int height,
  * USER driver
  */
 
-extern INT CDECL ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size ) DECLSPEC_HIDDEN;
-extern UINT CDECL ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl ) DECLSPEC_HIDDEN;
-extern SHORT CDECL ANDROID_VkKeyScanEx( WCHAR ch, HKL hkl ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetCursor( HCURSOR handle ) DECLSPEC_HIDDEN;
-extern BOOL CDECL ANDROID_CreateWindow( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_DestroyWindow( HWND hwnd ) DECLSPEC_HIDDEN;
-extern DWORD CDECL ANDROID_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
-                                                        DWORD mask, DWORD flags ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetCursor( HCURSOR handle ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha,
-                                                      DWORD flags ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetParent( HWND hwnd, HWND parent, HWND old_parent ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetCapture( HWND hwnd, UINT flags ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style ) DECLSPEC_HIDDEN;
-extern UINT CDECL ANDROID_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp ) DECLSPEC_HIDDEN;
-extern BOOL CDECL ANDROID_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
-                                               const RECT *window_rect ) DECLSPEC_HIDDEN;
-extern LRESULT CDECL ANDROID_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp ) DECLSPEC_HIDDEN;
-extern BOOL CDECL ANDROID_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
-                                             const RECT *window_rect, const RECT *client_rect,
-                                             RECT *visible_rect, struct window_surface **surface ) DECLSPEC_HIDDEN;
-extern void CDECL ANDROID_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
-                                            const RECT *window_rect, const RECT *client_rect,
-                                            const RECT *visible_rect, const RECT *valid_rects,
-                                            struct window_surface *surface ) DECLSPEC_HIDDEN;
+extern pthread_mutex_t win_data_mutex DECLSPEC_HIDDEN;
+extern INT ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size ) DECLSPEC_HIDDEN;
+extern UINT ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl ) DECLSPEC_HIDDEN;
+extern SHORT ANDROID_VkKeyScanEx( WCHAR ch, HKL hkl ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetCursor( HCURSOR handle ) DECLSPEC_HIDDEN;
+extern BOOL ANDROID_CreateWindow( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void ANDROID_DestroyWindow( HWND hwnd ) DECLSPEC_HIDDEN;
+extern NTSTATUS ANDROID_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
+                                                     const LARGE_INTEGER *timeout,
+                                                     DWORD mask, DWORD flags ) DECLSPEC_HIDDEN;
+extern LRESULT ANDROID_DesktopWindowProc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetCursor( HCURSOR handle ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha,
+                                                DWORD flags ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetParent( HWND hwnd, HWND parent, HWND old_parent ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetCapture( HWND hwnd, UINT flags ) DECLSPEC_HIDDEN;
+extern void ANDROID_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style ) DECLSPEC_HIDDEN;
+extern UINT ANDROID_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp ) DECLSPEC_HIDDEN;
+extern BOOL ANDROID_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
+                                         const RECT *window_rect ) DECLSPEC_HIDDEN;
+extern LRESULT ANDROID_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp ) DECLSPEC_HIDDEN;
+extern BOOL ANDROID_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
+                                       const RECT *window_rect, const RECT *client_rect,
+                                       RECT *visible_rect, struct window_surface **surface ) DECLSPEC_HIDDEN;
+extern void ANDROID_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
+                                      const RECT *window_rect, const RECT *client_rect,
+                                      const RECT *visible_rect, const RECT *valid_rects,
+                                      struct window_surface *surface ) DECLSPEC_HIDDEN;
+
+/* unixlib interface */
+
+extern NTSTATUS android_create_desktop( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS android_dispatch_ioctl( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS android_java_init( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS android_java_uninit( void *arg ) DECLSPEC_HIDDEN;
+extern NTSTATUS android_register_window( void *arg ) DECLSPEC_HIDDEN;
+extern PNTAPCFUNC register_window_callback;
+extern NTSTATUS (WINAPI *pNtWaitForMultipleObjects)( ULONG,const HANDLE*,BOOLEAN,
+                                                     BOOLEAN,const LARGE_INTEGER* ) DECLSPEC_HIDDEN;
 
 extern unsigned int screen_width DECLSPEC_HIDDEN;
 extern unsigned int screen_height DECLSPEC_HIDDEN;
@@ -185,5 +201,12 @@ int send_event( const union event_data *data ) DECLSPEC_HIDDEN;
 extern JavaVM **p_java_vm;
 extern jobject *p_java_object;
 extern unsigned short *p_java_gdt_sel;
+
+/* string helpers */
+
+static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
+{
+    while (len--) *dst++ = (unsigned char)*src++;
+}
 
 #endif  /* __WINE_ANDROID_H */

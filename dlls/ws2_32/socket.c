@@ -551,6 +551,14 @@ static HANDLE get_sync_event(void)
     return data->sync_event;
 }
 
+static DWORD wait_event_alertable( HANDLE event )
+{
+    DWORD ret;
+
+    while ((ret = WaitForSingleObjectEx( event, INFINITE, TRUE )) == WAIT_IO_COMPLETION)
+        ;
+    return ret;
+}
 
 BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
 {
@@ -951,7 +959,7 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
                                     IOCTL_AFD_WINE_RECVMSG, &params, sizeof(params), NULL, 0 );
     if (status == STATUS_PENDING && !overlapped)
     {
-        if (WaitForSingleObject( event, INFINITE ) == WAIT_FAILED)
+        if (wait_event_alertable( event ) == WAIT_FAILED)
             return -1;
         status = piosb->u.Status;
     }
@@ -2786,7 +2794,7 @@ int WINAPI select( int count, fd_set *read_ptr, fd_set *write_ptr,
                                     IOCTL_AFD_POLL, params, params_size, params, params_size );
     if (status == STATUS_PENDING)
     {
-        if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED)
+        if (wait_event_alertable( sync_event ) == WAIT_FAILED)
         {
             free( read_input );
             free( params );
@@ -3640,6 +3648,12 @@ BOOL WINAPI WSAGetOverlappedResult( SOCKET s, LPWSAOVERLAPPED lpOverlapped,
     {
         ERR( "Invalid pointer\n" );
         SetLastError(WSA_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!socket_list_find( s ))
+    {
+        SetLastError( WSAENOTSOCK );
         return FALSE;
     }
 

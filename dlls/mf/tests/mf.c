@@ -254,9 +254,7 @@ static BOOL create_transform(GUID category, MFT_REGISTER_TYPE_INFO *input_type,
         if (IsEqualGUID(expect_class_id, class_ids + i))
             break;
     }
-    todo_wine_if(IsEqualGUID(class_ids, &CLSID_WINEAudioConverter))
     ok(i < count, "failed to find %s transform\n", debugstr_w(expect_name));
-    if (i == count) return FALSE;
     *class_id = class_ids[i];
     CoTaskMemFree(class_ids);
     ok(IsEqualGUID(class_id, expect_class_id), "got class id %s\n", debugstr_guid(class_id));
@@ -6423,7 +6421,6 @@ static void test_wma_decoder(void)
     hr = IMFTransform_ProcessInput(transform, 0, sample, 0);
     ok(hr == MF_E_NOTACCEPTING, "ProcessInput returned %#lx\n", hr);
     ret = IMFSample_Release(sample);
-    todo_wine
     ok(ret == 1, "Release returned %lu\n", ret);
 
     /* As output_info.dwFlags doesn't have MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES
@@ -7567,7 +7564,6 @@ static void test_audio_convert(void)
     check_interface(transform, &IID_IMFTransform, TRUE);
     check_interface(transform, &IID_IMediaObject, TRUE);
     check_interface(transform, &IID_IPropertyStore, TRUE);
-    todo_wine
     check_interface(transform, &IID_IPropertyBag, TRUE);
     /* check_interface(transform, &IID_IWMResamplerProps, TRUE); */
 
@@ -8024,6 +8020,7 @@ static void test_color_convert(void)
     check_interface(transform, &IID_IMFTransform, TRUE);
     check_interface(transform, &IID_IMediaObject, TRUE);
     check_interface(transform, &IID_IPropertyStore, TRUE);
+    todo_wine
     check_interface(transform, &IID_IMFRealTimeClient, TRUE);
     /* check_interface(transform, &IID_IWMColorConvProps, TRUE); */
 

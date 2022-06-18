@@ -18,13 +18,13 @@
  */
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 #define COBJMACROS
 
 #include "d3d10_1.h"
 #include "d3dx10.h"
 #include "d3dcompiler.h"
+#include "dxhelpers.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
@@ -113,34 +113,15 @@ HRESULT WINAPI D3DX10CreateEffectFromFileA(const char *filename, const D3D10_SHA
         return E_INVALIDARG;
 
     len = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-    if (!(filenameW = heap_alloc(len * sizeof(*filenameW))))
+    if (!(filenameW = malloc(len * sizeof(*filenameW))))
         return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, len);
 
     hr = D3DX10CreateEffectFromFileW(filenameW, defines, include, profile, shader_flags,
             effect_flags, device, effect_pool, pump, effect, errors, hresult);
-    heap_free(filenameW);
+    free(filenameW);
 
     return hr;
-}
-
-static HRESULT get_resource_data(HMODULE module, HRSRC resinfo, void **buffer, DWORD *length)
-{
-    HGLOBAL resource;
-
-    *length = SizeofResource(module, resinfo);
-    if (!*length)
-        return D3DX10_ERR_INVALID_DATA;
-
-    resource = LoadResource(module, resinfo);
-    if (!resource)
-        return D3DX10_ERR_INVALID_DATA;
-
-    *buffer = LockResource(resource);
-    if (!*buffer)
-        return D3DX10_ERR_INVALID_DATA;
-
-    return S_OK;
 }
 
 HRESULT WINAPI D3DX10CreateEffectFromResourceA(HMODULE module, const char *resource_name,
@@ -149,7 +130,6 @@ HRESULT WINAPI D3DX10CreateEffectFromResourceA(HMODULE module, const char *resou
         ID3D10EffectPool *effect_pool, ID3DX10ThreadPump *pump, ID3D10Effect **effect,
         ID3D10Blob **errors, HRESULT *hresult)
 {
-    HRSRC resinfo;
     void *data;
     DWORD size;
     HRESULT hr;
@@ -160,10 +140,8 @@ HRESULT WINAPI D3DX10CreateEffectFromResourceA(HMODULE module, const char *resou
             defines, include, debugstr_a(profile), shader_flags, effect_flags,
             device, effect_pool, pump, effect, errors, hresult);
 
-    if (!(resinfo = FindResourceA(module, resource_name, (const char *)RT_RCDATA)))
-        return D3DX10_ERR_INVALID_DATA;
-
-    if (FAILED(hr = get_resource_data(module, resinfo, &data, &size)))
+    hr = load_resourceA(module, resource_name, &data, &size);
+    if (FAILED(hr))
         return hr;
 
     return D3DX10CreateEffectFromMemory(data, size, filename, defines, include, profile,
@@ -177,7 +155,6 @@ HRESULT WINAPI D3DX10CreateEffectFromResourceW(HMODULE module, const WCHAR *reso
         ID3D10Blob **errors, HRESULT *hresult)
 {
     char *filename = NULL;
-    HRSRC resinfo;
     void *data;
     DWORD size;
     HRESULT hr;
@@ -189,22 +166,20 @@ HRESULT WINAPI D3DX10CreateEffectFromResourceW(HMODULE module, const WCHAR *reso
             defines, include, debugstr_a(profile), shader_flags, effect_flags,
             device, effect_pool, pump, effect, errors, hresult);
 
-    if (!(resinfo = FindResourceW(module, resource_name, (const WCHAR *)RT_RCDATA)))
-        return D3DX10_ERR_INVALID_DATA;
-
-    if (FAILED(hr = get_resource_data(module, resinfo, &data, &size)))
+    hr = load_resourceW(module, resource_name, &data, &size);
+    if (FAILED(hr))
         return hr;
 
     if (filenameW)
     {
         len = WideCharToMultiByte(CP_ACP, 0, filenameW, -1, NULL, 0, NULL, NULL);
-        if (!(filename = heap_alloc(len)))
+        if (!(filename = malloc(len)))
             return E_OUTOFMEMORY;
         WideCharToMultiByte(CP_ACP, 0, filenameW, -1, filename, len, NULL, NULL);
     }
 
     hr = D3DX10CreateEffectFromMemory(data, size, filename, defines, include, profile,
             shader_flags, effect_flags, device, effect_pool, pump, effect, errors, hresult);
-    heap_free(filename);
+    free(filename);
     return hr;
 }

@@ -1252,7 +1252,6 @@ static void test_simple_joystick( DWORD version )
 
     hwnd = CreateWindowW( L"static", L"dinput", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 10, 10, 200, 200,
                           NULL, NULL, NULL, NULL );
-    SetForegroundWindow( hwnd );
 
     hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE );
     ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
@@ -1261,6 +1260,8 @@ static void test_simple_joystick( DWORD version )
     hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE );
     ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
 
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == DI_OK, "SetCooperativeLevel returned: %#lx\n", hr );
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned: %#lx\n", hr );
     hr = IDirectInputDevice8_Acquire( device );
@@ -1681,8 +1682,8 @@ static void test_simple_joystick( DWORD version )
 
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
     ok( hr == DI_OK, "GetDeviceState returned: %#lx\n", hr );
-    check_member( state, expect_state_abs[1], "%ld", lX );
-    check_member( state, expect_state_abs[1], "%ld", lY );
+    ok( state.lX == expect_state_abs[1].lX || broken( state.lX == 16853 ) /* w8 */, "got lX %ld", state.lX );
+    ok( state.lY == expect_state_abs[1].lY || broken( state.lY == 16853 ) /* w8 */, "got lY %ld", state.lY );
     check_member( state, expect_state_abs[1], "%ld", lZ );
     check_member( state, expect_state_abs[1], "%ld", lRx );
     check_member( state, expect_state_abs[1], "%ld", rgdwPOV[0] );
@@ -4162,10 +4163,9 @@ done:
 
 START_TEST( joystick8 )
 {
-    if (!dinput_test_init()) return;
+    dinput_test_init();
     if (!bus_device_start()) goto done;
 
-    CoInitialize( NULL );
     if (test_device_types( 0x800 ))
     {
         /* This needs to be done before doing anything involving dinput.dll
@@ -4183,7 +4183,6 @@ START_TEST( joystick8 )
         test_driving_wheel_axes();
         test_windows_gaming_input();
     }
-    CoUninitialize();
 
 done:
     bus_device_stop();

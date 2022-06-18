@@ -52,6 +52,7 @@ struct h264_decoder
 
     struct wg_format wg_format;
     struct wg_transform *wg_transform;
+    struct wg_sample_queue *wg_sample_queue;
 };
 
 static struct h264_decoder *impl_from_IMFTransform(IMFTransform *iface)
@@ -237,6 +238,8 @@ static ULONG WINAPI transform_Release(IMFTransform *iface)
             IMFMediaType_Release(decoder->input_type);
         if (decoder->output_type)
             IMFMediaType_Release(decoder->output_type);
+
+        wg_sample_queue_destroy(decoder->wg_sample_queue);
         free(decoder);
     }
 
@@ -540,13 +543,10 @@ static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFS
     if (!decoder->wg_transform)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    if (FAILED(hr = mf_create_wg_sample(sample, &wg_sample)))
+    if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
         return hr;
 
-    hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
-
-    mf_destroy_wg_sample(wg_sample);
-    return hr;
+    return wg_transform_push_mf(decoder->wg_transform, wg_sample, decoder->wg_sample_queue);
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
@@ -574,18 +574,18 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
     samples[0].dwStatus = 0;
     if (!samples[0].pSample) return E_INVALIDARG;
 
-    if (FAILED(hr = mf_create_wg_sample(samples[0].pSample, &wg_sample)))
+    if (FAILED(hr = wg_sample_create_mf(samples[0].pSample, &wg_sample)))
         return hr;
 
     if (wg_sample->max_size < info.cbSize)
     {
-        mf_destroy_wg_sample(wg_sample);
+        wg_sample_release(wg_sample);
         return MF_E_BUFFERTOOSMALL;
     }
 
-    hr = wg_transform_read_data(decoder->wg_transform, wg_sample,
-            &wg_format);
-    mf_destroy_wg_sample(wg_sample);
+    if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, wg_sample, &wg_format)))
+        wg_sample_queue_flush(decoder->wg_sample_queue, false);
+    wg_sample_release(wg_sample);
 
     if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
     {
@@ -650,6 +650,7 @@ HRESULT h264_decoder_create(REFIID riid, void **ret)
     static const struct wg_format input_format = {.major_type = WG_MAJOR_TYPE_H264};
     struct wg_transform *transform;
     struct h264_decoder *decoder;
+    HRESULT hr;
 
     TRACE("riid %s, ret %p.\n", debugstr_guid(riid), ret);
 
@@ -670,6 +671,12 @@ HRESULT h264_decoder_create(REFIID riid, void **ret)
     decoder->wg_format.u.video.height = 1080;
     decoder->wg_format.u.video.fps_n = 30000;
     decoder->wg_format.u.video.fps_d = 1001;
+
+    if (FAILED(hr = wg_sample_queue_create(&decoder->wg_sample_queue)))
+    {
+        free(decoder);
+        return hr;
+    }
 
     *ret = &decoder->IMFTransform_iface;
     TRACE("Created decoder %p\n", *ret);

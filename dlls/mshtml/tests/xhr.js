@@ -18,27 +18,71 @@
 
 function test_xhr() {
     var xhr = new XMLHttpRequest();
-    var complete_cnt = 0;
+    var complete_cnt = 0, loadstart = false;
 
     xhr.onreadystatechange = function() {
         if(xhr.readyState != 4)
             return;
 
         ok(xhr.responseText === "Testing...", "unexpected responseText " + xhr.responseText);
-        if(complete_cnt++)
+        if(complete_cnt++ && !("onloadend" in xhr))
             next_test();
     }
     xhr.ontimeout = function() { ok(false, "ontimeout called"); }
     var onload_func = xhr.onload = function() {
         ok(xhr.statusText === "OK", "statusText = " + xhr.statusText);
-        if(complete_cnt++)
+        if("onloadstart" in xhr)
+            ok(loadstart, "onloadstart not fired");
+        if(complete_cnt++ && !("onloadend" in xhr))
             next_test();
     };
     ok(xhr.onload === onload_func, "xhr.onload != onload_func");
+    if("onloadstart" in xhr) {
+        xhr.onloadstart = function(e) {
+            ok(complete_cnt == 0, "onloadstart fired after onload");
+            var props = [ "initProgressEvent", "lengthComputable", "loaded", "total" ];
+            for(var i = 0; i < props.length; i++)
+                ok(props[i] in e, props[i] + " not available in loadstart");
+            loadstart = true;
+        };
+        xhr.onloadend = function(e) {
+            ok(complete_cnt == 2, "onloadend not fired after onload and onreadystatechange");
+            ok(loadstart, "onloadstart not fired before onloadend");
+            var props = [ "initProgressEvent", "lengthComputable", "loaded", "total" ];
+            for(var i = 0; i < props.length; i++)
+                ok(props[i] in e, props[i] + " not available in loadstart");
+            next_test();
+        };
+    }
 
     xhr.open("POST", "echo.php", true);
     xhr.setRequestHeader("X-Test", "True");
+    if("withCredentials" in xhr) {
+        ok(xhr.withCredentials === false, "default withCredentials = " + xhr.withCredentials);
+        xhr.withCredentials = true;
+        ok(xhr.withCredentials === true, "withCredentials = " + xhr.withCredentials);
+        xhr.withCredentials = false;
+    }
     xhr.send("Testing...");
+}
+
+function test_abort() {
+    var xhr = new XMLHttpRequest();
+    if(!("onabort" in xhr)) { next_test(); return; }
+
+    xhr.onreadystatechange = function() {
+        if(xhr.readyState != 4)
+            return;
+        todo_wine_if(v < 10).
+        ok(v >= 10, "onreadystatechange called");
+    }
+    xhr.onload = function() { ok(false, "onload called"); }
+    xhr.onabort = function(e) { next_test(); }
+
+    xhr.open("POST", "echo.php?delay", true);
+    xhr.setRequestHeader("X-Test", "True");
+    xhr.send("Abort Test");
+    xhr.abort();
 }
 
 function test_timeout() {
@@ -74,5 +118,6 @@ function test_timeout() {
 
 var tests = [
     test_xhr,
+    test_abort,
     test_timeout
 ];

@@ -935,8 +935,9 @@ static HRESULT Global_VarType(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt
 
 static HRESULT Global_IsDate(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("%s\n", debugstr_variant(arg));
+
+    return return_bool(res, V_VT(arg) == VT_DATE);
 }
 
 static HRESULT Global_IsEmpty(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -944,12 +945,7 @@ static HRESULT Global_IsEmpty(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt
     TRACE("(%s)\n", debugstr_variant(arg));
 
     assert(args_cnt == 1);
-
-    if(res) {
-        V_VT(res) = VT_BOOL;
-        V_BOOL(res) = V_VT(arg) == VT_EMPTY ? VARIANT_TRUE : VARIANT_FALSE;
-    }
-    return S_OK;
+    return return_bool(res, V_VT(arg) == VT_EMPTY);
 }
 
 static HRESULT Global_IsNull(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -958,11 +954,7 @@ static HRESULT Global_IsNull(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt,
 
     assert(args_cnt == 1);
 
-    if(res) {
-        V_VT(res) = VT_BOOL;
-        V_BOOL(res) = V_VT(arg) == VT_NULL ? VARIANT_TRUE : VARIANT_FALSE;
-    }
-    return S_OK;
+    return return_bool(res, V_VT(arg) == VT_NULL);
 }
 
 static HRESULT Global_IsNumeric(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -994,11 +986,7 @@ static HRESULT Global_IsObject(BuiltinDisp *This, VARIANT *arg, unsigned args_cn
 
     assert(args_cnt == 1);
 
-    if(res) {
-        V_VT(res) = VT_BOOL;
-        V_BOOL(res) = V_VT(arg) == VT_DISPATCH ? VARIANT_TRUE : VARIANT_FALSE;
-    }
-    return S_OK;
+    return return_bool(res, V_VT(arg) == VT_DISPATCH);
 }
 
 static HRESULT Global_Atn(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)

@@ -397,8 +397,18 @@ sync_test("xhr_props", function() {
     test_exposed("addEventListener", v >= 9);
     test_exposed("removeEventListener", v >= 9);
     test_exposed("dispatchEvent", v >= 9);
+    test_exposed("onabort", v >= 10);
+    test_exposed("onerror", v >= 10);
+    test_exposed("onloadend", v >= 10);
+    test_exposed("onloadstart", v >= 10);
+    test_exposed("onprogress", v >= 10);
     test_exposed("ontimeout", true);
+    test_exposed("overrideMimeType", v >= 11);
+    test_exposed("response", v >= 10);
+    test_exposed("responseType", v >= 10);
     test_exposed("timeout", true);
+    test_exposed("upload", v >= 10);
+    test_exposed("withCredentials", v >= 10);
 });
 
 sync_test("stylesheet_props", function() {
@@ -1009,6 +1019,18 @@ sync_test("set_obj", function() {
 
     s = new Set([1, 2, 3]);
     ok(s.size === 0, "size = " + s.size);
+
+    s = new Set();
+    s.add(1);
+    s.add(2);
+    s.add(3);
+    r = 0;
+    s.forEach(function(value, key, obj) {
+        r++;
+        s.clear();
+        ok(s.size === 0, "size = " + s.size);
+    });
+    ok(r === 1, "r = " + r);
 });
 
 sync_test("map_obj", function() {
@@ -1151,6 +1173,18 @@ sync_test("map_obj", function() {
     }catch(e) {
         ok(e.number === 0xa13fc - 0x80000000, "e.number = " + e.number);
     }
+
+    s = new Map();
+    s.set(1, 10);
+    s.set(2, 20);
+    s.set(3, 30);
+    r = 0;
+    s.forEach(function(value, key) {
+        r++;
+        s.clear();
+        ok(s.size === 0, "size = " + s.size);
+    });
+    ok(r === 1, "r = " + r);
 });
 
 sync_test("elem_attr", function() {

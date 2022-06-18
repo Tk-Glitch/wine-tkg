@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #include "config.h"
@@ -27,6 +31,8 @@
 #include <dlfcn.h>
 #include <link.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -46,6 +52,8 @@ static RECT monitor_rc_work;
 static int device_init_done;
 static BOOL force_display_devices_refresh;
 
+PNTAPCFUNC register_window_callback;
+
 typedef struct
 {
     struct gdi_physdev dev;
@@ -60,15 +68,19 @@ static const struct user_driver_funcs android_drv_funcs;
 void init_monitors( int width, int height )
 {
     static const WCHAR trayW[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d',0};
+    UNICODE_STRING name;
     RECT rect;
-    HWND hwnd = FindWindowW( trayW, NULL );
+    HWND hwnd;
+
+    RtlInitUnicodeString( &name, trayW );
+    hwnd = NtUserFindWindowEx( 0, 0, &name, NULL, 0 );
 
     virtual_screen_rect.right = width;
     virtual_screen_rect.bottom = height;
     monitor_rc_work = virtual_screen_rect;
 
-    if (!hwnd || !IsWindowVisible( hwnd )) return;
-    if (!GetWindowRect( hwnd, &rect )) return;
+    if (!hwnd || !NtUserIsWindowVisible( hwnd )) return;
+    if (!NtUserGetWindowRect( hwnd, &rect )) return;
     if (rect.top) monitor_rc_work.bottom = rect.top;
     else monitor_rc_work.top = rect.bottom;
     TRACE( "found tray %p %s work area %s\n", hwnd,
@@ -84,19 +96,78 @@ void init_monitors( int width, int height )
 }
 
 
+/* wrapper for NtCreateKey that creates the key recursively if necessary */
+static HKEY reg_create_key( const WCHAR *name, ULONG name_len )
+{
+    UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+    HANDLE ret;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    status = NtCreateKey( &ret, MAXIMUM_ALLOWED, &attr, 0, NULL, 0, NULL );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+    {
+        static const WCHAR registry_rootW[] = { '\\','R','e','g','i','s','t','r','y','\\' };
+        DWORD pos = 0, i = 0, len = name_len / sizeof(WCHAR);
+
+        /* don't try to create registry root */
+        if (len > ARRAY_SIZE(registry_rootW) &&
+            !memcmp( name, registry_rootW, sizeof(registry_rootW) ))
+            i += ARRAY_SIZE(registry_rootW);
+
+        while (i < len && name[i] != '\\') i++;
+        if (i == len) return 0;
+        for (;;)
+        {
+            nameW.Buffer = (WCHAR *)name + pos;
+            nameW.Length = (i - pos) * sizeof(WCHAR);
+            status = NtCreateKey( &ret, MAXIMUM_ALLOWED, &attr, 0, NULL, 0, NULL );
+
+            if (attr.RootDirectory) NtClose( attr.RootDirectory );
+            if (status) return 0;
+            if (i == len) break;
+            attr.RootDirectory = ret;
+            while (i < len && name[i] == '\\') i++;
+            pos = i;
+            while (i < len && name[i] != '\\') i++;
+        }
+    }
+    return ret;
+}
+
+
 /******************************************************************************
  *           set_screen_dpi
  */
 void set_screen_dpi( DWORD dpi )
 {
-    static const WCHAR dpi_key_name[] = {'S','o','f','t','w','a','r','e','\\','F','o','n','t','s',0};
     static const WCHAR dpi_value_name[] = {'L','o','g','P','i','x','e','l','s',0};
+    static const WCHAR dpi_key_name[] =
+    {
+        '\\','R','e','g','i','s','t','r','y',
+        '\\','M','a','c','h','i','n','e',
+        '\\','S','y','s','t','e','m',
+        '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
+        '\\','H','a','r','d','w','a','r','e',' ','P','r','o','f','i','l','e','s',
+        '\\','C','u','r','r','e','n','t',
+        '\\','S','o','f','t','w','a','r','e',
+        '\\','F','o','n','t','s'
+    };
     HKEY hkey;
 
-    if (!RegCreateKeyW( HKEY_CURRENT_CONFIG, dpi_key_name, &hkey ))
+    if ((hkey = reg_create_key( dpi_key_name, sizeof(dpi_key_name ))))
     {
-        RegSetValueExW( hkey, dpi_value_name, 0, REG_DWORD, (void *)&dpi, sizeof(DWORD) );
-        RegCloseKey( hkey );
+        UNICODE_STRING name;
+        RtlInitUnicodeString( &name, dpi_value_name );
+        NtSetValueKey( hkey, &name, 0, REG_DWORD, &dpi, sizeof(dpi) );
+        NtClose( hkey );
     }
 }
 
@@ -109,7 +180,7 @@ static void fetch_display_metrics(void)
 
     SERVER_START_REQ( get_window_rectangles )
     {
-        req->handle = wine_server_user_handle( GetDesktopWindow() );
+        req->handle = wine_server_user_handle( NtUserGetDesktopWindow() );
         req->relative = COORDS_CLIENT;
         if (!wine_server_call( req ))
         {
@@ -145,7 +216,7 @@ static ANDROID_PDEVICE *create_android_physdev(void)
 
     if (!device_init_done) device_init();
 
-    if (!(physdev = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physdev) ))) return NULL;
+    if (!(physdev = calloc( 1, sizeof(*physdev) ))) return NULL;
     return physdev;
 }
 
@@ -183,7 +254,7 @@ static BOOL CDECL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
  */
 static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 {
-    HeapFree( GetProcessHeap(), 0, dev );
+    free( dev );
     return TRUE;
 }
 
@@ -191,8 +262,8 @@ static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 /***********************************************************************
  *           ANDROID_ChangeDisplaySettingsEx
  */
-LONG CDECL ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
-                                            HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+                                      HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     FIXME( "(%s,%p,%p,0x%08x,%p)\n", debugstr_w( devname ), devmode, hwnd, flags, lpvoid );
     return DISP_CHANGE_SUCCESSFUL;
@@ -202,8 +273,8 @@ LONG CDECL ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
 /***********************************************************************
  *           ANDROID_UpdateDisplayDevices
  */
-void CDECL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
-                                         BOOL force, void *param )
+void ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
+                                   BOOL force, void *param )
 {
     if (force || force_display_devices_refresh)
     {
@@ -222,7 +293,7 @@ void CDECL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device
 /***********************************************************************
  *           ANDROID_EnumDisplaySettingsEx
  */
-BOOL CDECL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags)
+BOOL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags )
 {
     static const WCHAR dev_name[CCHDEVICENAME] =
         { 'W','i','n','e',' ','A','n','d','r','o','i','d',' ','d','r','i','v','e','r',0 };
@@ -261,7 +332,7 @@ BOOL CDECL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devm
 /**********************************************************************
  *           ANDROID_wine_get_wgl_driver
  */
-static struct opengl_funcs * CDECL ANDROID_wine_get_wgl_driver( UINT version )
+static struct opengl_funcs *ANDROID_wine_get_wgl_driver( UINT version )
 {
     return get_wgl_driver( version );
 }
@@ -282,6 +353,7 @@ static const struct user_driver_funcs android_drv_funcs =
     .pEnumDisplaySettingsEx = ANDROID_EnumDisplaySettingsEx,
     .pUpdateDisplayDevices = ANDROID_UpdateDisplayDevices,
     .pCreateWindow = ANDROID_CreateWindow,
+    .pDesktopWindowProc = ANDROID_DesktopWindowProc,
     .pDestroyWindow = ANDROID_DestroyWindow,
     .pMsgWaitForMultipleObjectsEx = ANDROID_MsgWaitForMultipleObjectsEx,
     .pSetCapture = ANDROID_SetCapture,
@@ -490,15 +562,21 @@ JavaVM **p_java_vm = NULL;
 jobject *p_java_object = NULL;
 unsigned short *p_java_gdt_sel = NULL;
 
-static BOOL process_attach(void)
+static NTSTATUS CDECL unix_call( enum android_funcs code, void *params );
+NTSTATUS (WINAPI *pNtWaitForMultipleObjects)( ULONG,const HANDLE*,BOOLEAN,
+                                              BOOLEAN,const LARGE_INTEGER* );
+
+static HRESULT android_init( void *arg )
 {
+    struct init_params *params = arg;
+    pthread_mutexattr_t attr;
     jclass class;
     jobject object;
     JNIEnv *jni_env;
     JavaVM *java_vm;
     void *ntdll;
 
-    if (!(ntdll = dlopen( "ntdll.so", RTLD_NOW ))) return FALSE;
+    if (!(ntdll = dlopen( "ntdll.so", RTLD_NOW ))) return STATUS_UNSUCCESSFUL;
 
     p_java_vm = dlsym( ntdll, "java_vm" );
     p_java_object = dlsym( ntdll, "java_object" );
@@ -507,6 +585,14 @@ static BOOL process_attach(void)
     object = *p_java_object;
 
     load_hardware_libs();
+
+    pthread_mutexattr_init( &attr );
+    pthread_mutexattr_settype( &attr, PTHREAD_MUTEX_RECURSIVE );
+    pthread_mutex_init( &drawable_mutex, &attr );
+    pthread_mutex_init( &win_data_mutex, &attr );
+    pthread_mutexattr_destroy( &attr );
+
+    register_window_callback = params->register_window_callback;
 
     if ((java_vm = *p_java_vm))  /* running under Java */
     {
@@ -525,19 +611,27 @@ static BOOL process_attach(void)
 #endif
     }
     __wine_set_user_driver( &android_drv_funcs, WINE_GDI_DRIVER_VERSION );
-    return TRUE;
+    pNtWaitForMultipleObjects = params->pNtWaitForMultipleObjects;
+    params->unix_call = unix_call;
+    return STATUS_SUCCESS;
 }
 
-/***********************************************************************
- *       dll initialisation routine
- */
-BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
+const unixlib_entry_t __wine_unix_call_funcs[] =
 {
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( inst );
-        return process_attach();
-    }
-    return TRUE;
+    android_create_desktop,
+    android_dispatch_ioctl,
+    android_init,
+    android_java_init,
+    android_java_uninit,
+    android_register_window,
+};
+
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+
+
+/* FIXME: Use __wine_unix_call instead */
+static NTSTATUS CDECL unix_call( enum android_funcs code, void *params )
+{
+    return __wine_unix_call_funcs[code]( params );
 }

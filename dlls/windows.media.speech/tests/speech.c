@@ -41,6 +41,7 @@
 #define AsyncStatus_Closed 4
 
 #define SPERR_WINRT_INTERNAL_ERROR 0x800455a0
+#define SPERR_WINRT_INCORRECT_FORMAT 0x80131537
 
 #define IHandler_RecognitionResult ITypedEventHandler_SpeechContinuousRecognitionSession_SpeechContinuousRecognitionResultGeneratedEventArgs
 #define IHandler_RecognitionResultVtbl ITypedEventHandler_SpeechContinuousRecognitionSession_SpeechContinuousRecognitionResultGeneratedEventArgsVtbl
@@ -331,7 +332,6 @@ struct async_inspectable_handler
 
     HANDLE event_block;
     HANDLE event_finished;
-    DWORD thread_id;
 };
 
 static inline struct async_inspectable_handler *impl_from_IAsyncOperationCompletedHandler_IInspectable( IAsyncOperationCompletedHandler_IInspectable *iface )
@@ -378,9 +378,8 @@ HRESULT WINAPI async_inspectable_handler_Invoke( IAsyncOperationCompletedHandler
                                                  AsyncStatus status )
 {
     struct async_inspectable_handler *impl = impl_from_IAsyncOperationCompletedHandler_IInspectable(iface);
-    DWORD id = GetCurrentThreadId();
+
     trace("Iface %p, sender %p, status %d.\n", iface, sender, status);
-    trace("Caller thread id %lu callback thread id %lu.\n", impl->thread_id, id);
 
     /* Signal finishing of the handler. */
     if (impl->event_finished) SetEvent(impl->event_finished);
@@ -781,18 +780,27 @@ static void test_ActivationFactory(void)
 
 static void test_SpeechSynthesizer(void)
 {
+    static const WCHAR *simple_ssml =
+    L"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
+         "Hello, how are you doing today?"
+     "</speak>";
+    static const WCHAR *simple_synth_text = L"Hello, how are you doing today?";
     static const WCHAR *speech_synthesizer_name = L"Windows.Media.SpeechSynthesis.SpeechSynthesizer";
     static const WCHAR *speech_synthesizer_name2 = L"windows.media.speechsynthesis.speechsynthesizer";
     static const WCHAR *unknown_class_name = L"Unknown.Class";
     IActivationFactory *factory = NULL, *factory2 = NULL;
+    IAsyncOperation_SpeechSynthesisStream *operation_ss_stream = NULL;
+    IVectorView_IMediaMarker *media_markers = NULL;
     IVectorView_VoiceInformation *voices = NULL;
     IInstalledVoicesStatic *voices_static = NULL;
+    ISpeechSynthesisStream *ss_stream = NULL;
     IVoiceInformation *voice;
     IInspectable *inspectable = NULL, *tmp_inspectable = NULL;
     IAgileObject *agile_object = NULL, *tmp_agile_object = NULL;
     ISpeechSynthesizer *synthesizer;
     ISpeechSynthesizer2 *synthesizer2;
     IClosable *closable;
+    struct async_inspectable_handler async_inspectable_handler;
     HMODULE hdll;
     HSTRING str, str2;
     HRESULT hr;
@@ -845,6 +853,7 @@ static void test_SpeechSynthesizer(void)
         FreeLibrary(hdll);
     }
 
+    /* Test static Synth ifaces: IActivationFactory, IInstalledVoicesStatic, etc. */
     hr = IActivationFactory_QueryInterface(factory, &IID_IInspectable, (void **)&inspectable);
     ok(hr == S_OK, "IActivationFactory_QueryInterface IID_IInspectable failed, hr %#lx\n", hr);
 
@@ -891,27 +900,125 @@ static void test_SpeechSynthesizer(void)
 
     IVectorView_VoiceInformation_Release(voices);
 
-    IInstalledVoicesStatic_Release(voices_static);
+    hr = IInstalledVoicesStatic_get_DefaultVoice(voices_static, &voice);
+    todo_wine ok(hr == S_OK, "IInstalledVoicesStatic_get_DefaultVoice failed, hr %#lx\n", hr);
 
+    if (hr == S_OK)
+    {
+        IVoiceInformation_get_Description(voice, &str2);
+        trace("SpeechSynthesizer default voice %s.\n", debugstr_hstring(str2));
+
+        WindowsDeleteString(str2);
+        ref = IVoiceInformation_Release(voice);
+        ok(ref == 0, "Got unexpected ref %lu.\n", ref);
+    }
+
+    IInstalledVoicesStatic_Release(voices_static);
     IAgileObject_Release(agile_object);
     IInspectable_Release(inspectable);
 
+    /* Test Synthesizer */
     hr = IActivationFactory_QueryInterface(factory, &IID_ISpeechSynthesizer, (void **)&synthesizer);
     ok(hr == E_NOINTERFACE, "Got unexpected hr %#lx.\n", hr);
 
     hr = RoActivateInstance(str, &inspectable);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    WindowsDeleteString(str);
 
     hr = IInspectable_QueryInterface(inspectable, &IID_ISpeechSynthesizer, (void **)&synthesizer);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Test SynthesizeTextToStreamAsync */
+    hr = WindowsCreateString(simple_synth_text, wcslen(simple_synth_text), &str);
+    ok(hr == S_OK, "WindowsCreateString failed, hr %#lx\n", hr);
+
+    hr = ISpeechSynthesizer_SynthesizeTextToStreamAsync(synthesizer, NULL, &operation_ss_stream);
+    ok(hr == S_OK, "ISpeechSynthesizer_SynthesizeTextToStreamAsync failed, hr %#lx\n", hr);
+    IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
+
+    hr = ISpeechSynthesizer_SynthesizeTextToStreamAsync(synthesizer, str, &operation_ss_stream);
+    ok(hr == S_OK, "ISpeechSynthesizer_SynthesizeTextToStreamAsync failed, hr %#lx\n", hr);
+
+    await_async_inspectable((IAsyncOperation_IInspectable *)operation_ss_stream,
+                             &async_inspectable_handler,
+                             &IID_IAsyncOperationCompletedHandler_SpeechSynthesisStream);
+    check_async_info((IInspectable *)operation_ss_stream, 2, Completed, S_OK);
+    check_interface(operation_ss_stream, &IID_IAsyncOperation_SpeechSynthesisStream, TRUE);
+    check_interface(operation_ss_stream, &IID_IAgileObject, TRUE);
+
+    hr = IAsyncOperation_SpeechSynthesisStream_GetResults(operation_ss_stream, &ss_stream);
+    ok(hr == S_OK, "IAsyncOperation_SpeechSynthesisStream_GetResults failed, hr %#lx\n", hr);
+
+    hr = ISpeechSynthesisStream_get_Markers(ss_stream, &media_markers);
+    ok(hr == S_OK, "ISpeechSynthesisStream_get_Markers failed, hr %#lx\n", hr);
+    check_interface(media_markers, &IID_IVectorView_IMediaMarker, TRUE);
+    check_interface(media_markers, &IID_IIterable_IMediaMarker, TRUE);
+    check_interface(media_markers, &IID_IAgileObject, TRUE);
+
+    ref = IVectorView_IMediaMarker_Release(media_markers);
+    ok(ref == 0, "Got unexpected ref %lu.\n", ref);
+
+    ref = ISpeechSynthesisStream_Release(ss_stream);
+    ok(ref == 0, "Got unexpected ref %lu.\n", ref);
+
+    IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
+
+    /* Test SynthesizeSsmlToStreamAsync */
+    hr = WindowsCreateString(simple_ssml, wcslen(simple_ssml), &str2);
+    ok(hr == S_OK, "WindowsCreateString failed, hr %#lx\n", hr);
+
+    hr = ISpeechSynthesizer_SynthesizeSsmlToStreamAsync(synthesizer, str2, &operation_ss_stream);
+    ok(hr == S_OK, "ISpeechSynthesizer_SynthesizeSsmlToStreamAsync failed, hr %#lx\n", hr);
+
+    await_async_inspectable((IAsyncOperation_IInspectable *)operation_ss_stream,
+                             &async_inspectable_handler,
+                             &IID_IAsyncOperationCompletedHandler_SpeechSynthesisStream);
+    check_async_info((IInspectable *)operation_ss_stream, 3, Completed, S_OK);
+    check_interface(operation_ss_stream, &IID_IAsyncOperation_SpeechSynthesisStream, TRUE);
+    check_interface(operation_ss_stream, &IID_IAgileObject, TRUE);
+
+    hr = IAsyncOperation_SpeechSynthesisStream_GetResults(operation_ss_stream, &ss_stream);
+    ok(hr == S_OK, "IAsyncOperation_SpeechSynthesisStream_GetResults failed, hr %#lx\n", hr);
+    check_interface(ss_stream, &IID_ISpeechSynthesisStream, TRUE);
+    check_interface(ss_stream, &IID_IAgileObject, TRUE);
+
+    ref = ISpeechSynthesisStream_Release(ss_stream);
+    ok(ref == 0, "Got unexpected ref %lu.\n", ref);
+
+    IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
+
+    operation_ss_stream = (void *)0xdeadbeef;
+    hr = ISpeechSynthesizer_SynthesizeSsmlToStreamAsync(synthesizer, NULL, &operation_ss_stream);
+    /* Broken on Win 8 + 8.1 */
+    ok(hr == S_OK || broken(hr == E_INVALIDARG), "ISpeechSynthesizer_SynthesizeSsmlToStreamAsync failed, hr %#lx\n", hr);
+
+    if (hr == S_OK)
+    {
+        ok(!!operation_ss_stream, "operation_ss_stream had value %p.\n", operation_ss_stream);
+        IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
+    }
+    else ok(operation_ss_stream == NULL, "operation_ss_stream had value %p.\n", operation_ss_stream);
+
+    operation_ss_stream = (void *)0xdeadbeef;
+    hr = ISpeechSynthesizer_SynthesizeSsmlToStreamAsync(synthesizer, str, &operation_ss_stream);
+    /* Broken on Win 8 + 8.1 */
+    ok(hr == S_OK || broken(hr == SPERR_WINRT_INCORRECT_FORMAT), "ISpeechSynthesizer_SynthesizeSsmlToStreamAsync failed, hr %#lx\n", hr);
+
+    if (hr == S_OK)
+    {
+        ok(!!operation_ss_stream, "operation_ss_stream had value %p.\n", operation_ss_stream);
+        IAsyncOperation_SpeechSynthesisStream_Release(operation_ss_stream);
+    }
+    else ok(operation_ss_stream == NULL, "operation_ss_stream had value %p.\n", operation_ss_stream);
+
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     hr = IInspectable_QueryInterface(inspectable, &IID_IClosable, (void **)&closable);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IInspectable_QueryInterface(inspectable, &IID_ISpeechSynthesizer2, (void **)&synthesizer2);
-    ok(hr == S_OK ||
-            broken(hr == E_NOINTERFACE), /* requires newer Windows */
-            "Got unexpected hr %#lx.\n", hr);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#lx.\n", hr); /* Requires Win10 >= 1703 */
 
     if (hr == S_OK)
     {
@@ -929,8 +1036,6 @@ static void test_SpeechSynthesizer(void)
     ok(!ref, "Got unexpected ref %lu.\n", ref);
 
     IActivationFactory_Release(factory);
-    WindowsDeleteString(str);
-
     RoUninitialize();
 }
 
@@ -1124,25 +1229,32 @@ static void test_SpeechRecognizer(void)
 
         compilation_result = (void*)0xdeadbeef;
         hr = IAsyncOperation_SpeechRecognitionCompilationResult_GetResults(operation, &compilation_result);
-        ok(hr == E_ILLEGAL_METHOD_CALL, "Got unexpected hr %#lx.\n", hr);
-        ok(compilation_result == (void*)0xdeadbeef, "Compilation result had value %p.\n", compilation_result);
+        ok(hr == E_ILLEGAL_METHOD_CALL || hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-        await_async_inspectable((IAsyncOperation_IInspectable *)operation,
-                                 &compilation_handler,
-                                 &IID_IAsyncOperationCompletedHandler_SpeechRecognitionCompilationResult);
-        check_async_info((IInspectable *)operation, 1, Completed, S_OK);
+        if (hr == E_ILLEGAL_METHOD_CALL) /* Sometimes the operation could have already finished here, */
+                                         /* if so skip waiting and getting the results a second time. */
+        {
+            ok(compilation_result == (void*)0xdeadbeef, "Compilation result had value %p.\n", compilation_result);
 
-        hr = IAsyncOperation_SpeechRecognitionCompilationResult_put_Completed(operation, NULL);
-        ok(hr == E_ILLEGAL_DELEGATE_ASSIGNMENT, "Got unexpected hr %#lx.\n", hr);
+            await_async_inspectable((IAsyncOperation_IInspectable *)operation,
+                                     &compilation_handler,
+                                     &IID_IAsyncOperationCompletedHandler_SpeechRecognitionCompilationResult);
 
-        hr = IAsyncOperation_SpeechRecognitionCompilationResult_get_Completed(operation, &handler);
-        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            hr = IAsyncOperation_SpeechRecognitionCompilationResult_put_Completed(operation, NULL);
+            ok(hr == E_ILLEGAL_DELEGATE_ASSIGNMENT, "Got unexpected hr %#lx.\n", hr);
 
-        compilation_result = (void*)0xdeadbeef;
-        hr = IAsyncOperation_SpeechRecognitionCompilationResult_GetResults(operation, &compilation_result);
-        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            hr = IAsyncOperation_SpeechRecognitionCompilationResult_get_Completed(operation, &handler);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+            compilation_result = (void*)0xdeadbeef;
+            hr = IAsyncOperation_SpeechRecognitionCompilationResult_GetResults(operation, &compilation_result);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        }
+
+        ok(compilation_result != (void*)0xdeadbeef, "Compilation result had value %p.\n", compilation_result);
         check_interface(compilation_result, &IID_IAgileObject, TRUE);
+
+        check_async_info((IInspectable *)operation, 1, Completed, S_OK);
 
         hr = ISpeechRecognitionCompilationResult_get_Status(compilation_result, &result_status);
         ok(hr == S_OK, "ISpeechRecognitionCompilationResult_get_Status failed, hr %#lx.\n", hr);
@@ -1217,7 +1329,6 @@ static void test_SpeechRecognizer(void)
         async_inspectable_handler_create_static(&compilation_handler, &IID_IAsyncOperationCompletedHandler_SpeechRecognitionCompilationResult);
         compilation_handler.event_block = CreateEventW(NULL, FALSE, FALSE, NULL);
         compilation_handler.event_finished = CreateEventW(NULL, FALSE, FALSE, NULL);
-        compilation_handler.thread_id = GetCurrentThreadId();
 
         ok(!!compilation_handler.event_block, "event_block wasn't created.\n");
         ok(!!compilation_handler.event_finished, "event_finished wasn't created.\n");

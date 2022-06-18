@@ -6398,6 +6398,7 @@ static void test_MFCreateDXSurfaceBuffer(void)
 {
     IDirect3DSurface9 *backbuffer = NULL, *surface;
     IDirect3DSwapChain9 *swapchain;
+    D3DLOCKED_RECT locked_rect;
     DWORD length, max_length;
     IDirect3DDevice9 *device;
     IMF2DBuffer2 *_2dbuffer2;
@@ -6470,9 +6471,32 @@ static void test_MFCreateDXSurfaceBuffer(void)
     ok(hr == S_OK, "Failed to get length, hr %#lx.\n", hr);
     ok(length == 2 * max_length, "Unexpected length %lu.\n", length);
 
+    hr = IDirect3DSurface9_LockRect(backbuffer, &locked_rect, NULL, 0);
+    ok(hr == S_OK, "Failed to lock back buffer, hr %#lx.\n", hr);
+
+    /* Cannot lock while the surface is locked. */
+    hr = IMFMediaBuffer_Lock(buffer, &data, NULL, &length);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DSurface9_UnlockRect(backbuffer);
+    ok(hr == S_OK, "Failed to unlock back buffer, hr %#lx.\n", hr);
+
     hr = IMFMediaBuffer_Lock(buffer, &data, NULL, &length);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(length == max_length, "Unexpected length.\n");
+    ok(length == max_length, "Unexpected length %lu instead of %lu.\n", length, max_length);
+
+    /* You can lock the surface while the media buffer is locked. */
+    hr = IDirect3DSurface9_LockRect(backbuffer, &locked_rect, NULL, 0);
+    ok(hr == S_OK, "Failed to lock back buffer, hr %#lx.\n", hr);
+
+    hr = IMFMediaBuffer_Lock(buffer, &data, NULL, &length);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaBuffer_Unlock(buffer);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DSurface9_UnlockRect(backbuffer);
+    ok(hr == S_OK, "Failed to unlock back buffer, hr %#lx.\n", hr);
 
     /* Unlock twice. */
     hr = IMFMediaBuffer_Unlock(buffer);
@@ -6502,8 +6526,22 @@ static void test_MFCreateDXSurfaceBuffer(void)
     hr = IMF2DBuffer_GetScanline0AndPitch(_2dbuffer, &data, &pitch);
     ok(hr == HRESULT_FROM_WIN32(ERROR_WAS_UNLOCKED), "Unexpected hr %#lx.\n", hr);
 
+    hr = IDirect3DSurface9_LockRect(backbuffer, &locked_rect, NULL, 0);
+    ok(hr == S_OK, "Failed to lock back buffer, hr %#lx.\n", hr);
+
+    /* Cannot lock the buffer while the surface is locked. */
+    hr = IMF2DBuffer_Lock2D(_2dbuffer, &data, &pitch);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DSurface9_UnlockRect(backbuffer);
+    ok(hr == S_OK, "Failed to unlock back buffer, hr %#lx.\n", hr);
+
     hr = IMF2DBuffer_Lock2D(_2dbuffer, &data, &pitch);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    /* Cannot lock the surface once the buffer is locked. */
+    hr = IDirect3DSurface9_LockRect(backbuffer, &locked_rect, NULL, 0);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#lx.\n", hr);
 
     hr = IMF2DBuffer_GetScanline0AndPitch(_2dbuffer, &data, &pitch);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);

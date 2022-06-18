@@ -26,13 +26,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 
 #include "config.h"
 
 #include "android.h"
-#include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -754,11 +757,12 @@ jboolean keyboard_event( JNIEnv *env, jobject obj, jint win, jint action, jint k
 /***********************************************************************
  *           ANDROID_GetKeyNameText
  */
-INT CDECL ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
+INT ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
 {
-    int scancode, vkey, len;
+    int scancode, vkey;
     const char *name;
     char key[2];
+    DWORD len;
 
     scancode = (lparam >> 16) & 0x1FF;
     vkey = scancode_to_vkey( scancode );
@@ -796,14 +800,17 @@ INT CDECL ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
         name = vkey_to_name( vkey );
     }
 
-    len = MultiByteToWideChar( CP_UTF8, 0, name, -1, buffer, size );
+    RtlUTF8ToUnicodeN( buffer, size * sizeof(WCHAR), &len, name, strlen( name ) + 1 );
+    len /= sizeof(WCHAR);
     if (len) len--;
 
     if (!len)
     {
-        static const WCHAR format[] = {'K','e','y',' ','0','x','%','0','2','x',0};
-        snprintfW( buffer, size, format, vkey );
-        len = strlenW( buffer );
+        char name[16];
+        len = sprintf( name, "Key 0x%02x", vkey );
+        len = min( len + 1, size );
+        ascii_to_unicode( buffer, name, len );
+        if (len) buffer[--len] = 0;
     }
 
     TRACE( "lparam 0x%08x -> %s\n", lparam, debugstr_w( buffer ));
@@ -814,7 +821,7 @@ INT CDECL ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
 /***********************************************************************
  *           ANDROID_MapVirtualKeyEx
  */
-UINT CDECL ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl )
+UINT ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl )
 {
     UINT ret = 0;
     const char *s;
@@ -882,7 +889,7 @@ UINT CDECL ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl )
 /***********************************************************************
  *           ANDROID_VkKeyScanEx
  */
-SHORT CDECL ANDROID_VkKeyScanEx( WCHAR ch, HKL hkl )
+SHORT ANDROID_VkKeyScanEx( WCHAR ch, HKL hkl )
 {
     SHORT ret = -1;
     if (ch < ARRAY_SIZE( char_vkey_map )) ret = char_vkey_map[ch];

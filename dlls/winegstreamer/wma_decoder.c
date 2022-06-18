@@ -56,6 +56,7 @@ struct wma_decoder
     IMFMediaType *output_type;
 
     struct wg_transform *wg_transform;
+    struct wg_sample_queue *wg_sample_queue;
 };
 
 static inline struct wma_decoder *impl_from_IUnknown(IUnknown *iface)
@@ -135,6 +136,8 @@ static ULONG WINAPI unknown_Release(IUnknown *iface)
             IMFMediaType_Release(decoder->input_type);
         if (decoder->output_type)
             IMFMediaType_Release(decoder->output_type);
+
+        wg_sample_queue_destroy(decoder->wg_sample_queue);
         free(decoder);
     }
 
@@ -534,19 +537,17 @@ static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFS
     if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info)))
         return hr;
 
-    if (FAILED(hr = mf_create_wg_sample(sample, &wg_sample)))
+    if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
         return hr;
 
     /* WMA transform uses fixed size input samples and ignores samples with invalid sizes */
     if (wg_sample->size % info.cbSize)
     {
-        mf_destroy_wg_sample(wg_sample);
+        wg_sample_release(wg_sample);
         return S_OK;
     }
 
-    hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
-    mf_destroy_wg_sample(wg_sample);
-    return hr;
+    return wg_transform_push_mf(decoder->wg_transform, wg_sample, decoder->wg_sample_queue);
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
@@ -576,23 +577,24 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
         return MF_E_TRANSFORM_NEED_MORE_INPUT;
     }
 
-    if (FAILED(hr = mf_create_wg_sample(samples[0].pSample, &wg_sample)))
+    if (FAILED(hr = wg_sample_create_mf(samples[0].pSample, &wg_sample)))
         return hr;
 
     wg_sample->size = 0;
     if (wg_sample->max_size < info.cbSize)
     {
-        mf_destroy_wg_sample(wg_sample);
+        wg_sample_release(wg_sample);
         return MF_E_BUFFERTOOSMALL;
     }
 
-    if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, wg_sample, NULL)))
+    if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, wg_sample, NULL)))
     {
         if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
             samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
+        wg_sample_queue_flush(decoder->wg_sample_queue, false);
     }
 
-    mf_destroy_wg_sample(wg_sample);
+    wg_sample_release(wg_sample);
 
     if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
     {
@@ -882,6 +884,7 @@ HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out)
     static const struct wg_format input_format = {.major_type = WG_MAJOR_TYPE_WMA};
     struct wg_transform *transform;
     struct wma_decoder *decoder;
+    HRESULT hr;
 
     TRACE("outer %p, out %p.\n", outer, out);
 
@@ -894,6 +897,12 @@ HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out)
 
     if (!(decoder = calloc(1, sizeof(*decoder))))
         return E_OUTOFMEMORY;
+
+    if (FAILED(hr = wg_sample_queue_create(&decoder->wg_sample_queue)))
+    {
+        free(decoder);
+        return hr;
+    }
 
     decoder->IUnknown_inner.lpVtbl = &unknown_vtbl;
     decoder->IMFTransform_iface.lpVtbl = &transform_vtbl;

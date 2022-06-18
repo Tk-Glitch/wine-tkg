@@ -16,9 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
 #include "d3d10_1.h"
 #include "d3dx10.h"
 #include "d3dcompiler.h"
+#include "dxhelpers.h"
 
 #include "wine/debug.h"
 
@@ -41,7 +43,7 @@ struct asyncdataloader
         } resource;
     } u;
     void *data;
-    SIZE_T size;
+    DWORD size;
 };
 
 static inline struct asyncdataloader *impl_from_ID3DX10DataLoader(ID3DX10DataLoader *iface)
@@ -73,7 +75,7 @@ static HRESULT WINAPI memorydataloader_Destroy(ID3DX10DataLoader *iface)
 
     TRACE("iface %p.\n", iface);
 
-    HeapFree(GetProcessHeap(), 0, loader);
+    free(loader);
     return S_OK;
 }
 
@@ -84,40 +86,50 @@ static const ID3DX10DataLoaderVtbl memorydataloadervtbl =
     memorydataloader_Destroy
 };
 
-static HRESULT WINAPI filedataloader_Load(ID3DX10DataLoader *iface)
+HRESULT load_file(const WCHAR *path, void **data, DWORD *size)
 {
-    struct asyncdataloader *loader = impl_from_ID3DX10DataLoader(iface);
-    DWORD size, read_len;
+    DWORD read_len;
     HANDLE file;
-    void *data;
     BOOL ret;
 
-    TRACE("iface %p.\n", iface);
-
-    /* Always buffer file contents, even if Load() was already called. */
-    file = CreateFileW(loader->u.file.path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
             NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE)
         return D3D10_ERROR_FILE_NOT_FOUND;
 
-    size = GetFileSize(file, NULL);
-    data = HeapAlloc(GetProcessHeap(), 0, size);
-    if (!data)
+    *size = GetFileSize(file, NULL);
+    *data = malloc(*size);
+    if (!*data)
     {
         CloseHandle(file);
         return E_OUTOFMEMORY;
     }
 
-    ret = ReadFile(file, data, size, &read_len, NULL);
+    ret = ReadFile(file, *data, *size, &read_len, NULL);
     CloseHandle(file);
-    if (!ret)
+    if (!ret || read_len != *size)
     {
         WARN("Failed to read file contents.\n");
-        HeapFree(GetProcessHeap(), 0, data);
+        free(*data);
         return E_FAIL;
     }
+    return S_OK;
+}
 
-    HeapFree(GetProcessHeap(), 0, loader->data);
+static HRESULT WINAPI filedataloader_Load(ID3DX10DataLoader *iface)
+{
+    struct asyncdataloader *loader = impl_from_ID3DX10DataLoader(iface);
+    void *data;
+    DWORD size;
+    HRESULT hr;
+
+    TRACE("iface %p.\n", iface);
+
+    /* Always buffer file contents, even if Load() was already called. */
+    if (FAILED((hr = load_file(loader->u.file.path, &data, &size))))
+        return hr;
+
+    free(loader->data);
     loader->data = data;
     loader->size = size;
 
@@ -145,9 +157,9 @@ static HRESULT WINAPI filedataloader_Destroy(ID3DX10DataLoader *iface)
 
     TRACE("iface %p.\n", iface);
 
-    HeapFree(GetProcessHeap(), 0, loader->u.file.path);
-    HeapFree(GetProcessHeap(), 0, loader->data);
-    HeapFree(GetProcessHeap(), 0, loader);
+    free(loader->u.file.path);
+    free(loader->data);
+    free(loader);
 
     return S_OK;
 }
@@ -159,27 +171,74 @@ static const ID3DX10DataLoaderVtbl filedataloadervtbl =
     filedataloader_Destroy
 };
 
+static HRESULT load_resource_initA(HMODULE module, const char *resource, HRSRC *rsrc)
+{
+    if (!(*rsrc = FindResourceA(module, resource, (const char *)RT_RCDATA)))
+        *rsrc = FindResourceA(module, resource, (const char *)RT_BITMAP);
+    if (!*rsrc)
+    {
+        WARN("Failed to find resource.\n");
+        return D3DX10_ERR_INVALID_DATA;
+    }
+    return S_OK;
+}
+
+static HRESULT load_resource_initW(HMODULE module, const WCHAR *resource, HRSRC *rsrc)
+{
+    if (!(*rsrc = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
+        *rsrc = FindResourceW(module, resource, (const WCHAR *)RT_BITMAP);
+    if (!*rsrc)
+    {
+        WARN("Failed to find resource.\n");
+        return D3DX10_ERR_INVALID_DATA;
+    }
+    return S_OK;
+}
+
+static HRESULT load_resource(HMODULE module, HRSRC rsrc, void **data, DWORD *size)
+{
+    HGLOBAL hglobal;
+
+    if (!(*size = SizeofResource(module, rsrc)))
+        return D3DX10_ERR_INVALID_DATA;
+    if (!(hglobal = LoadResource(module, rsrc)))
+        return D3DX10_ERR_INVALID_DATA;
+    if (!(*data = LockResource(hglobal)))
+        return D3DX10_ERR_INVALID_DATA;
+    return S_OK;
+}
+
+HRESULT load_resourceA(HMODULE module, const char *resource, void **data, DWORD *size)
+{
+    HRESULT hr;
+    HRSRC rsrc;
+
+    if (FAILED((hr = load_resource_initA(module, resource, &rsrc))))
+        return hr;
+    return load_resource(module, rsrc, data, size);
+}
+
+HRESULT load_resourceW(HMODULE module, const WCHAR *resource, void **data, DWORD *size)
+{
+    HRESULT hr;
+    HRSRC rsrc;
+
+    if ((FAILED(hr = load_resource_initW(module, resource, &rsrc))))
+        return hr;
+    return load_resource(module, rsrc, data, size);
+}
+
 static HRESULT WINAPI resourcedataloader_Load(ID3DX10DataLoader *iface)
 {
     struct asyncdataloader *loader = impl_from_ID3DX10DataLoader(iface);
-    HGLOBAL hglobal;
 
     TRACE("iface %p.\n", iface);
 
     if (loader->data)
         return S_OK;
 
-    hglobal = LoadResource(loader->u.resource.module, loader->u.resource.rsrc);
-    if (!hglobal)
-    {
-        WARN("Failed to load resource.\n");
-        return E_FAIL;
-    }
-
-    loader->data = LockResource(hglobal);
-    loader->size = SizeofResource(loader->u.resource.module, loader->u.resource.rsrc);
-
-    return S_OK;
+    return load_resource(loader->u.resource.module, loader->u.resource.rsrc,
+            &loader->data, &loader->size);
 }
 
 static HRESULT WINAPI resourcedataloader_Decompress(ID3DX10DataLoader *iface, void **data, SIZE_T *size)
@@ -203,7 +262,7 @@ static HRESULT WINAPI resourcedataloader_Destroy(ID3DX10DataLoader *iface)
 
     TRACE("iface %p.\n", iface);
 
-    HeapFree(GetProcessHeap(), 0, loader);
+    free(loader);
 
     return S_OK;
 }
@@ -213,6 +272,108 @@ static const ID3DX10DataLoaderVtbl resourcedataloadervtbl =
     resourcedataloader_Load,
     resourcedataloader_Decompress,
     resourcedataloader_Destroy
+};
+
+struct texture_info_processor
+{
+    ID3DX10DataProcessor ID3DX10DataProcessor_iface;
+    D3DX10_IMAGE_INFO *info;
+};
+
+static inline struct texture_info_processor *impl_from_ID3DX10DataProcessor(ID3DX10DataProcessor *iface)
+{
+    return CONTAINING_RECORD(iface, struct texture_info_processor, ID3DX10DataProcessor_iface);
+}
+
+static HRESULT WINAPI texture_info_processor_Process(ID3DX10DataProcessor *iface, void *data, SIZE_T size)
+{
+    struct texture_info_processor *processor = impl_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p, data %p, size %Iu.\n", iface, data, size);
+    return get_image_info(data, size, processor->info);
+}
+
+static HRESULT WINAPI texture_info_processor_CreateDeviceObject(ID3DX10DataProcessor *iface, void **object)
+{
+    TRACE("iface %p, object %p.\n", iface, object);
+    return S_OK;
+}
+
+static HRESULT WINAPI texture_info_processor_Destroy(ID3DX10DataProcessor *iface)
+{
+    struct texture_info_processor *processor = impl_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    free(processor);
+    return S_OK;
+}
+
+static ID3DX10DataProcessorVtbl texture_info_processor_vtbl =
+{
+    texture_info_processor_Process,
+    texture_info_processor_CreateDeviceObject,
+    texture_info_processor_Destroy
+};
+
+struct texture_processor
+{
+    ID3DX10DataProcessor ID3DX10DataProcessor_iface;
+    ID3D10Device *device;
+    D3DX10_IMAGE_LOAD_INFO load_info;
+    D3D10_SUBRESOURCE_DATA *resource_data;
+};
+
+static inline struct texture_processor *texture_processor_from_ID3DX10DataProcessor(ID3DX10DataProcessor *iface)
+{
+    return CONTAINING_RECORD(iface, struct texture_processor, ID3DX10DataProcessor_iface);
+}
+
+static HRESULT WINAPI texture_processor_Process(ID3DX10DataProcessor *iface, void *data, SIZE_T size)
+{
+    struct texture_processor *processor = texture_processor_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p, data %p, size %Iu.\n", iface, data, size);
+
+    if (processor->resource_data)
+    {
+        WARN("Called multiple times.\n");
+        free(processor->resource_data);
+        processor->resource_data = NULL;
+    }
+    return load_texture_data(data, size, &processor->load_info, &processor->resource_data);
+}
+
+static HRESULT WINAPI texture_processor_CreateDeviceObject(ID3DX10DataProcessor *iface, void **object)
+{
+    struct texture_processor *processor = texture_processor_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p, object %p.\n", iface, object);
+
+    if (!processor->resource_data)
+        return E_FAIL;
+
+    return create_d3d_texture(processor->device, &processor->load_info,
+            processor->resource_data, (ID3D10Resource **)object);
+}
+
+static HRESULT WINAPI texture_processor_Destroy(ID3DX10DataProcessor *iface)
+{
+    struct texture_processor *processor = texture_processor_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    ID3D10Device_Release(processor->device);
+    free(processor->resource_data);
+    free(processor);
+    return S_OK;
+}
+
+static ID3DX10DataProcessorVtbl texture_processor_vtbl =
+{
+    texture_processor_Process,
+    texture_processor_CreateDeviceObject,
+    texture_processor_Destroy
 };
 
 HRESULT WINAPI D3DX10CompileFromMemory(const char *data, SIZE_T data_size, const char *filename,
@@ -266,7 +427,7 @@ HRESULT WINAPI D3DX10CreateAsyncMemoryLoader(const void *data, SIZE_T data_size,
     if (!data || !loader)
         return E_FAIL;
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
@@ -291,12 +452,12 @@ HRESULT WINAPI D3DX10CreateAsyncFileLoaderA(const char *filename, ID3DX10DataLoa
         return E_FAIL;
 
     len = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-    filename_w = HeapAlloc(GetProcessHeap(), 0, len * sizeof(*filename_w));
+    filename_w = malloc(len * sizeof(*filename_w));
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filename_w, len);
 
     hr = D3DX10CreateAsyncFileLoaderW(filename_w, loader);
 
-    HeapFree(GetProcessHeap(), 0, filename_w);
+    free(filename_w);
 
     return hr;
 }
@@ -310,15 +471,15 @@ HRESULT WINAPI D3DX10CreateAsyncFileLoaderW(const WCHAR *filename, ID3DX10DataLo
     if (!filename || !loader)
         return E_FAIL;
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
     object->ID3DX10DataLoader_iface.lpVtbl = &filedataloadervtbl;
-    object->u.file.path = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(filename) + 1) * sizeof(WCHAR));
+    object->u.file.path = malloc((lstrlenW(filename) + 1) * sizeof(WCHAR));
     if (!object->u.file.path)
     {
-        HeapFree(GetProcessHeap(), 0, object);
+        free(object);
         return E_OUTOFMEMORY;
     }
     lstrcpyW(object->u.file.path, filename);
@@ -334,23 +495,21 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderA(HMODULE module, const char *reso
 {
     struct asyncdataloader *object;
     HRSRC rsrc;
+    HRESULT hr;
 
     TRACE("module %p, resource %s, loader %p.\n", module, debugstr_a(resource), loader);
 
     if (!loader)
         return E_FAIL;
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
-    if (!(rsrc = FindResourceA(module, resource, (const char *)RT_RCDATA)))
-        rsrc = FindResourceA(module, resource, (const char *)RT_BITMAP);
-    if (!rsrc)
+    if (FAILED((hr = load_resource_initA(module, resource, &rsrc))))
     {
-        WARN("Failed to find resource.\n");
-        HeapFree(GetProcessHeap(), 0, object);
-        return D3DX10_ERR_INVALID_DATA;
+        free(object);
+        return hr;
     }
 
     object->ID3DX10DataLoader_iface.lpVtbl = &resourcedataloadervtbl;
@@ -368,23 +527,21 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
 {
     struct asyncdataloader *object;
     HRSRC rsrc;
+    HRESULT hr;
 
     TRACE("module %p, resource %s, loader %p.\n", module, debugstr_w(resource), loader);
 
     if (!loader)
         return E_FAIL;
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
-    if (!(rsrc = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
-        rsrc = FindResourceW(module, resource, (const WCHAR *)RT_BITMAP);
-    if (!rsrc)
+    if (FAILED((hr = load_resource_initW(module, resource, &rsrc))))
     {
-        WARN("Failed to find resource.\n");
-        HeapFree(GetProcessHeap(), 0, object);
-        return D3DX10_ERR_INVALID_DATA;
+        free(object);
+        return hr;
     }
 
     object->ID3DX10DataLoader_iface.lpVtbl = &resourcedataloadervtbl;
@@ -400,8 +557,45 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
 
 HRESULT WINAPI D3DX10CreateAsyncTextureInfoProcessor(D3DX10_IMAGE_INFO *info, ID3DX10DataProcessor **processor)
 {
-    FIXME("info %p, processor %p stub!\n", info, processor);
-    return E_NOTIMPL;
+    struct texture_info_processor *object;
+
+    TRACE("info %p, processor %p.\n", info, processor);
+
+    if (!processor)
+        return E_INVALIDARG;
+
+    object = malloc(sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    object->ID3DX10DataProcessor_iface.lpVtbl = &texture_info_processor_vtbl;
+    object->info = info;
+
+    *processor = &object->ID3DX10DataProcessor_iface;
+    return S_OK;
+}
+
+HRESULT WINAPI D3DX10CreateAsyncTextureProcessor(ID3D10Device *device,
+        D3DX10_IMAGE_LOAD_INFO *load_info, ID3DX10DataProcessor **processor)
+{
+    struct texture_processor *object;
+
+    TRACE("device %p, load_info %p, processor %p.\n", device, load_info, processor);
+
+    if (!device || !processor)
+        return E_INVALIDARG;
+
+    object = calloc(1, sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    object->ID3DX10DataProcessor_iface.lpVtbl = &texture_processor_vtbl;
+    object->device = device;
+    ID3D10Device_AddRef(device);
+    init_load_info(load_info, &object->load_info);
+
+    *processor = &object->ID3DX10DataProcessor_iface;
+    return S_OK;
 }
 
 HRESULT WINAPI D3DX10PreprocessShaderFromMemory(const char *data, SIZE_T data_size, const char *filename,

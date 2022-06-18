@@ -1199,9 +1199,9 @@ void secondarybuffer_destroy(IDirectSoundBufferImpl *This)
 
     free_eax_buffer(This);
 
-    HeapFree(GetProcessHeap(), 0, This);
-
     TRACE("(%p) released\n", This);
+
+    HeapFree(GetProcessHeap(), 0, This);
 }
 
 BOOL secondarybuffer_is_audible(IDirectSoundBufferImpl *This)

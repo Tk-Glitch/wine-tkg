@@ -30,26 +30,18 @@
 #include "winnls.h"
 #include "winreg.h"
 #include "winuser.h"
-#include "setupapi.h"
+#include "ddk/hidclass.h"
 #include "wine/debug.h"
 #include "wine/server.h"
 #include "wine/hid.h"
 
 #include "user_private.h"
 
-#include "initguid.h"
-#include "ddk/hidclass.h"
-#include "devpkey.h"
-#include "ntddmou.h"
-#include "ntddkbd.h"
-
 WINE_DEFAULT_DEBUG_CHANNEL(rawinput);
-
-DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
 
 struct device
 {
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
+    WCHAR *path;
     HANDLE file;
     HANDLE handle;
     RID_DEVICE_INFO info;
@@ -95,55 +87,67 @@ static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int 
     return TRUE;
 }
 
-static struct device *add_device( HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface, DWORD type )
+static ULONG query_reg_value( HKEY hkey, const WCHAR *name,
+                              KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size )
 {
+    unsigned int name_size = name ? lstrlenW( name ) * sizeof(WCHAR) : 0;
+    UNICODE_STRING nameW = { name_size, name_size, (WCHAR *)name };
+
+    if (NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation,
+                         info, size, &size ))
+        return 0;
+
+    return size - FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data);
+}
+
+static struct device *add_device( HKEY key, DWORD type )
+{
+    static const WCHAR symbolic_linkW[] = {'S','y','m','b','o','l','i','c','L','i','n','k',0};
+    char value_buffer[4096];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (KEY_VALUE_PARTIAL_INFORMATION *)value_buffer;
     static const RID_DEVICE_INFO_KEYBOARD keyboard_info = {0, 0, 1, 12, 3, 101};
     static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
     struct hid_preparsed_data *preparsed = NULL;
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
     HID_COLLECTION_INFORMATION hid_info;
     struct device *device = NULL;
     RID_DEVICE_INFO info;
     IO_STATUS_BLOCK io;
+    WCHAR *path, *pos;
     NTSTATUS status;
+    unsigned int i;
     UINT32 handle;
-    DWORD i, size;
     HANDLE file;
-    WCHAR *pos;
 
-    SetupDiGetDeviceInterfaceDetailW(set, iface, NULL, 0, &size, &device_data);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+    if (!query_reg_value( key, symbolic_linkW, value, sizeof(value_buffer) ))
     {
-        ERR("Failed to get device path, error %#lx.\n", GetLastError());
-        return FALSE;
-    }
-
-    if (!SetupDiGetDevicePropertyW(set, &device_data, &DEVPROPKEY_HID_HANDLE, &type, (BYTE *)&handle, sizeof(handle), NULL, 0) ||
-        type != DEVPROP_TYPE_UINT32)
-    {
-        ERR("Failed to get device handle, error %#lx.\n", GetLastError());
+        ERR( "failed to get symbolic link value\n" );
         return NULL;
     }
 
-    if (!(detail = malloc(size)))
-    {
-        ERR("Failed to allocate memory.\n");
-        return FALSE;
-    }
-    detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
-    SetupDiGetDeviceInterfaceDetailW(set, iface, detail, size, NULL, NULL);
+    if (!(path = malloc( value->DataLength + sizeof(WCHAR) )))
+        return NULL;
+    memcpy( path, value->Data, value->DataLength );
+    path[value->DataLength / sizeof(WCHAR)] = 0;
 
     /* upper case everything but the GUID */
-    for (pos = detail->DevicePath; *pos && *pos != '{'; pos++) *pos = towupper(*pos);
+    for (pos = path; *pos && *pos != '{'; pos++) *pos = towupper(*pos);
 
-    file = CreateFileW(detail->DevicePath, GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
+    file = CreateFileW( path, GENERIC_READ | GENERIC_WRITE,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
     if (file == INVALID_HANDLE_VALUE)
     {
-        ERR("Failed to open device file %s, error %lu.\n", debugstr_w(detail->DevicePath), GetLastError());
-        free(detail);
+        ERR( "Failed to open device file %s, error %lu.\n", debugstr_w(path), GetLastError() );
+        free( path );
         return NULL;
+    }
+
+    status = NtDeviceIoControlFile( file, NULL, NULL, NULL, &io,
+                                    IOCTL_HID_GET_WINE_RAWINPUT_HANDLE,
+                                    NULL, 0, &handle, sizeof(handle) );
+    if (status)
+    {
+        ERR( "Failed to get raw input handle, status %#lx.\n", status );
+        goto fail;
     }
 
     memset( &info, 0, sizeof(info) );
@@ -200,16 +204,16 @@ static struct device *add_device( HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface,
 
     if (device)
     {
-        TRACE("Updating device %x / %s.\n", handle, debugstr_w(detail->DevicePath));
+        TRACE( "Updating device %#x / %s.\n", handle, debugstr_w(path) );
         free(device->data);
         CloseHandle(device->file);
-        free(device->detail);
+        free( device->path );
     }
     else if (array_reserve((void **)&rawinput_devices, &rawinput_devices_max,
                            rawinput_devices_count + 1, sizeof(*rawinput_devices)))
     {
         device = &rawinput_devices[rawinput_devices_count++];
-        TRACE("Adding device %x / %s.\n", handle, debugstr_w(detail->DevicePath));
+        TRACE( "Adding device %#x / %s.\n", handle, debugstr_w(path) );
     }
     else
     {
@@ -217,7 +221,7 @@ static struct device *add_device( HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface,
         goto fail;
     }
 
-    device->detail = detail;
+    device->path = path;
     device->file = file;
     device->handle = ULongToHandle(handle);
     device->info = info;
@@ -228,22 +232,69 @@ static struct device *add_device( HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface,
 fail:
     free( preparsed );
     CloseHandle( file );
-    free( detail );
+    free( path );
     return NULL;
 }
 
-static void enumerate_devices( DWORD type, const GUID *guid )
+static HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
 {
-    SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
-    HDEVINFO set;
-    DWORD idx;
+    UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
+    OBJECT_ATTRIBUTES attr;
+    HANDLE ret;
 
-    set = SetupDiGetClassDevsW( guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
 
-    for (idx = 0; SetupDiEnumDeviceInterfaces( set, NULL, &GUID_DEVINTERFACE_HID, idx, &iface); ++idx )
-        add_device( set, &iface, type );
+    if (NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 )) return 0;
+    return ret;
+}
 
-    SetupDiDestroyDeviceInfoList( set );
+static const WCHAR device_classesW[] = L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\DeviceClasses\\";
+static const WCHAR guid_devinterface_hidW[] = L"{4d1e55b2-f16f-11cf-88cb-001111000030}";
+static const WCHAR guid_devinterface_keyboardW[] = L"{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
+static const WCHAR guid_devinterface_mouseW[] = L"{378de44c-56ef-11d1-bc8c-00a0c91405dd}";
+
+static void enumerate_devices( DWORD type, const WCHAR *class )
+{
+    WCHAR buffer[1024];
+    KEY_NODE_INFORMATION *subkey_info = (void *)buffer;
+    HKEY class_key, device_key, iface_key;
+    unsigned int i, j;
+    DWORD size;
+
+    wcscpy( buffer, device_classesW );
+    wcscat( buffer, class );
+    if (!(class_key = reg_open_key( NULL, buffer, wcslen( buffer ) * sizeof(WCHAR) )))
+        return;
+
+    for (i = 0; !NtEnumerateKey( class_key, i, KeyNodeInformation, buffer, sizeof(buffer), &size ); ++i)
+    {
+        if (!(device_key = reg_open_key( class_key, subkey_info->Name, subkey_info->NameLength )))
+        {
+            ERR( "failed to open %s\n", debugstr_wn(subkey_info->Name, subkey_info->NameLength / sizeof(WCHAR)) );
+            continue;
+        }
+
+        for (j = 0; !NtEnumerateKey( device_key, j, KeyNodeInformation, buffer, sizeof(buffer), &size ); ++j)
+        {
+            if (!(iface_key = reg_open_key( device_key, subkey_info->Name, subkey_info->NameLength )))
+            {
+                ERR( "failed to open %s\n", debugstr_wn(subkey_info->Name, subkey_info->NameLength / sizeof(WCHAR)) );
+                continue;
+            }
+
+            add_device( iface_key, type );
+            NtClose( iface_key );
+        }
+
+        NtClose( device_key );
+    }
+
+    NtClose( class_key );
 }
 
 void rawinput_update_device_list(void)
@@ -259,13 +310,13 @@ void rawinput_update_device_list(void)
     {
         free(rawinput_devices[idx].data);
         CloseHandle(rawinput_devices[idx].file);
-        free(rawinput_devices[idx].detail);
+        free( rawinput_devices[idx].path );
     }
     rawinput_devices_count = 0;
 
-    enumerate_devices( RIM_TYPEHID, &GUID_DEVINTERFACE_HID );
-    enumerate_devices( RIM_TYPEMOUSE, &GUID_DEVINTERFACE_MOUSE );
-    enumerate_devices( RIM_TYPEKEYBOARD, &GUID_DEVINTERFACE_KEYBOARD );
+    enumerate_devices( RIM_TYPEHID, guid_devinterface_hidW );
+    enumerate_devices( RIM_TYPEMOUSE, guid_devinterface_mouseW );
+    enumerate_devices( RIM_TYPEKEYBOARD, guid_devinterface_keyboardW );
 
     LeaveCriticalSection(&rawinput_devices_cs);
 }
@@ -765,8 +816,8 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE handle, UINT command, void *data, UINT
     switch (command)
     {
     case RIDI_DEVICENAME:
-        if ((len = wcslen(device->detail->DevicePath) + 1) <= data_len && data)
-            memcpy(data, device->detail->DevicePath, len * sizeof(WCHAR));
+        if ((len = wcslen( device->path ) + 1) <= data_len && data)
+            memcpy( data, device->path, len * sizeof(WCHAR) );
         *data_size = len;
         break;
 

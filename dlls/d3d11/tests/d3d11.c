@@ -2499,6 +2499,63 @@ static void test_create_texture1d(void)
     ok(!refcount, "Device has %lu references left.\n", refcount);
 }
 
+#define test_dxgi_resource(a) test_dxgi_resource_(__LINE__, a)
+static void test_dxgi_resource_(unsigned int line, void *iface)
+{
+    IDXGIResource *resource, *resource2;
+    IDXGISurface *surface, *surface2;
+    IUnknown *object = iface, *unk;
+    DWORD data;
+    HRESULT hr;
+    UINT size;
+
+    hr = IUnknown_QueryInterface(object, &IID_IDXGIResource, (void **)&resource);
+    ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (FAILED(hr)) return;
+
+    if (SUCCEEDED(IUnknown_QueryInterface(object, &IID_IDXGISurface, (void **)&surface)))
+    {
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIDeviceSubObject, (void **)&unk);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)((IUnknown *)resource == unk, "Unexpected interface pointer.\n");
+        IUnknown_Release(unk);
+
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIObject, (void **)&unk);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)((IUnknown *)resource == unk, "Unexpected interface pointer.\n");
+        IUnknown_Release(unk);
+
+        hr = IDXGISurface_QueryInterface(surface, &IID_IDXGIResource, (void **)&resource2);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)(resource2 == resource, "Unexpected resource pointer.\n");
+        IDXGIResource_Release(resource2);
+
+        hr = IDXGIResource_QueryInterface(resource, &IID_IDXGISurface, (void **)&surface2);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)(surface2 == surface, "Unexpected surface pointer.\n");
+        IDXGISurface_Release(surface2);
+
+        hr = IDXGISurface_GetParent(surface, &IID_IDXGIResource, (void **)&resource2);
+        ok_(__FILE__, line)(hr == E_NOINTERFACE, "Got unexpected hr %#lx.\n", hr);
+        hr = IDXGIResource_GetParent(resource, &IID_IDXGISurface, (void **)&surface2);
+        ok_(__FILE__, line)(hr == E_NOINTERFACE, "Got unexpected hr %#lx.\n", hr);
+
+        data = 123;
+        hr = IDXGIResource_SetPrivateData(resource, &IID_IUnknown, sizeof(data), &data);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        size = sizeof(data);
+        data = 0;
+        hr = IDXGISurface_GetPrivateData(surface, &IID_IUnknown, &size, &data);
+        ok_(__FILE__, line)(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok_(__FILE__, line)(data == 123, "Unexpected data %#lx.\n", data);
+
+        IDXGISurface_Release(surface);
+    }
+
+    IDXGIResource_Release(resource);
+}
+
 static void test_texture1d_interfaces(void)
 {
     ID3D10Texture1D *d3d10_texture;
@@ -2548,7 +2605,7 @@ static void test_texture1d_interfaces(void)
     }
 
     desc.Width = 512;
-    desc.MipLevels = 0;
+    desc.MipLevels = 1;
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.Usage = D3D11_USAGE_DEFAULT;
@@ -2558,7 +2615,15 @@ static void test_texture1d_interfaces(void)
 
     hr = ID3D11Device_CreateTexture1D(device, &desc, NULL, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    test_dxgi_resource(texture);
+    ID3D11Texture1D_Release(texture);
+
+    desc.MipLevels = 0;
+    hr = ID3D11Device_CreateTexture1D(device, &desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    test_dxgi_resource(texture);
     check_interface(texture, &IID_IDXGISurface, FALSE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
     hr = check_interface(texture, &IID_ID3D10Texture1D, TRUE, TRUE); /* Not available on all Windows versions. */
     ID3D11Texture1D_Release(texture);
     if (FAILED(hr))
@@ -2934,7 +2999,7 @@ static void test_texture2d_interfaces(void)
 
     desc.Width = 512;
     desc.Height = 512;
-    desc.MipLevels = 0;
+    desc.MipLevels = 1;
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
@@ -2946,7 +3011,17 @@ static void test_texture2d_interfaces(void)
 
     hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_interface(texture, &IID_IDXGISurface, TRUE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
+    test_dxgi_resource(texture);
+    ID3D11Texture2D_Release(texture);
+
+    desc.MipLevels = 0;
+    hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_interface(texture, &IID_IDXGISurface, FALSE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
+    test_dxgi_resource(texture);
     hr = check_interface(texture, &IID_ID3D10Texture2D, TRUE, TRUE); /* Not available on all Windows versions. */
     ID3D11Texture2D_Release(texture);
     if (FAILED(hr))
@@ -3211,6 +3286,8 @@ static void test_texture3d_interfaces(void)
     hr = ID3D11Device_CreateTexture3D(device, &desc, NULL, &texture);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_interface(texture, &IID_IDXGISurface, FALSE, FALSE);
+    check_interface(texture, &IID_IDXGIResource, TRUE, FALSE);
+    test_dxgi_resource(texture);
     hr = check_interface(texture, &IID_ID3D10Texture3D, TRUE, TRUE); /* Not available on all Windows versions. */
     ID3D11Texture3D_Release(texture);
     if (FAILED(hr))
@@ -3525,6 +3602,8 @@ static void test_create_buffer(void)
                 win_skip("Failed to create a buffer, skipping test %u.\n", i);
             continue;
         }
+
+        check_interface(buffer, &IID_IDXGIResource, TRUE, FALSE);
 
         if (!(desc.MiscFlags & D3D11_RESOURCE_MISC_BUFFER_STRUCTURED))
             desc.StructureByteStride = 0;
@@ -14934,8 +15013,14 @@ static void test_resource_map(void)
     hr = ID3D11Device_CreateBuffer(device, &buffer_desc, NULL, &buffer);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    mapped_subresource.pData = (void *)0xdeadbeef;
+    mapped_subresource.RowPitch = 0xabab;
+    mapped_subresource.DepthPitch = 0xcdcd;
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)buffer, 1, D3D11_MAP_READ, 0, &mapped_subresource);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!mapped_subresource.pData, "Unexpected pointer %p.\n", mapped_subresource.pData);
+    ok(mapped_subresource.RowPitch == 0xabab, "Unexpected row pitch value %u.\n", mapped_subresource.RowPitch);
+    ok(mapped_subresource.DepthPitch == 0xcdcd, "Unexpected depth pitch value %u.\n", mapped_subresource.DepthPitch);
 
     memset(&mapped_subresource, 0, sizeof(mapped_subresource));
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)buffer, 0, D3D11_MAP_WRITE, 0, &mapped_subresource);
@@ -14972,8 +15057,14 @@ static void test_resource_map(void)
     hr = ID3D11Device_CreateTexture2D(device, &texture2d_desc, NULL, &texture2d);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    mapped_subresource.pData = (void *)0xdeadbeef;
+    mapped_subresource.RowPitch = 0xabab;
+    mapped_subresource.DepthPitch = 0xcdcd;
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)texture2d, 1, D3D11_MAP_READ, 0, &mapped_subresource);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!mapped_subresource.pData, "Unexpected pointer %p.\n", mapped_subresource.pData);
+    ok(mapped_subresource.RowPitch == 0xabab, "Unexpected row pitch value %u.\n", mapped_subresource.RowPitch);
+    ok(mapped_subresource.DepthPitch == 0xcdcd, "Unexpected depth pitch value %u.\n", mapped_subresource.DepthPitch);
 
     memset(&mapped_subresource, 0, sizeof(mapped_subresource));
     hr = ID3D11DeviceContext_Map(context, (ID3D11Resource *)texture2d, 0, D3D11_MAP_WRITE, 0, &mapped_subresource);
@@ -33285,8 +33376,14 @@ static void test_deferred_context_map(void)
     hr = ID3D11Device_CreateBuffer(device, &buffer_desc, &resource_data, &buffer2);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    map_desc.pData = (void *)0xdeadbeef;
+    map_desc.RowPitch = 0xabab;
+    map_desc.DepthPitch = 0xcdcd;
     hr = ID3D11DeviceContext_Map(deferred, (ID3D11Resource *)buffer, 0, D3D11_MAP_READ, 0, &map_desc);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(!map_desc.pData, "Unexpected pointer %p.\n", map_desc.pData);
+    ok(map_desc.RowPitch == 0xabab, "Unexpected row pitch value %u.\n", map_desc.RowPitch);
+    ok(map_desc.DepthPitch == 0xcdcd, "Unexpected depth pitch value %u.\n", map_desc.DepthPitch);
 
     hr = ID3D11DeviceContext_Map(deferred, (ID3D11Resource *)buffer, 0, D3D11_MAP_READ_WRITE, 0, &map_desc);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);

@@ -202,6 +202,11 @@ static void tcp_socketpair(SOCKET *src, SOCKET *dst)
     tcp_socketpair_flags(src, dst, WSA_FLAG_OVERLAPPED);
 }
 
+static void WINAPI apc_func(ULONG_PTR apc_count)
+{
+    ++*(unsigned int *)apc_count;
+}
+
 /* Set the linger timeout to zero and close the socket. This will trigger an
  * RST on the connection on Windows as well as on Unix systems. */
 static void close_with_rst(SOCKET s)
@@ -3613,6 +3618,7 @@ static void test_select(void)
     select_thread_params thread_params;
     HANDLE thread_handle;
     DWORD ticks, id, old_protect;
+    unsigned int apc_count;
     unsigned int maxfd, i;
     char *page_pair;
 
@@ -3716,14 +3722,24 @@ static void test_select(void)
 
     FD_ZERO(&readfds);
     FD_SET(fdRead, &readfds);
+    apc_count = 0;
+    ret = QueueUserAPC(apc_func, GetCurrentThread(), (ULONG_PTR)&apc_count);
+    ok(ret, "QueueUserAPC returned %d\n", ret);
     ret = select(fdRead+1, &readfds, NULL, NULL, &select_timeout);
     ok(!ret, "select returned %d\n", ret);
+    ok(apc_count == 1, "got apc_count %d.\n", apc_count);
 
     FD_ZERO(&writefds);
     FD_SET(fdWrite, &writefds);
+    apc_count = 0;
+    ret = QueueUserAPC(apc_func, GetCurrentThread(), (ULONG_PTR)&apc_count);
+    ok(ret, "QueueUserAPC returned %d\n", ret);
     ret = select(fdWrite+1, NULL, &writefds, NULL, &select_timeout);
     ok(ret == 1, "select returned %d\n", ret);
     ok(FD_ISSET(fdWrite, &writefds), "fdWrite socket is not in the set\n");
+    ok(!apc_count, "APC was called\n");
+    SleepEx(0, TRUE);
+    ok(apc_count == 1, "got apc_count %d.\n", apc_count);
 
     /* select the same socket twice */
     writefds.fd_count = 2;
@@ -6737,21 +6753,58 @@ static void test_WSASendTo(void)
     closesocket(s);
 }
 
+struct recv_thread_apc_param
+{
+    SOCKET sock;
+    unsigned int apc_count;
+};
+
+static void WINAPI recv_thread_apc_func(ULONG_PTR param)
+{
+    struct recv_thread_apc_param *p = (struct recv_thread_apc_param *)param;
+    int ret;
+
+    ++p->apc_count;
+
+    ret = send(p->sock, "test", 4, 0);
+    ok(ret == 4, "got %d.\n", ret);
+}
+
+struct recv_thread_param
+{
+    SOCKET sock;
+    BOOL overlapped;
+};
+
 static DWORD WINAPI recv_thread(LPVOID arg)
 {
-    SOCKET sock = *(SOCKET *)arg;
+    struct recv_thread_param *p = arg;
+    SOCKET sock = p->sock;
     char buffer[32];
     WSABUF wsa;
     WSAOVERLAPPED ov;
     DWORD flags = 0;
+    DWORD len;
+    int ret;
 
     wsa.buf = buffer;
     wsa.len = sizeof(buffer);
-    ov.hEvent = WSACreateEvent();
-    WSARecv(sock, &wsa, 1, NULL, &flags, &ov, NULL);
+    if (p->overlapped)
+    {
+        ov.hEvent = WSACreateEvent();
+        WSARecv(sock, &wsa, 1, NULL, &flags, &ov, NULL);
 
-    WaitForSingleObject(ov.hEvent, 1000);
-    WSACloseEvent(ov.hEvent);
+        WaitForSingleObject(ov.hEvent, 1000);
+        WSACloseEvent(ov.hEvent);
+    }
+    else
+    {
+        SetLastError(0xdeadbeef);
+        ret = WSARecv(sock, &wsa, 1, &len, &flags, NULL, NULL);
+        ok(!ret, "got ret %d.\n", ret);
+        ok(WSAGetLastError() == 0, "got error %d.\n", WSAGetLastError());
+        ok(len == 4, "got len %lu.\n", len);
+    }
     return 0;
 }
 
@@ -6765,11 +6818,14 @@ static void WINAPI io_completion(DWORD error, DWORD transferred, WSAOVERLAPPED *
 static void test_WSARecv(void)
 {
     SOCKET src, dest, server = INVALID_SOCKET;
+    struct recv_thread_apc_param apc_param;
+    struct recv_thread_param recv_param;
     char buf[20];
     WSABUF bufs[2];
     WSAOVERLAPPED ov;
     DWORD bytesReturned, flags, id;
     struct sockaddr_in addr;
+    unsigned int apc_count;
     int iret, len;
     DWORD dwret;
     BOOL bret;
@@ -6790,10 +6846,20 @@ static void test_WSARecv(void)
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     bytesReturned = 0xdeadbeef;
+
+    apc_count = 0;
+    dwret = QueueUserAPC(apc_func, GetCurrentThread(), (ULONG_PTR)&apc_count);
+    ok(dwret, "QueueUserAPC returned %lu\n", dwret);
+
     iret = WSARecv(dest, bufs, 1, &bytesReturned, &flags, NULL, NULL);
     ok(!iret, "Expected 0, got %d\n", iret);
     ok(bytesReturned == 2, "Expected 2, got %ld\n", bytesReturned);
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %ld\n", GetLastError());
+
+    ok(!apc_count, "got apc_count %u.\n", apc_count);
+    SleepEx(0, TRUE);
+    ok(apc_count == 1, "got apc_count %u.\n", apc_count);
+
     SetLastError(0xdeadbeef);
     bytesReturned = 0xdeadbeef;
     iret = WSARecv(dest, bufs, 1, &bytesReturned, &flags, NULL, NULL);
@@ -6886,8 +6952,21 @@ static void test_WSARecv(void)
     if (dest == INVALID_SOCKET) goto end;
 
     send(src, "test message", sizeof("test message"), 0);
-    thread = CreateThread(NULL, 0, recv_thread, &dest, 0, &id);
+    recv_param.sock = dest;
+    recv_param.overlapped = TRUE;
+    thread = CreateThread(NULL, 0, recv_thread, &recv_param, 0, &id);
     WaitForSingleObject(thread, 3000);
+    CloseHandle(thread);
+
+    recv_param.overlapped = FALSE;
+    thread = CreateThread(NULL, 0, recv_thread, &recv_param, 0, &id);
+    apc_param.apc_count = 0;
+    apc_param.sock = src;
+    dwret = QueueUserAPC(recv_thread_apc_func, thread, (ULONG_PTR)&apc_param);
+    ok(dwret, "QueueUserAPC returned %lu\n", dwret);
+    WaitForSingleObject(thread, 3000);
+    ok(apc_param.apc_count == 1, "got apc_count %u.\n", apc_param.apc_count);
+
     CloseHandle(thread);
 
     memset(&ov, 0, sizeof(ov));
@@ -11859,6 +11938,7 @@ static void test_WSAGetOverlappedResult(void)
     NTSTATUS status;
     unsigned int i;
     SOCKET s;
+    HANDLE h;
     BOOL ret;
 
     static const NTSTATUS ranges[][2] =
@@ -11873,7 +11953,19 @@ static void test_WSAGetOverlappedResult(void)
         {0xd0070000, 0xd0080000},
     };
 
+    WSASetLastError(0xdeadbeef);
+    ret = WSAGetOverlappedResult(0xdeadbeef, &overlapped, &size, FALSE, &flags);
+    ok(!ret, "got %d.\n", ret);
+    ok(WSAGetLastError() == WSAENOTSOCK, "got %u.\n", WSAGetLastError());
+
     s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    ret = DuplicateHandle(GetCurrentProcess(), (HANDLE)s, GetCurrentProcess(), &h, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(ret, "got %d.\n", ret);
+    ret = WSAGetOverlappedResult((SOCKET)h, &overlapped, &size, FALSE, &flags);
+    ok(!ret, "got %d.\n", ret);
+    ok(WSAGetLastError() == WSAENOTSOCK, "got %u.\n", WSAGetLastError());
+    CloseHandle(h);
 
     for (i = 0; i < ARRAY_SIZE(ranges); ++i)
     {

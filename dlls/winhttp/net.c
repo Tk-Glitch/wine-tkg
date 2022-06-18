@@ -51,6 +51,24 @@ static int sock_send(int fd, const void *msg, size_t len, WSAOVERLAPPED *ovr)
     return -1;
 }
 
+BOOL netconn_wait_overlapped_result( struct netconn *conn, WSAOVERLAPPED *ovr, DWORD *len )
+{
+    OVERLAPPED *completion_ovr;
+    ULONG_PTR key;
+
+    if (!GetQueuedCompletionStatus( conn->port, len, &key, &completion_ovr, INFINITE ))
+    {
+        WARN( "GetQueuedCompletionStatus failed, err %lu.\n", GetLastError() );
+        return FALSE;
+    }
+    if ((key != conn->socket && conn->socket != -1) || completion_ovr != (OVERLAPPED *)ovr)
+    {
+        ERR( "Unexpected completion key %Ix, overlapped %p.\n", key, completion_ovr );
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static int sock_recv(int fd, void *msg, size_t len, int flags)
 {
     int ret;
@@ -269,8 +287,11 @@ void netconn_close( struct netconn *conn )
         free(conn->extra_buf);
         DeleteSecurityContext(&conn->ssl_ctx);
     }
-    closesocket( conn->socket );
+    if (conn->socket != -1)
+        closesocket( conn->socket );
     release_host( conn->host );
+    if (conn->port)
+        CloseHandle( conn->port );
     free(conn);
 }
 
@@ -443,6 +464,12 @@ static DWORD send_ssl_chunk( struct netconn *conn, const void *msg, size_t size,
 DWORD netconn_send( struct netconn *conn, const void *msg, size_t len, int *sent, WSAOVERLAPPED *ovr )
 {
     DWORD err;
+
+    if (ovr && !conn->port)
+    {
+        if (!(conn->port = CreateIoCompletionPort( (HANDLE)(SOCKET)conn->socket, NULL, (ULONG_PTR)conn->socket, 0 )))
+            ERR( "Failed to create port.\n" );
+    }
 
     if (conn->secure)
     {
@@ -627,6 +654,13 @@ DWORD netconn_recv( struct netconn *conn, void *buf, size_t len, int flags, int 
 
     if ((*recvd = sock_recv( conn->socket, buf, len, flags )) < 0) return WSAGetLastError();
     return ERROR_SUCCESS;
+}
+
+void netconn_cancel_io( struct netconn *conn )
+{
+    SOCKET socket = InterlockedExchange( (LONG *)&conn->socket, -1 );
+
+    closesocket( socket );
 }
 
 ULONG netconn_query_data_available( struct netconn *conn )

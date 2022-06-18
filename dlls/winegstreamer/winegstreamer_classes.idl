@@ -71,12 +71,6 @@ coclass GStreamerByteStreamHandler {}
 
 [
     threading(both),
-    uuid(6a170414-aad9-4693-b806-3a0c47c570d6)
-]
-coclass WINEAudioConverter { }
-
-[
-    threading(both),
     uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
 ]
 coclass CWMADecMediaObject {};
@@ -86,3 +80,15 @@ coclass CWMADecMediaObject {};
     uuid(62ce7e72-4c71-4d20-b15d-452831a87d9d)
 ]
 coclass CMSH264DecoderMFT {}
+
+[
+    threading(both),
+    uuid(f447b69e-1884-4a7e-8055-346f74d6edb3)
+]
+coclass CResamplerMediaObject {}
+
+[
+    threading(both),
+    uuid(98230571-0087-4204-b020-3282538e57d3)
+]
+coclass CColorConvertDMO {}
