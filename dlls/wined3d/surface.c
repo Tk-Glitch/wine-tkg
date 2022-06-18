@@ -275,7 +275,7 @@ static struct wined3d_texture *surface_convert_format(struct wined3d_texture *sr
     if (!(conv = find_converter(src_format->id, dst_format->id)) && ((device->wined3d->flags & WINED3D_NO3D)
             || !is_identity_fixup(src_format->color_fixup) || src_format->conv_byte_count
             || !is_identity_fixup(dst_format->color_fixup) || dst_format->conv_byte_count
-            || ((src_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_COMPRESSED)
+            || ((src_format->attrs & WINED3D_FORMAT_ATTR_COMPRESSED)
             && !src_format->decompress)))
     {
         FIXME("Cannot find a conversion function from format %s to %s.\n",
@@ -672,7 +672,7 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
     const struct wined3d_format *src_format, *dst_format;
     struct wined3d_texture *converted_texture = NULL;
     struct wined3d_bo_address src_data, dst_data;
-    unsigned int src_fmt_flags, dst_fmt_flags;
+    unsigned int src_fmt_attrs, dst_fmt_attrs;
     struct wined3d_map_desc dst_map, src_map;
     unsigned int x, sx, xinc, y, sy, yinc;
     struct wined3d_context *context;
@@ -727,12 +727,12 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
     else
     {
         same_sub_resource = FALSE;
-        upload = dst_format->flags[dst_texture->resource.gl_type] & WINED3DFMT_FLAG_BLOCKS
+        upload = dst_format->attrs & WINED3D_FORMAT_ATTR_BLOCKS
                 && (dst_width != src_width || dst_height != src_height);
 
         if (upload)
         {
-            dst_format = src_format->flags[dst_texture->resource.gl_type] & WINED3DFMT_FLAG_BLOCKS
+            dst_format = src_format->attrs & WINED3D_FORMAT_ATTR_BLOCKS
                     ? wined3d_get_format(device->adapter, WINED3DFMT_B8G8R8A8_UNORM, 0) : src_format;
         }
 
@@ -779,8 +779,8 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
                     dst_texture->sub_resources[dst_sub_resource_idx].size, WINED3D_MAP_WRITE);
         }
     }
-    src_fmt_flags = src_format->flags[src_texture->resource.gl_type];
-    dst_fmt_flags = dst_format->flags[dst_texture->resource.gl_type];
+    src_fmt_attrs = src_format->attrs;
+    dst_fmt_attrs = dst_format->attrs;
     flags &= ~WINED3D_BLT_RAW;
 
     bpp = dst_format->byte_count;
@@ -793,7 +793,7 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
             + ((dst_box->top / dst_format->block_height) * dst_map.row_pitch)
             + ((dst_box->left / dst_format->block_width) * dst_format->block_byte_count);
 
-    if (src_fmt_flags & dst_fmt_flags & WINED3DFMT_FLAG_BLOCKS)
+    if (src_fmt_attrs & dst_fmt_attrs & WINED3D_FORMAT_ATTR_BLOCKS)
     {
         TRACE("%s -> %s copy.\n", debug_d3dformat(src_format->id), debug_d3dformat(dst_format->id));
 
@@ -810,7 +810,7 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
         goto release;
     }
 
-    if ((src_fmt_flags | dst_fmt_flags) & WINED3DFMT_FLAG_HEIGHT_SCALE)
+    if ((src_fmt_attrs | dst_fmt_attrs) & WINED3D_FORMAT_ATTR_HEIGHT_SCALE)
     {
         FIXME("Unsupported blit between height-scaled formats (src %s, dst %s).\n",
                 debug_d3dformat(src_format->id), debug_d3dformat(dst_format->id));
@@ -1202,14 +1202,16 @@ static void surface_cpu_blt_colour_fill(struct wined3d_rendertarget_view *view,
     struct wined3d_context *context;
     struct wined3d_texture *texture;
     struct wined3d_bo_address data;
+    struct wined3d_box level_box;
     struct wined3d_map_desc map;
     struct wined3d_range range;
+    bool full_subresource;
     unsigned int level;
     DWORD map_binding;
 
     TRACE("view %p, box %s, colour %s.\n", view, debug_box(box), debug_color(colour));
 
-    if (view->format_flags & WINED3DFMT_FLAG_BLOCKS)
+    if (view->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS)
     {
         FIXME("Not implemented for format %s.\n", debug_d3dformat(view->format->id));
         return;
@@ -1229,6 +1231,8 @@ static void surface_cpu_blt_colour_fill(struct wined3d_rendertarget_view *view,
 
     texture = texture_from_resource(view->resource);
     level = view->sub_resource_idx % texture->level_count;
+    wined3d_texture_get_level_box(texture_from_resource(view->resource), level, &level_box);
+    full_subresource = !memcmp(box, &level_box, sizeof(*box));
 
     map_binding = texture->resource.map_binding;
     if (!wined3d_texture_load_location(texture, view->sub_resource_idx, context, map_binding))
@@ -1241,7 +1245,7 @@ static void surface_cpu_blt_colour_fill(struct wined3d_rendertarget_view *view,
     range.offset = 0;
     range.size = texture->sub_resources[view->sub_resource_idx].size;
 
-    wined3d_resource_memory_colour_fill(view->resource, &map, colour, box);
+    wined3d_resource_memory_colour_fill(view->resource, &map, colour, box, full_subresource);
 
     wined3d_context_unmap_bo_address(context, &data, 1, &range);
     context_release(context);

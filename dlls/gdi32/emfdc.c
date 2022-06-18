@@ -2321,6 +2321,8 @@ void EMFDC_DeleteDC( DC_ATTR *dc_attr )
         if (emf->handles[index])
             GDI_hdc_not_using_object( emf->handles[index], emf->dc_attr->hdc );
     HeapFree( GetProcessHeap(), 0, emf->handles );
+    HeapFree( GetProcessHeap(), 0, emf );
+    dc_attr->emf = NULL;
 }
 
 /*******************************************************************
@@ -2426,7 +2428,6 @@ HDC WINAPI CreateEnhMetaFileW( HDC hdc, const WCHAR *filename, const RECT *rect,
         DeleteDC( ret );
         return 0;
     }
-    emf->dc_attr = dc_attr;
 
     emf->handles = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
                               HANDLE_LIST_INC * sizeof(emf->handles[0]) );

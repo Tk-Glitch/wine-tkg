@@ -530,7 +530,7 @@ static void update_layout_list(void)
             CFStringRef type = CFDictionaryGetValue(dict, macdrv_input_source_type_key);
             CFStringRef lang = CFDictionaryGetValue(dict, macdrv_input_source_lang_key);
 
-            layout = HeapAlloc(GetProcessHeap(), 0, sizeof(*layout));
+            layout = malloc(sizeof(*layout));
             layout->input_source = (TISInputSourceRef)CFRetain(input);
             layout->hkl = get_hkl(lang, type);
 
@@ -1258,8 +1258,9 @@ INT CDECL macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
             {
                 if (vkey_names[i].vkey == vkey)
                 {
-                    len = MultiByteToWideChar(CP_UTF8, 0, vkey_names[i].name, -1, buffer, size);
-                    if (len) len--;
+                    len = min(strlen(vkey_names[i].name) + 1, size);
+                    ascii_to_unicode(buffer, vkey_names[i].name, len);
+                    if (len) buffer[--len] = 0;
                     break;
                 }
             }

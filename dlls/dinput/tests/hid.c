@@ -899,39 +899,80 @@ BOOL sync_ioctl_( const char *file, int line, HANDLE device, DWORD code, void *i
     return ret;
 }
 
-void set_hid_expect_( const char *file, int line, HANDLE device, struct hid_expect *expect, DWORD expect_size )
+void fill_context_( const char *file, int line, char *buffer, SIZE_T size )
 {
-    char context[64];
+    const char *source_file;
+    source_file = strrchr( file, '/' );
+    if (!source_file) source_file = strrchr( file, '\\' );
+    if (!source_file) source_file = file;
+    else source_file++;
+    snprintf( buffer, size, "%s:%d", source_file, line );
+}
+
+void set_hid_expect_( const char *file, int line, HANDLE device, struct hid_device_desc *desc,
+                      struct hid_expect *expect, DWORD expect_size )
+{
+    char buffer[sizeof(*desc) + EXPECT_QUEUE_BUFFER_SIZE];
+    SIZE_T size;
     BOOL ret;
 
-    fill_context( line, context, ARRAY_SIZE(context) );
-    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SET_CONTEXT, context, ARRAY_SIZE(context), NULL, 0, INFINITE );
+    if (desc) memcpy( buffer, desc, sizeof(*desc) );
+    else memset( buffer, 0, sizeof(*desc) );
+
+    fill_context_( file, line, buffer + sizeof(*desc), ARRAY_SIZE(buffer) - sizeof(*desc) );
+    size = sizeof(*desc) + strlen( buffer + sizeof(*desc) ) + 1;
+    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SET_CONTEXT, buffer, size, NULL, 0, INFINITE );
     ok_(file, line)( ret, "IOCTL_WINETEST_HID_SET_CONTEXT failed, last error %lu\n", GetLastError() );
-    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SET_EXPECT, expect, expect_size, NULL, 0, INFINITE );
+
+    if (expect) memcpy( buffer + sizeof(*desc), expect, expect_size );
+    else memset( buffer + sizeof(*desc), 0, expect_size );
+
+    size = sizeof(*desc) + expect_size;
+    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SET_EXPECT, buffer, size, NULL, 0, INFINITE );
     ok_(file, line)( ret, "IOCTL_WINETEST_HID_SET_EXPECT failed, last error %lu\n", GetLastError() );
 }
 
-void wait_hid_expect_( const char *file, int line, HANDLE device, DWORD timeout, BOOL wait_pending, BOOL todo )
+void wait_hid_expect_( const char *file, int line, HANDLE device, struct hid_device_desc *desc,
+                       DWORD timeout, BOOL wait_pending, BOOL todo )
 {
     struct wait_expect_params params = {.wait_pending = wait_pending};
+    char buffer[sizeof(*desc) + sizeof(params)];
+    SIZE_T size;
+
+    if (desc) memcpy( buffer, desc, sizeof(*desc) );
+    else memset( buffer, 0, sizeof(*desc) );
+
+    memcpy( buffer + sizeof(*desc), &params, sizeof(params) );
+    size = sizeof(*desc) + sizeof(params);
 
     todo_wine_if(todo) {
-    BOOL ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_WAIT_EXPECT, &params, sizeof(params), NULL, 0, timeout );
+    BOOL ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_WAIT_EXPECT, buffer, size, NULL, 0, timeout );
     ok_(file, line)( ret, "IOCTL_WINETEST_HID_WAIT_EXPECT failed, last error %lu\n", GetLastError() );
     }
 
-    set_hid_expect_( file, line, device, NULL, 0 );
+    set_hid_expect_( file, line, device, desc, NULL, 0 );
 }
 
-void send_hid_input_( const char *file, int line, HANDLE device, struct hid_expect *expect, DWORD expect_size )
+void send_hid_input_( const char *file, int line, HANDLE device, struct hid_device_desc *desc,
+                      struct hid_expect *expect, DWORD expect_size )
 {
-    char context[64];
+    char buffer[sizeof(*desc) + EXPECT_QUEUE_BUFFER_SIZE];
+    SIZE_T size;
     BOOL ret;
 
-    fill_context( line, context, ARRAY_SIZE(context) );
-    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SET_CONTEXT, context, ARRAY_SIZE(context), NULL, 0, INFINITE );
+    if (desc) memcpy( buffer, desc, sizeof(*desc) );
+    else memset( buffer, 0, sizeof(*desc) );
+
+    fill_context_( file, line, buffer + sizeof(*desc), ARRAY_SIZE(buffer) - sizeof(*desc) );
+    size = sizeof(*desc) + strlen( buffer + sizeof(*desc) ) + 1;
+    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SET_CONTEXT, buffer, size, NULL, 0, INFINITE );
     ok_(file, line)( ret, "IOCTL_WINETEST_HID_SET_CONTEXT failed, last error %lu\n", GetLastError() );
-    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SEND_INPUT, expect, expect_size, NULL, 0, INFINITE );
+
+    if (expect) memcpy( buffer + sizeof(*desc), expect, expect_size );
+    else memset( buffer + sizeof(*desc), 0, expect_size );
+
+    size = sizeof(*desc) + expect_size;
+    ret = sync_ioctl_( file, line, device, IOCTL_WINETEST_HID_SEND_INPUT, buffer, size, NULL, 0, INFINITE );
     ok_(file, line)( ret, "IOCTL_WINETEST_HID_SEND_INPUT failed, last error %lu\n", GetLastError() );
 }
 
@@ -2894,7 +2935,7 @@ static void test_hid_driver( DWORD report_id, DWORD polled )
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
     desc.input_size = polled ? sizeof(expect_in) : 0;
     memcpy( desc.input, &expect_in, sizeof(expect_in) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (hid_device_start( &desc )) test_hid_device( report_id, polled, &caps, desc.attributes.VendorID, desc.attributes.ProductID );
     hid_device_stop( &desc );
@@ -2979,6 +3020,106 @@ struct hidp_kdr
     struct hidp_kdr_caps caps[1];
     /* struct hidp_kdr_node nodes[1] */
 };
+
+static void check_preparsed_data( HANDLE file, const struct hidp_kdr *expect_kdr,
+                                  UINT expect_caps_count, const struct hidp_kdr_caps *expect_caps,
+                                  UINT expect_nodes_count, const struct hidp_kdr_node *expect_nodes )
+{
+    PHIDP_PREPARSED_DATA preparsed_data;
+    struct hidp_kdr *kdr;
+    BOOL ret;
+    UINT i;
+
+    ret = HidD_GetPreparsedData( file, &preparsed_data );
+    ok( ret, "HidD_GetPreparsedData failed with error %lu\n", GetLastError() );
+
+    kdr = (struct hidp_kdr *)preparsed_data;
+    ok( !strncmp( kdr->magic, expect_kdr->magic, 8 ), "got %s expected %s\n",
+        debugstr_an(kdr->magic, 8), debugstr_an(expect_kdr->magic, 8) );
+
+    if (!strncmp( kdr->magic, expect_kdr->magic, 8 ))
+    {
+        check_member( *kdr, *expect_kdr, "%04x", usage );
+        check_member( *kdr, *expect_kdr, "%04x", usage_page );
+        check_member( *kdr, *expect_kdr, "%#x", unknown[0] );
+        check_member( *kdr, *expect_kdr, "%#x", unknown[1] );
+        check_member( *kdr, *expect_kdr, "%d", input_caps_start );
+        check_member( *kdr, *expect_kdr, "%d", input_caps_count );
+        check_member( *kdr, *expect_kdr, "%d", input_caps_end );
+        check_member( *kdr, *expect_kdr, "%d", input_report_byte_length );
+        check_member( *kdr, *expect_kdr, "%d", output_caps_start );
+        check_member( *kdr, *expect_kdr, "%d", output_caps_count );
+        check_member( *kdr, *expect_kdr, "%d", output_caps_end );
+        check_member( *kdr, *expect_kdr, "%d", output_report_byte_length );
+        check_member( *kdr, *expect_kdr, "%d", feature_caps_start );
+        todo_wine
+        check_member( *kdr, *expect_kdr, "%d", feature_caps_count );
+        check_member( *kdr, *expect_kdr, "%d", feature_caps_end );
+        check_member( *kdr, *expect_kdr, "%d", feature_report_byte_length );
+        todo_wine
+        check_member( *kdr, *expect_kdr, "%d", caps_size );
+        check_member( *kdr, *expect_kdr, "%d", number_link_collection_nodes );
+
+        for (i = 0; i < min( expect_caps_count, kdr->caps_size / sizeof(struct hidp_kdr_caps) ); ++i)
+        {
+            winetest_push_context( "caps[%u]", i );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_page );
+            check_member( kdr->caps[i], expect_caps[i], "%d", report_id );
+            check_member( kdr->caps[i], expect_caps[i], "%d", start_bit );
+            check_member( kdr->caps[i], expect_caps[i], "%d", bit_size );
+            check_member( kdr->caps[i], expect_caps[i], "%d", report_count );
+            check_member( kdr->caps[i], expect_caps[i], "%d", start_byte );
+            check_member( kdr->caps[i], expect_caps[i], "%d", total_bits );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", bit_field );
+            check_member( kdr->caps[i], expect_caps[i], "%d", end_byte );
+            check_member( kdr->caps[i], expect_caps[i], "%d", link_collection );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", link_usage_page );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", link_usage );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", flags );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[0] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[1] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[2] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[3] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[4] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[5] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[6] );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[7] );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_min );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", string_min );
+            check_member( kdr->caps[i], expect_caps[i], "%d", string_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", designator_min );
+            check_member( kdr->caps[i], expect_caps[i], "%d", designator_max );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", data_index_min );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", data_index_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", null_value );
+            check_member( kdr->caps[i], expect_caps[i], "%d", unknown );
+            check_member( kdr->caps[i], expect_caps[i], "%ld", logical_min );
+            check_member( kdr->caps[i], expect_caps[i], "%ld", logical_max );
+            check_member( kdr->caps[i], expect_caps[i], "%ld", physical_min );
+            check_member( kdr->caps[i], expect_caps[i], "%ld", physical_max );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", units );
+            check_member( kdr->caps[i], expect_caps[i], "%#lx", units_exp );
+            winetest_pop_context();
+        }
+
+        for (i = 0; i < expect_nodes_count; ++i)
+        {
+            struct hidp_kdr_node *nodes = (struct hidp_kdr_node *)((char *)kdr->caps + kdr->caps_size);
+            winetest_push_context( "nodes[%u]", i );
+            check_member( nodes[i], expect_nodes[i], "%04x", usage );
+            check_member( nodes[i], expect_nodes[i], "%04x", usage_page );
+            check_member( nodes[i], expect_nodes[i], "%d", parent );
+            check_member( nodes[i], expect_nodes[i], "%d", number_of_children );
+            check_member( nodes[i], expect_nodes[i], "%d", next_sibling );
+            check_member( nodes[i], expect_nodes[i], "%d", first_child );
+            check_member( nodes[i], expect_nodes[i], "%#lx", collection_type );
+            winetest_pop_context();
+        }
+    }
+
+    HidD_FreePreparsedData( preparsed_data );
+}
 
 static void test_hidp_kdr(void)
 {
@@ -3199,16 +3340,13 @@ static void test_hidp_kdr(void)
         },
     };
 
-    PHIDP_PREPARSED_DATA preparsed_data;
     WCHAR device_path[MAX_PATH];
-    struct hidp_kdr *kdr;
     HANDLE file;
     BOOL ret;
-    DWORD i;
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     if (!hid_device_start( &desc )) goto done;
 
@@ -3221,95 +3359,8 @@ static void test_hidp_kdr(void)
                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
     ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
 
-    ret = HidD_GetPreparsedData( file, &preparsed_data );
-    ok( ret, "HidD_GetPreparsedData failed with error %lu\n", GetLastError() );
-
-    kdr = (struct hidp_kdr *)preparsed_data;
-    ok( !strncmp( kdr->magic, expect_kdr.magic, 8 ), "got %s expected %s\n",
-        debugstr_an(kdr->magic, 8), debugstr_an(expect_kdr.magic, 8) );
-
-    if (!strncmp( kdr->magic, expect_kdr.magic, 8 ))
-    {
-        check_member( *kdr, expect_kdr, "%04x", usage );
-        check_member( *kdr, expect_kdr, "%04x", usage_page );
-        check_member( *kdr, expect_kdr, "%#x", unknown[0] );
-        check_member( *kdr, expect_kdr, "%#x", unknown[1] );
-        check_member( *kdr, expect_kdr, "%d", input_caps_start );
-        check_member( *kdr, expect_kdr, "%d", input_caps_count );
-        check_member( *kdr, expect_kdr, "%d", input_caps_end );
-        check_member( *kdr, expect_kdr, "%d", input_report_byte_length );
-        check_member( *kdr, expect_kdr, "%d", output_caps_start );
-        check_member( *kdr, expect_kdr, "%d", output_caps_count );
-        check_member( *kdr, expect_kdr, "%d", output_caps_end );
-        check_member( *kdr, expect_kdr, "%d", output_report_byte_length );
-        check_member( *kdr, expect_kdr, "%d", feature_caps_start );
-        todo_wine
-        check_member( *kdr, expect_kdr, "%d", feature_caps_count );
-        check_member( *kdr, expect_kdr, "%d", feature_caps_end );
-        check_member( *kdr, expect_kdr, "%d", feature_report_byte_length );
-        todo_wine
-        check_member( *kdr, expect_kdr, "%d", caps_size );
-        check_member( *kdr, expect_kdr, "%d", number_link_collection_nodes );
-
-        for (i = 0; i < min( ARRAY_SIZE(expect_caps), kdr->caps_size / sizeof(struct hidp_kdr_caps) ); ++i)
-        {
-            winetest_push_context( "caps[%ld]", i );
-            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_page );
-            check_member( kdr->caps[i], expect_caps[i], "%d", report_id );
-            check_member( kdr->caps[i], expect_caps[i], "%d", start_bit );
-            check_member( kdr->caps[i], expect_caps[i], "%d", bit_size );
-            check_member( kdr->caps[i], expect_caps[i], "%d", report_count );
-            check_member( kdr->caps[i], expect_caps[i], "%d", start_byte );
-            check_member( kdr->caps[i], expect_caps[i], "%d", total_bits );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", bit_field );
-            check_member( kdr->caps[i], expect_caps[i], "%d", end_byte );
-            check_member( kdr->caps[i], expect_caps[i], "%d", link_collection );
-            check_member( kdr->caps[i], expect_caps[i], "%04x", link_usage_page );
-            check_member( kdr->caps[i], expect_caps[i], "%04x", link_usage );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", flags );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[0] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[1] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[2] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[3] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[4] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[5] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[6] );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", padding[7] );
-            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_min );
-            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_max );
-            check_member( kdr->caps[i], expect_caps[i], "%d", string_min );
-            check_member( kdr->caps[i], expect_caps[i], "%d", string_max );
-            check_member( kdr->caps[i], expect_caps[i], "%d", designator_min );
-            check_member( kdr->caps[i], expect_caps[i], "%d", designator_max );
-            check_member( kdr->caps[i], expect_caps[i], "%#x", data_index_min );
-            check_member( kdr->caps[i], expect_caps[i], "%#x", data_index_max );
-            check_member( kdr->caps[i], expect_caps[i], "%d", null_value );
-            check_member( kdr->caps[i], expect_caps[i], "%d", unknown );
-            check_member( kdr->caps[i], expect_caps[i], "%ld", logical_min );
-            check_member( kdr->caps[i], expect_caps[i], "%ld", logical_max );
-            check_member( kdr->caps[i], expect_caps[i], "%ld", physical_min );
-            check_member( kdr->caps[i], expect_caps[i], "%ld", physical_max );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", units );
-            check_member( kdr->caps[i], expect_caps[i], "%#lx", units_exp );
-            winetest_pop_context();
-        }
-
-        for (i = 0; i < ARRAY_SIZE(expect_nodes); ++i)
-        {
-            struct hidp_kdr_node *nodes = (struct hidp_kdr_node *)((char *)kdr->caps + kdr->caps_size);
-            winetest_push_context( "nodes[%ld]", i );
-            check_member( nodes[i], expect_nodes[i], "%04x", usage );
-            check_member( nodes[i], expect_nodes[i], "%04x", usage_page );
-            check_member( nodes[i], expect_nodes[i], "%d", parent );
-            check_member( nodes[i], expect_nodes[i], "%d", number_of_children );
-            check_member( nodes[i], expect_nodes[i], "%d", next_sibling );
-            check_member( nodes[i], expect_nodes[i], "%d", first_child );
-            check_member( nodes[i], expect_nodes[i], "%#lx", collection_type );
-            winetest_pop_context();
-        }
-    }
-
-    HidD_FreePreparsedData( preparsed_data );
+    check_preparsed_data( file, &expect_kdr, ARRAY_SIZE(expect_caps), expect_caps,
+                          ARRAY_SIZE(expect_nodes), expect_nodes );
 
     CloseHandle( file );
 
@@ -3597,7 +3648,7 @@ DWORD WINAPI dinput_test_device_thread( void *stop_event )
 
     desc.report_descriptor_len = sizeof(gamepad_desc);
     memcpy( desc.report_descriptor_buf, gamepad_desc, sizeof(gamepad_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
     hid_device_start( &desc );
     WaitForSingleObject( stop_event, INFINITE );
@@ -3689,6 +3740,195 @@ done:
     bus_device_stop();
 }
 
+static void test_hid_multiple_tlc(void)
+{
+#include "psh_hid_macros.h"
+    const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Physical),
+                REPORT_ID(1, 1),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 2),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 2),
+                LOGICAL_MINIMUM(2, -10),
+                LOGICAL_MAXIMUM(2, +10),
+                INPUT(1, Data|Var|Rel),
+            END_COLLECTION,
+        END_COLLECTION,
+
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+            COLLECTION(1, Physical),
+                REPORT_ID(1, 2),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 40),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 40),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
+#include "pop_hid_macros.h"
+
+    struct hid_device_desc desc =
+    {
+        .caps = { .InputReportByteLength = 7 },
+        .attributes = default_attributes,
+    };
+
+    static const struct hidp_kdr expect_kdr_joystick =
+    {
+        .magic = "HidP KDR",
+        .usage = 0x04,
+        .usage_page = 0x01,
+        .input_caps_count = 3,
+        .input_caps_end = 3,
+        .input_report_byte_length = 6,
+        .output_caps_start = 3,
+        .output_caps_end = 3,
+        .feature_caps_start = 3,
+        .feature_caps_end = 3,
+        .caps_size = 312,
+        .number_link_collection_nodes = 2,
+    };
+    static const struct hidp_kdr expect_kdr_gamepad =
+    {
+        .magic = "HidP KDR",
+        .usage = 0x05,
+        .usage_page = 0x01,
+        .input_caps_count = 1,
+        .input_caps_end = 1,
+        .input_report_byte_length = 6,
+        .output_caps_start = 1,
+        .output_caps_end = 1,
+        .feature_caps_start = 1,
+        .feature_caps_end = 1,
+        .caps_size = 104,
+        .number_link_collection_nodes = 2,
+    };
+    static const struct hidp_kdr_caps expect_caps_joystick[] =
+    {
+        {
+            .usage_page = 9, .report_id = 1, .bit_size = 1, .report_count = 8, .start_byte = 1, .total_bits = 8,
+            .bit_field = 2, .end_byte = 2, .link_collection = 1, .link_usage_page = 0x01, .link_usage = 0x04, .flags = 0x1c,
+            .usage_min = 1, .usage_max = 2, .data_index_max = 1,
+        },
+        {
+            .usage_page = 1, .report_id = 1, .bit_size = 16, .report_count = 1, .start_byte = 4, .total_bits = 16,
+            .bit_field = 6, .end_byte = 6, .link_collection = 1, .link_usage_page = 0x01, .link_usage = 0x04,
+            .usage_min = 0x31, .usage_max = 0x31, .data_index_min = 2, .data_index_max = 2, .logical_min = -10, .logical_max = +10,
+        },
+        {
+            .usage_page = 1, .report_id = 1, .bit_size = 16, .report_count = 1, .start_byte = 2, .total_bits = 16,
+            .bit_field = 6, .end_byte = 4, .link_collection = 1, .link_usage_page = 0x01, .link_usage = 0x04,
+            .usage_min = 0x30, .usage_max = 0x30, .data_index_min = 3, .data_index_max = 3, .logical_min = -10, .logical_max = +10,
+        },
+    };
+    static const struct hidp_kdr_caps expect_caps_gamepad[] =
+    {
+        {
+            .usage_page = 9, .report_id = 2, .bit_size = 1, .report_count = 40, .start_byte = 1, .total_bits = 40,
+            .bit_field = 2, .end_byte = 6, .link_collection = 1, .link_usage_page = 0x01, .link_usage = 0x05, .flags = 0x1c,
+            .usage_min = 0x01, .usage_max = 0x28, .data_index_max = 0x27,
+        },
+    };
+    static const struct hidp_kdr_node expect_nodes_joystick[] =
+    {
+        {
+            .usage = 0x04,
+            .usage_page = 0x01,
+            .number_of_children = 1,
+            .first_child = 1,
+            .collection_type = 0x1,
+        },
+        {
+            .usage = 0x04,
+            .usage_page = 0x01,
+        },
+    };
+    static const struct hidp_kdr_node expect_nodes_gamepad[] =
+    {
+        {
+            .usage = 0x05,
+            .usage_page = 0x01,
+            .number_of_children = 1,
+            .first_child = 1,
+            .collection_type = 1,
+        },
+        {
+            .usage = 0x05,
+            .usage_page = 0x01,
+        },
+    };
+
+    WCHAR device_path[MAX_PATH];
+    HANDLE file;
+    BOOL ret;
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
+
+    swprintf( device_path, MAX_PATH, L"\\\\?\\hid#vid_%04x&pid_%04x&col01", desc.attributes.VendorID,
+              desc.attributes.ProductID );
+    ret = find_hid_device_path( device_path );
+    todo_wine
+    ok( ret, "Failed to find HID device matching %s\n", debugstr_w( device_path ) );
+    if (!ret) goto done;
+
+    file = CreateFileW( device_path, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
+    check_preparsed_data( file, &expect_kdr_joystick, ARRAY_SIZE(expect_caps_joystick), expect_caps_joystick,
+                          ARRAY_SIZE(expect_nodes_joystick), expect_nodes_joystick );
+    CloseHandle( file );
+
+    swprintf( device_path, MAX_PATH, L"\\\\?\\hid#vid_%04x&pid_%04x&col02", desc.attributes.VendorID,
+              desc.attributes.ProductID );
+    ret = find_hid_device_path( device_path );
+    ok( ret, "Failed to find HID device matching %s\n", debugstr_w( device_path ) );
+
+    file = CreateFileW( device_path, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
+    check_preparsed_data( file, &expect_kdr_gamepad, ARRAY_SIZE(expect_caps_gamepad), expect_caps_gamepad,
+                          ARRAY_SIZE(expect_nodes_gamepad), expect_nodes_gamepad );
+    CloseHandle( file );
+
+    swprintf( device_path, MAX_PATH, L"\\\\?\\hid#vid_%04x&pid_%04x&col03", desc.attributes.VendorID,
+              desc.attributes.ProductID );
+    ret = find_hid_device_path( device_path );
+    ok( !ret, "Failed to find HID device matching %s\n", debugstr_w( device_path ) );
+
+done:
+    hid_device_stop( &desc );
+}
+
 START_TEST( hid )
 {
     if (!dinput_test_init()) return;
@@ -3701,6 +3941,7 @@ START_TEST( hid )
     test_hid_driver( 1, FALSE );
     test_hid_driver( 0, TRUE );
     test_hid_driver( 1, TRUE );
+    test_hid_multiple_tlc();
 
 done:
     bus_device_stop();

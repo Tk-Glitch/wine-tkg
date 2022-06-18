@@ -26,11 +26,11 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
+#include "winioctl.h"
 #include "winnls.h"
 #include "winreg.h"
 #include "winuser.h"
 #include "setupapi.h"
-#include "ddk/hidsdi.h"
 #include "wine/debug.h"
 #include "wine/server.h"
 #include "wine/hid.h"
@@ -38,6 +38,7 @@
 #include "user_private.h"
 
 #include "initguid.h"
+#include "ddk/hidclass.h"
 #include "devpkey.h"
 #include "ntddmou.h"
 #include "ntddkbd.h"
@@ -52,7 +53,7 @@ struct device
     HANDLE file;
     HANDLE handle;
     RID_DEVICE_INFO info;
-    PHIDP_PREPARSED_DATA data;
+    struct hid_preparsed_data *data;
 };
 
 static struct device *rawinput_devices;
@@ -94,27 +95,34 @@ static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int 
     return TRUE;
 }
 
-static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
+static struct device *add_device( HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface, DWORD type )
 {
+    static const RID_DEVICE_INFO_KEYBOARD keyboard_info = {0, 0, 1, 12, 3, 101};
+    static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
+    struct hid_preparsed_data *preparsed = NULL;
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
+    HID_COLLECTION_INFORMATION hid_info;
     struct device *device = NULL;
+    RID_DEVICE_INFO info;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
     UINT32 handle;
+    DWORD i, size;
     HANDLE file;
     WCHAR *pos;
-    DWORD i, size, type;
 
     SetupDiGetDeviceInterfaceDetailW(set, iface, NULL, 0, &size, &device_data);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
     {
-        ERR("Failed to get device path, error %#x.\n", GetLastError());
+        ERR("Failed to get device path, error %#lx.\n", GetLastError());
         return FALSE;
     }
 
     if (!SetupDiGetDevicePropertyW(set, &device_data, &DEVPROPKEY_HID_HANDLE, &type, (BYTE *)&handle, sizeof(handle), NULL, 0) ||
         type != DEVPROP_TYPE_UINT32)
     {
-        ERR("Failed to get device handle, error %#x.\n", GetLastError());
+        ERR("Failed to get device handle, error %#lx.\n", GetLastError());
         return NULL;
     }
 
@@ -133,9 +141,57 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
     if (file == INVALID_HANDLE_VALUE)
     {
-        ERR("Failed to open device file %s, error %u.\n", debugstr_w(detail->DevicePath), GetLastError());
+        ERR("Failed to open device file %s, error %lu.\n", debugstr_w(detail->DevicePath), GetLastError());
         free(detail);
         return NULL;
+    }
+
+    memset( &info, 0, sizeof(info) );
+    info.cbSize = sizeof(info);
+    info.dwType = type;
+
+    switch (type)
+    {
+    case RIM_TYPEHID:
+        status = NtDeviceIoControlFile( file, NULL, NULL, NULL, &io,
+                                        IOCTL_HID_GET_COLLECTION_INFORMATION,
+                                        NULL, 0, &hid_info, sizeof(hid_info) );
+        if (status)
+        {
+            ERR( "Failed to get collection information, status %#lx.\n", status );
+            goto fail;
+        }
+
+        info.hid.dwVendorId = hid_info.VendorID;
+        info.hid.dwProductId = hid_info.ProductID;
+        info.hid.dwVersionNumber = hid_info.VersionNumber;
+
+        if (!(preparsed = malloc( hid_info.DescriptorSize )))
+        {
+            ERR( "Failed to allocate memory.\n" );
+            goto fail;
+        }
+
+        status = NtDeviceIoControlFile( file, NULL, NULL, NULL, &io,
+                                        IOCTL_HID_GET_COLLECTION_DESCRIPTOR,
+                                        NULL, 0, preparsed, hid_info.DescriptorSize );
+        if (status)
+        {
+            ERR( "Failed to get collection descriptor, status %#lx.\n", status );
+            goto fail;
+        }
+
+        info.hid.usUsagePage = preparsed->usage_page;
+        info.hid.usUsage = preparsed->usage;
+        break;
+
+    case RIM_TYPEMOUSE:
+        info.mouse = mouse_info;
+        break;
+
+    case RIM_TYPEKEYBOARD:
+        info.keyboard = keyboard_info;
+        break;
     }
 
     for (i = 0; i < rawinput_devices_count && !device; ++i)
@@ -145,7 +201,7 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     if (device)
     {
         TRACE("Updating device %x / %s.\n", handle, debugstr_w(detail->DevicePath));
-        HidD_FreePreparsedData(device->data);
+        free(device->data);
         CloseHandle(device->file);
         free(device->detail);
     }
@@ -158,102 +214,58 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     else
     {
         ERR("Failed to allocate memory.\n");
-        CloseHandle(file);
-        free(detail);
-        return NULL;
+        goto fail;
     }
 
     device->detail = detail;
     device->file = file;
     device->handle = ULongToHandle(handle);
-    device->info.cbSize = sizeof(RID_DEVICE_INFO);
-    device->data = NULL;
+    device->info = info;
+    device->data = preparsed;
 
     return device;
+
+fail:
+    free( preparsed );
+    CloseHandle( file );
+    free( detail );
+    return NULL;
+}
+
+static void enumerate_devices( DWORD type, const GUID *guid )
+{
+    SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
+    HDEVINFO set;
+    DWORD idx;
+
+    set = SetupDiGetClassDevsW( guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
+
+    for (idx = 0; SetupDiEnumDeviceInterfaces( set, NULL, &GUID_DEVINTERFACE_HID, idx, &iface); ++idx )
+        add_device( set, &iface, type );
+
+    SetupDiDestroyDeviceInfoList( set );
 }
 
 void rawinput_update_device_list(void)
 {
-    SP_DEVICE_INTERFACE_DATA iface = { sizeof(iface) };
-    struct device *device;
-    HIDD_ATTRIBUTES attr;
-    HIDP_CAPS caps;
-    GUID hid_guid;
-    HDEVINFO set;
     DWORD idx;
 
     TRACE("\n");
-
-    HidD_GetHidGuid(&hid_guid);
 
     EnterCriticalSection(&rawinput_devices_cs);
 
     /* destroy previous list */
     for (idx = 0; idx < rawinput_devices_count; ++idx)
     {
-        HidD_FreePreparsedData(rawinput_devices[idx].data);
+        free(rawinput_devices[idx].data);
         CloseHandle(rawinput_devices[idx].file);
         free(rawinput_devices[idx].detail);
     }
     rawinput_devices_count = 0;
 
-    set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &hid_guid, idx, &iface); ++idx)
-    {
-        if (!(device = add_device(set, &iface)))
-            continue;
-
-        attr.Size = sizeof(HIDD_ATTRIBUTES);
-        if (!HidD_GetAttributes(device->file, &attr))
-            WARN("Failed to get attributes.\n");
-
-        device->info.dwType = RIM_TYPEHID;
-        device->info.hid.dwVendorId = attr.VendorID;
-        device->info.hid.dwProductId = attr.ProductID;
-        device->info.hid.dwVersionNumber = attr.VersionNumber;
-
-        if (!HidD_GetPreparsedData(device->file, &device->data))
-            WARN("Failed to get preparsed data.\n");
-
-        if (!HidP_GetCaps(device->data, &caps))
-            WARN("Failed to get caps.\n");
-
-        device->info.hid.usUsagePage = caps.UsagePage;
-        device->info.hid.usUsage = caps.Usage;
-    }
-
-    SetupDiDestroyDeviceInfoList(set);
-
-    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MOUSE, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_MOUSE, idx, &iface); ++idx)
-    {
-        static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
-
-        if (!(device = add_device(set, &iface)))
-            continue;
-
-        device->info.dwType = RIM_TYPEMOUSE;
-        device->info.mouse = mouse_info;
-    }
-
-    SetupDiDestroyDeviceInfoList(set);
-
-    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_KEYBOARD, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_KEYBOARD, idx, &iface); ++idx)
-    {
-        static const RID_DEVICE_INFO_KEYBOARD keyboard_info = {0, 0, 1, 12, 3, 101};
-
-        if (!(device = add_device(set, &iface)))
-            continue;
-
-        device->info.dwType = RIM_TYPEKEYBOARD;
-        device->info.keyboard = keyboard_info;
-    }
-
-    SetupDiDestroyDeviceInfoList(set);
+    enumerate_devices( RIM_TYPEHID, &GUID_DEVINTERFACE_HID );
+    enumerate_devices( RIM_TYPEMOUSE, &GUID_DEVINTERFACE_MOUSE );
+    enumerate_devices( RIM_TYPEKEYBOARD, &GUID_DEVINTERFACE_KEYBOARD );
 
     LeaveCriticalSection(&rawinput_devices_cs);
 }
@@ -508,11 +520,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH RegisterRawInputDevices(const RAWINPUTDEVICE *devi
 
     for (i = 0; i < device_count; ++i)
     {
-        TRACE("device %u: page %#x, usage %#x, flags %#x, target %p.\n",
+        TRACE("device %u: page %#x, usage %#x, flags %#lx, target %p.\n",
                 i, devices[i].usUsagePage, devices[i].usUsage,
                 devices[i].dwFlags, devices[i].hwndTarget);
         if (devices[i].dwFlags & ~(RIDEV_REMOVE|RIDEV_NOLEGACY|RIDEV_INPUTSINK|RIDEV_DEVNOTIFY))
-            FIXME("Unhandled flags %#x for device %u.\n", devices[i].dwFlags, i);
+            FIXME("Unhandled flags %#lx for device %u.\n", devices[i].dwFlags, i);
 
         d[i].usage_page = devices[i].usUsagePage;
         d[i].usage = devices[i].usUsage;
@@ -765,12 +777,12 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE handle, UINT command, void *data, UINT
         break;
 
     case RIDI_PREPARSEDDATA:
-        if (!(preparsed = (struct hid_preparsed_data *)device->data)) len = 0;
+        if (!(preparsed = device->data)) len = 0;
         else len = preparsed->caps_size + FIELD_OFFSET(struct hid_preparsed_data, value_caps[0]) +
                    preparsed->number_link_collection_nodes * sizeof(struct hid_collection_node);
 
-        if (device->data && len <= data_len && data)
-            memcpy(data, device->data, len);
+        if (preparsed && len <= data_len && data)
+            memcpy(data, preparsed, len);
         *data_size = len;
         break;
 

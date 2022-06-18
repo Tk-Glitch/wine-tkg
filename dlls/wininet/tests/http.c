@@ -4801,6 +4801,13 @@ static const http_status_test_t http_status_tests[] = {
         ""
     },
     {
+        "HTTP/1.1 200 \r\n"
+        "Content-Length: 1\r\n"
+        "\r\nx",
+        200,
+        ""
+    },
+    {
         "HTTP/1.1 410 \r\n"
         "Content-Length: 1\r\n"
         "\r\nx",
@@ -6586,12 +6593,9 @@ typedef struct {
 
 static const cert_struct_test_t test_winehq_org_cert = {
     "US\r\n"
-    "55114\r\n"
     "Minnesota\r\n"
     "Saint Paul\r\n"
-    "Ste 120\r\n"
-    "700 Raymond Ave\r\n"
-    "CodeWeavers\r\n"
+    "\"CodeWeavers, Inc.\"\r\n"
     "IT\r\n"
     "*.winehq.org",
 

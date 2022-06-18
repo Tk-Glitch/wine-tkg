@@ -123,19 +123,19 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
             break;
 
         if ((bind_flags & WINED3D_BIND_RENDER_TARGET)
-                && !(format->flags[gl_type] & WINED3DFMT_FLAG_RENDERTARGET))
+                && !(format->caps[gl_type] & WINED3D_FORMAT_CAP_RENDERTARGET))
         {
             WARN("Format %s cannot be used for render targets.\n", debug_d3dformat(format->id));
             continue;
         }
         if ((bind_flags & WINED3D_BIND_DEPTH_STENCIL)
-                && !(format->flags[gl_type] & WINED3DFMT_FLAG_DEPTH_STENCIL))
+                && !(format->caps[gl_type] & WINED3D_FORMAT_CAP_DEPTH_STENCIL))
         {
             WARN("Format %s cannot be used for depth/stencil buffers.\n", debug_d3dformat(format->id));
             continue;
         }
         if ((bind_flags & WINED3D_BIND_SHADER_RESOURCE)
-                && !(format->flags[gl_type] & WINED3DFMT_FLAG_TEXTURE))
+                && !(format->caps[gl_type] & WINED3D_FORMAT_CAP_TEXTURE))
         {
             WARN("Format %s cannot be used for texturing.\n", debug_d3dformat(format->id));
             continue;
@@ -174,8 +174,8 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     }
 
     if (base_type != WINED3D_GL_RES_TYPE_COUNT
-            && (format->flags[base_type] & (WINED3DFMT_FLAG_BLOCKS | WINED3DFMT_FLAG_BLOCKS_NO_VERIFY))
-            == WINED3DFMT_FLAG_BLOCKS)
+            && (format->attrs & (WINED3D_FORMAT_ATTR_BLOCKS | WINED3D_FORMAT_ATTR_BLOCKS_NO_VERIFY))
+            == WINED3D_FORMAT_ATTR_BLOCKS)
     {
         UINT width_mask = format->block_width - 1;
         UINT height_mask = format->block_height - 1;
@@ -188,13 +188,14 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     resource->type = type;
     resource->gl_type = gl_type;
     resource->format = format;
+    resource->format_attrs = format->attrs;
     if (gl_type < WINED3D_GL_RES_TYPE_COUNT)
-        resource->format_flags = format->flags[gl_type];
+        resource->format_caps = format->caps[gl_type];
     resource->multisample_type = multisample_type;
     resource->multisample_quality = multisample_quality;
     resource->usage = usage;
     resource->bind_flags = bind_flags;
-    if (resource->format_flags & WINED3DFMT_FLAG_MAPPABLE)
+    if (resource->format_attrs & WINED3D_FORMAT_ATTR_MAPPABLE)
         access |= WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
     resource->access = access;
     resource->width = width;
@@ -464,7 +465,7 @@ void wined3d_resource_update_draw_binding(struct wined3d_resource *resource)
 const struct wined3d_format *wined3d_resource_get_decompress_format(const struct wined3d_resource *resource)
 {
     const struct wined3d_adapter *adapter = resource->device->adapter;
-    if (resource->format_flags & (WINED3DFMT_FLAG_SRGB_READ | WINED3DFMT_FLAG_SRGB_WRITE)
+    if (resource->format_caps & (WINED3D_FORMAT_CAP_SRGB_READ | WINED3D_FORMAT_CAP_SRGB_WRITE)
             && !(adapter->d3d_info.wined3d_creation_flags & WINED3D_SRGB_READ_WRITE_CONTROL))
         return wined3d_get_format(adapter, WINED3DFMT_B8G8R8A8_UNORM_SRGB, resource->bind_flags);
     return wined3d_get_format(adapter, WINED3DFMT_B8G8R8A8_UNORM, resource->bind_flags);
@@ -519,7 +520,7 @@ HRESULT wined3d_resource_check_box_dimensions(struct wined3d_resource *resource,
         return WINEDDERR_INVALIDRECT;
     }
 
-    if (resource->format_flags & WINED3DFMT_FLAG_BLOCKS)
+    if (resource->format_attrs & WINED3D_FORMAT_ATTR_BLOCKS)
     {
         /* This assumes power of two block sizes, but NPOT block sizes would
          * be silly anyway.
@@ -596,7 +597,8 @@ void *resource_offset_map_pointer(struct wined3d_resource *resource, unsigned in
 
     wined3d_resource_get_sub_resource_map_pitch(resource, sub_resource_idx, &row_pitch, &slice_pitch);
 
-    if ((resource->format_flags & (WINED3DFMT_FLAG_BLOCKS | WINED3DFMT_FLAG_BROKEN_PITCH)) == WINED3DFMT_FLAG_BLOCKS)
+    if ((resource->format_attrs & (WINED3D_FORMAT_ATTR_BLOCKS | WINED3D_FORMAT_ATTR_BROKEN_PITCH))
+            == WINED3D_FORMAT_ATTR_BLOCKS)
     {
         /* Compressed textures are block based, so calculate the offset of
          * the block that contains the top-left pixel of the mapped box. */
@@ -616,12 +618,21 @@ void *resource_offset_map_pointer(struct wined3d_resource *resource, unsigned in
 
 void wined3d_resource_memory_colour_fill(struct wined3d_resource *resource,
         const struct wined3d_map_desc *map, const struct wined3d_color *colour,
-        const struct wined3d_box *box)
+        const struct wined3d_box *box, bool full_subresource)
 {
     const struct wined3d_format *format = resource->format;
     unsigned int w, h, d, x, y, z, bpp;
     uint8_t *dst, *dst2;
     uint32_t c[4];
+
+    /* Fast and simple path for setting everything to zero. The C library's memset is
+     * more sophisticated than our code below. Also this works for block formats, which
+     * we still need to zero-initialize for newly created resources. */
+    if (full_subresource && !colour->r && !colour->g && !colour->b && !colour->a)
+    {
+        memset(map->data, 0, map->slice_pitch * box->back);
+        return;
+    }
 
     w = box->right - box->left;
     h = box->bottom - box->top;

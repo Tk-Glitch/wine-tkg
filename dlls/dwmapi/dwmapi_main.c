@@ -240,12 +240,28 @@ HRESULT WINAPI DwmRegisterThumbnail(HWND dest, HWND src, PHTHUMBNAIL thumbnail_i
     return E_NOTIMPL;
 }
 
+static int get_display_frequency(void)
+{
+    DEVMODEA mode;
+
+    memset(&mode, 0, sizeof(mode));
+    mode.dmSize = sizeof(mode);
+    if (EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &mode))
+        return mode.dmDisplayFrequency;
+    else
+    {
+        WARN("Failed to query display frequency, returning a fallback value.\n");
+        return 60;
+    }
+}
+
 /**********************************************************************
  *           DwmGetCompositionTimingInfo         (DWMAPI.@)
  */
 HRESULT WINAPI DwmGetCompositionTimingInfo(HWND hwnd, DWM_TIMING_INFO *info)
 {
-    static int i;
+    LARGE_INTEGER performance_frequency;
+    static int i, display_frequency;
 
     if (!info)
         return E_INVALIDARG;
@@ -257,11 +273,15 @@ HRESULT WINAPI DwmGetCompositionTimingInfo(HWND hwnd, DWM_TIMING_INFO *info)
 
     memset(info, 0, info->cbSize);
     info->cbSize = sizeof(DWM_TIMING_INFO);
+
+    display_frequency = get_display_frequency();
+    info->rateRefresh.uiNumerator = display_frequency;
     info->rateRefresh.uiDenominator = 1;
-    info->rateRefresh.uiNumerator = 64;
+    info->rateCompose.uiNumerator = display_frequency;
     info->rateCompose.uiDenominator = 1;
-    info->rateCompose.uiNumerator = 64;
-    info->qpcRefreshPeriod = 156250;
+
+    QueryPerformanceFrequency(&performance_frequency);
+    info->qpcRefreshPeriod = performance_frequency.QuadPart / display_frequency;
 
     return S_OK;
 }

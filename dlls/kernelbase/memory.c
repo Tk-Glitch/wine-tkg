@@ -640,8 +640,23 @@ struct rtl_heap_entry
  */
 BOOL WINAPI DECLSPEC_HOTPATCH HeapWalk( HANDLE heap, PROCESS_HEAP_ENTRY *entry )
 {
-    struct rtl_heap_entry rtl_entry = {.lpData = entry->lpData};
+    struct rtl_heap_entry rtl_entry = {0};
     NTSTATUS status;
+
+    if (!entry) return set_ntstatus( STATUS_INVALID_PARAMETER );
+
+    rtl_entry.lpData = entry->lpData;
+    rtl_entry.cbData = entry->cbData;
+    rtl_entry.cbOverhead = entry->cbOverhead;
+    rtl_entry.iRegionIndex = entry->iRegionIndex;
+
+    if (entry->wFlags & PROCESS_HEAP_ENTRY_BUSY)
+        rtl_entry.wFlags |= RTL_HEAP_ENTRY_BUSY;
+    if (entry->wFlags & PROCESS_HEAP_REGION)
+        rtl_entry.wFlags |= RTL_HEAP_ENTRY_REGION;
+    if (entry->wFlags & PROCESS_HEAP_UNCOMMITTED_RANGE)
+        rtl_entry.wFlags |= RTL_HEAP_ENTRY_UNCOMMITTED;
+    memcpy( &rtl_entry.Region, &entry->u.Region, sizeof(entry->u.Region) );
 
     if (!(status = RtlWalkHeap( heap, &rtl_entry )))
     {
@@ -712,7 +727,7 @@ static struct kernelbase_global_data global_data = {0};
 
 static inline struct mem_entry *unsafe_mem_from_HLOCAL( HLOCAL handle )
 {
-    struct mem_entry *mem = CONTAINING_RECORD( handle, struct mem_entry, ptr );
+    struct mem_entry *mem = CONTAINING_RECORD( *(volatile HANDLE *)&handle, struct mem_entry, ptr );
     struct kernelbase_global_data *data = &global_data;
     if (((UINT_PTR)handle & ((sizeof(void *) << 1) - 1)) != sizeof(void *)) return NULL;
     if (mem < data->mem_entries || mem >= data->mem_entries_end) return NULL;
@@ -831,7 +846,7 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalAlloc( UINT flags, SIZE_T size )
     return handle;
 
 failed:
-    if (mem) LocalFree( handle );
+    if (mem) LocalFree( *(volatile HANDLE *)&handle );
     SetLastError( ERROR_NOT_ENOUGH_MEMORY );
     return 0;
 }
@@ -883,6 +898,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH LocalLock( HLOCAL handle )
 
     TRACE_(globalmem)( "handle %p\n", handle );
 
+    if (!handle) return NULL;
     if ((ret = unsafe_ptr_from_HLOCAL( handle )))
     {
         __TRY

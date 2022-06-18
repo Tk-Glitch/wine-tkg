@@ -345,6 +345,8 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderA(HMODULE module, const char *reso
         return E_OUTOFMEMORY;
 
     if (!(rsrc = FindResourceA(module, resource, (const char *)RT_RCDATA)))
+        rsrc = FindResourceA(module, resource, (const char *)RT_BITMAP);
+    if (!rsrc)
     {
         WARN("Failed to find resource.\n");
         HeapFree(GetProcessHeap(), 0, object);
@@ -377,6 +379,8 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
         return E_OUTOFMEMORY;
 
     if (!(rsrc = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
+        rsrc = FindResourceW(module, resource, (const WCHAR *)RT_BITMAP);
+    if (!rsrc)
     {
         WARN("Failed to find resource.\n");
         HeapFree(GetProcessHeap(), 0, object);
@@ -392,6 +396,12 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
     *loader = &object->ID3DX10DataLoader_iface;
 
     return S_OK;
+}
+
+HRESULT WINAPI D3DX10CreateAsyncTextureInfoProcessor(D3DX10_IMAGE_INFO *info, ID3DX10DataProcessor **processor)
+{
+    FIXME("info %p, processor %p stub!\n", info, processor);
+    return E_NOTIMPL;
 }
 
 HRESULT WINAPI D3DX10PreprocessShaderFromMemory(const char *data, SIZE_T data_size, const char *filename,

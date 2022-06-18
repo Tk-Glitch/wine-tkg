@@ -1193,9 +1193,14 @@ static HRESULT WINAPI d3drm_texture3_SetShades(IDirect3DRMTexture3 *iface, DWORD
 
 static HRESULT WINAPI d3drm_texture3_SetDecalSize(IDirect3DRMTexture3 *iface, D3DVALUE width, D3DVALUE height)
 {
-    FIXME("iface %p, width %.8e, height %.8e stub!\n", iface, width, height);
+    struct d3drm_texture *texture = impl_from_IDirect3DRMTexture3(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, width %.8e, height %.8e.\n", iface, width, height);
+
+    texture->decal_width = width;
+    texture->decal_height = height;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI d3drm_texture3_SetDecalOrigin(IDirect3DRMTexture3 *iface, LONG x, LONG y)
@@ -1219,9 +1224,13 @@ static HRESULT WINAPI d3drm_texture3_SetDecalScale(IDirect3DRMTexture3 *iface, D
 
 static HRESULT WINAPI d3drm_texture3_SetDecalTransparency(IDirect3DRMTexture3 *iface, BOOL transparency)
 {
-    FIXME("iface %p, transparency %#x stub!\n", iface, transparency);
+    struct d3drm_texture *texture = impl_from_IDirect3DRMTexture3(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, transparency %#x.\n", iface, transparency);
+
+    texture->transparency = transparency;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI d3drm_texture3_SetDecalTransparentColor(IDirect3DRMTexture3 *iface, D3DCOLOR color)
@@ -1233,9 +1242,14 @@ static HRESULT WINAPI d3drm_texture3_SetDecalTransparentColor(IDirect3DRMTexture
 
 static HRESULT WINAPI d3drm_texture3_GetDecalSize(IDirect3DRMTexture3 *iface, D3DVALUE *width, D3DVALUE *height)
 {
-    FIXME("iface %p, width %p, height %p stub!\n", iface, width, height);
+    struct d3drm_texture *texture = impl_from_IDirect3DRMTexture3(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, width %p, height %p.\n", iface, width, height);
+
+    *width = texture->decal_width;
+    *height = texture->decal_height;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI d3drm_texture3_GetDecalOrigin(IDirect3DRMTexture3 *iface, LONG *x, LONG *y)
@@ -1282,9 +1296,11 @@ static DWORD WINAPI d3drm_texture3_GetDecalScale(IDirect3DRMTexture3 *iface)
 
 static BOOL WINAPI d3drm_texture3_GetDecalTransparency(IDirect3DRMTexture3 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3drm_texture *texture = impl_from_IDirect3DRMTexture3(iface);
 
-    return FALSE;
+    TRACE("iface %p.\n", iface);
+
+    return texture->transparency;
 }
 
 static D3DCOLOR WINAPI d3drm_texture3_GetDecalTransparentColor(IDirect3DRMTexture3 *iface)
@@ -1441,6 +1457,9 @@ HRESULT d3drm_texture_create(struct d3drm_texture **texture, IDirect3DRM *d3drm)
     object->d3drm = d3drm;
     object->max_colors = 8;
     object->max_shades = 16;
+    object->transparency = FALSE;
+    object->decal_width = 1.0f;
+    object->decal_height = 1.0f;
 
     d3drm_object_init(&object->obj, classname);
 

@@ -1834,12 +1834,6 @@ static void test_CompareStringA(void)
     ret = lstrcmpA(NULL, "");
     ok (ret == -1 || broken(ret == -2) /* win9x */, "lstrcmpA(NULL, \"\") should return -1, got %d\n", ret);
 
-
-    /* this requires collation table patch to make it MS compatible */
-    if (strcmp(winetest_platform, "wine") == 0)
-        skip("in Wine due to the lack of a compatible collation table\n");
-    else
-    {
     ret = CompareStringA(LOCALE_SYSTEM_DEFAULT, 0, "'o", -1, "-o", -1 );
     ok(ret == CSTR_LESS_THAN, "'o vs -o expected CSTR_LESS_THAN, got %d\n", ret);
 
@@ -1875,8 +1869,6 @@ static void test_CompareStringA(void)
 
     ret = CompareStringA(LOCALE_SYSTEM_DEFAULT, SORT_STRINGSORT, "-m", -1, "`o", -1 );
     ok(ret == CSTR_LESS_THAN, "-m vs `o expected CSTR_LESS_THAN, got %d\n", ret);
-    }
-
 
     /* WinXP handles embedded NULLs differently than earlier versions */
     ret = CompareStringA(LOCALE_USER_DEFAULT, 0, "aLuZkUtZ", 8, "aLuZkUtZ\0A", 10);
@@ -1919,15 +1911,15 @@ static void test_CompareStringA(void)
     ok (GetLastError() == 0xdeadbeef && ret == CSTR_EQUAL,
         "ret %d, error %ld, expected value %d\n", ret, GetLastError(), CSTR_EQUAL);
 
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 3, ABC_FF, 3);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 3);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 5, ABC_FF, 3);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 3);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 3, ABC_FF, 5);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 5, ABC_FF, 5);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_FF, 5, ABC_EE, 5);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_FF, 5, ABC_EE, 5);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
 }
 
@@ -1959,55 +1951,55 @@ static void test_CompareStringW(void)
     *str2 = 'B';
 
     /* CompareStringW should abort on the first non-matching character */
-    ret = CompareStringW(CP_ACP, 0, str1, 100, str2, 100);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, str1, 100, str2, 100);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
 
     success = VirtualFree(buf, 0, MEM_RELEASE);
     ok(success, "VirtualFree failed with %lu\n", GetLastError());
 
     SetLastError(0xdeadbeef);
-    ret = CompareStringW(CP_ACP, SORT_DIGITSASNUMBERS, L"NULL", -1, L"NULL", -1);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, SORT_DIGITSASNUMBERS, L"NULL", -1, L"NULL", -1);
     ok(ret == CSTR_EQUAL || broken(!ret && GetLastError() == ERROR_INVALID_FLAGS) /* <Win7 */,
         "expected CSTR_EQUAL, got %d, last error %ld\n", ret, GetLastError());
 
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 3, ABC_FF, 3);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 3);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 5, ABC_FF, 3);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 3);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 3, ABC_FF, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 5, ABC_FF, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_FF, 5, ABC_EE, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_FF, 5, ABC_EE, 5);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_ACUTE_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 4, A_ACUTE_BC, 4);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 3, A_ACUTE_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, ABC_EE, 3, A_ACUTE_BC, 4);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_NULL_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 4, A_NULL_BC, 4);
     ok(ret == CSTR_EQUAL, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 4, A_NULL_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, ABC_EE, 4, A_NULL_BC, 4);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, A_NULL_BC, 4, A_ACUTE_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, A_NULL_BC, 4, A_ACUTE_BC, 4);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC, 4);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 }
 
@@ -2018,159 +2010,158 @@ struct comparestringex_test {
     const WCHAR second[2];
     INT ret;
     INT broken;
-    BOOL todo;
 };
 
 static const struct comparestringex_test comparestringex_tests[] = {
     /* default behavior */
     { /* 0 */
       "tr-TR", 0,
-      {'i',0},   {'I',0},   CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {'I',0},   CSTR_LESS_THAN,    -1
     },
     { /* 1 */
       "tr-TR", 0,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 2 */
       "tr-TR", 0,
-      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 3 */
       "tr-TR", 0,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 4 */
       "tr-TR", 0,
-      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 5 */
       "tr-TR", 0,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                FALSE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_IGNORECASE */
     { /* 6 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_EQUAL,        -1,                FALSE
+      {'i',0},   {'I',0},   CSTR_EQUAL,        -1
     },
     { /* 7 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 8 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 9 */
       "tr-TR", NORM_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 10 */
       "tr-TR", NORM_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 11 */
       "tr-TR", NORM_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                FALSE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_LINGUISTIC_CASING */
     { /* 12 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 13 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 14 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 15 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 16 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'I',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'I',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 17 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                FALSE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with LINGUISTIC_IGNORECASE */
     { /* 18 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_EQUAL,        -1,                TRUE
+      {'i',0},   {'I',0},   CSTR_EQUAL,        -1
     },
     { /* 19 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 20 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 21 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 22 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 23 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                FALSE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_LINGUISTIC_CASING | NORM_IGNORECASE */
     { /* 24 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL,        TRUE
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL
     },
     { /* 25 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 26 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 27 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
      },
     { /* 28 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 29 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                FALSE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE */
     { /* 30 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL,        TRUE
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL
     },
     { /* 31 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 32 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 33 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 34 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 35 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    FALSE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     }
 };
 
@@ -2193,9 +2184,8 @@ static void test_CompareStringEx(void)
 
         MultiByteToWideChar(CP_ACP, 0, e->locale, -1, locale, ARRAY_SIZE(locale));
         ret = pCompareStringEx(locale, e->flags, e->first, -1, e->second, -1, NULL, NULL, 0);
-        todo_wine_if (e->todo)
-            ok(ret == e->ret || broken(ret == e->broken),
-               "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
+        ok(ret == e->ret || broken(ret == e->broken),
+           "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
     }
 
 }
@@ -2332,7 +2322,7 @@ static void test_LCMapStringA(void)
     ok(ret2, "LCMapStringA must succeed\n");
     ok(buf2[ret2-1] == 0, "LCMapStringA not null-terminated\n" );
     ok(ret == ret2, "lengths of sort keys must be equal\n");
-    ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+    ok(!memcmp(buf, buf2, ret), "sort keys must be equal\n");
 
     /* test we get the same length when no dest buffer is provided */
     ret2 = LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_SORTKEY,
@@ -2348,7 +2338,7 @@ static void test_LCMapStringA(void)
                        lower_case, -1, buf2, sizeof(buf2));
     ok(ret2, "LCMapStringA must succeed\n");
     ok(ret == ret2, "lengths of sort keys must be equal\n");
-    ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+    ok(!memcmp(buf, buf2, ret), "sort keys must be equal\n");
 
     /* Don't test LCMAP_SORTKEY | NORM_IGNORENONSPACE, produces different
        results from plain LCMAP_SORTKEY on Vista */
@@ -2361,7 +2351,7 @@ static void test_LCMapStringA(void)
                        symbols_stripped, -1, buf2, sizeof(buf2));
     ok(ret2, "LCMapStringA must succeed\n");
     ok(ret == ret2, "lengths of sort keys must be equal\n");
-    ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+    ok(!memcmp(buf, buf2, ret), "sort keys must be equal\n");
 
     /* test NORM_IGNORENONSPACE */
     lstrcpyA(buf, "foo");
@@ -2500,6 +2490,12 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
     ret2 = func_ptr(LCMAP_FULLWIDTH | LCMAP_HIRAGANA, halfwidth_text, -1, NULL, 0);
     ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
 
+    /* LCMAP_FULLWIDTH | LCMAP_KATAKANA maps to full-width first */
+    ret = func_ptr(LCMAP_FULLWIDTH | LCMAP_KATAKANA, halfwidth_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(katakana_text) + 1, "%s ret %d, error %ld, expected value %d\n", func_name,
+       ret, GetLastError(), lstrlenW(katakana_text) + 1);
+    ok(!lstrcmpW(buf, katakana_text), "%s string compare mismatch\n", func_name);
+
     /* test LCMAP_HALFWIDTH */
     ret = func_ptr(LCMAP_HALFWIDTH, japanese_text, -1, buf, ARRAY_SIZE(buf));
     ok(ret == lstrlenW(halfwidth_text) + 1, "%s ret %d, error %ld, expected value %d\n", func_name,
@@ -2518,6 +2514,12 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
 
     ret2 = func_ptr(LCMAP_HALFWIDTH | LCMAP_KATAKANA, japanese_text, -1, NULL, 0);
     ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
+
+    /* LCMAP_HALFWIDTH | LCMAP_HIRAGANA maps to Hiragana first */
+    ret = func_ptr(LCMAP_HALFWIDTH | LCMAP_HIRAGANA, japanese_text, -1, buf, ARRAY_SIZE(buf));
+    ret2 = func_ptr(LCMAP_HALFWIDTH, hiragana_text, -1, buf2, ARRAY_SIZE(buf2));
+    ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
+    ok(!lstrcmpW(buf, buf2), "%s string compare mismatch %s vs %s\n", func_name, debugstr_w(buf), debugstr_w(buf2));
 
     /* test buffer overflow */
     SetLastError(0xdeadbeef);
@@ -2585,7 +2587,26 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
                        upper_case, lstrlenW(upper_case), buf2, sizeof(buf2));
     ok(ret, "%s func_ptr must succeed\n", func_name);
     ok(ret == ret2, "%s lengths of sort keys must be equal\n", func_name);
-    ok(!lstrcmpA(p_buf, p_buf2), "%s sort keys must be equal\n", func_name);
+    ok(!memcmp(p_buf, p_buf2, ret), "%s sort keys must be equal\n", func_name);
+
+    /* test contents with short buffer */
+    memset( buf, 0xcc, sizeof(buf) );
+    ret = func_ptr(LCMAP_SORTKEY, upper_case, -1, buf, ret - 1);
+    ok( !ret, "%s succeeded with %u\n", func_name, ret );
+    ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "%s wrong error %lu\n", func_name, GetLastError() );
+    ret = (char *)memchr( p_buf, 0xcc, sizeof(buf) ) - p_buf;
+    ok( ret, "%s buffer not filled\n", func_name );
+    ok( p_buf[ret - 1] == 0x01, "%s buffer filled up to %02x\n", func_name, (BYTE)p_buf[ret - 1] );
+    ok( !memcmp( p_buf, p_buf2, ret - 1 ), "%s buffers differ\n", func_name );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    ret = func_ptr(LCMAP_SORTKEY, upper_case, -1, buf, ret2 - 20);
+    ok( !ret, "%s succeeded with %u\n", func_name, ret );
+    ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "%s wrong error %lu\n", func_name, GetLastError() );
+    ret = (char *)memchr( p_buf, 0xcc, sizeof(buf) ) - p_buf;
+    ok( ret, "%s buffer not filled\n", func_name );
+    ok( p_buf[ret - 1] == 0x01, "%s buffer filled up to %02x\n", func_name, (BYTE)p_buf[ret - 1] );
+    ok( !memcmp( p_buf, p_buf2, ret - 1 ), "%s buffers differ\n", func_name );
 
     /* test LCMAP_SORTKEY | NORM_IGNORECASE */
     ret = func_ptr(LCMAP_SORTKEY | NORM_IGNORECASE,
@@ -2595,7 +2616,7 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
                        lower_case, -1, buf2, sizeof(buf2));
     ok(ret2, "%s func_ptr must succeed\n", func_name);
     ok(ret == ret2, "%s lengths of sort keys must be equal\n", func_name);
-    ok(!lstrcmpA(p_buf, p_buf2), "%s sort keys must be equal\n", func_name);
+    ok(!memcmp(p_buf, p_buf2, ret), "%s sort keys must be equal\n", func_name);
 
     /* Don't test LCMAP_SORTKEY | NORM_IGNORENONSPACE, produces different
        results from plain LCMAP_SORTKEY on Vista */
@@ -2608,7 +2629,7 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
                        symbols_stripped, -1, buf2, sizeof(buf2));
     ok(ret2, "%s func_ptr must succeed\n", func_name);
     ok(ret == ret2, "%s lengths of sort keys must be equal\n", func_name);
-    ok(!lstrcmpA(p_buf, p_buf2), "%s sort keys must be equal\n", func_name);
+    ok(!memcmp(p_buf, p_buf2, ret), "%s sort keys must be equal\n", func_name);
 
     /* test NORM_IGNORENONSPACE */
     lstrcpyW(buf, fooW);
@@ -2660,10 +2681,13 @@ static void test_LCMapStringW(void)
 
     SetLastError(0xdeadbeef);
     ret = LCMapStringW((LCID)-1, LCMAP_LOWERCASE, upper_case, -1, buf, ARRAY_SIZE(buf));
-    todo_wine {
     ok(!ret, "LCMapStringW should fail with bad lcid\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "unexpected error code %ld\n", GetLastError());
-    }
+
+    SetLastError(0xdeadbeef);
+    ret = LCMapStringW((LCID)0xdead, LCMAP_HIRAGANA, upper_case, -1, buf, ARRAY_SIZE(buf));
+    ok(!ret, "LCMapStringW should fail with bad lcid\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "unexpected error code %ld\n", GetLastError());
 
     test_lcmapstring_unicode(LCMapStringW_wrapper, "LCMapStringW:");
 }
@@ -2689,10 +2713,13 @@ static void test_LCMapStringEx(void)
     SetLastError(0xdeadbeef);
     ret = pLCMapStringEx(invalidW, LCMAP_LOWERCASE,
                          upper_case, -1, buf, ARRAY_SIZE(buf), NULL, NULL, 0);
-    todo_wine {
     ok(!ret, "LCMapStringEx should fail with bad locale name\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "unexpected error code %ld\n", GetLastError());
-    }
+
+    SetLastError(0xdeadbeef);
+    ret = pLCMapStringEx(invalidW, LCMAP_HIRAGANA,
+                         upper_case, -1, buf, ARRAY_SIZE(buf), NULL, NULL, 0);
+    ok(ret, "LCMapStringEx should not fail with bad locale name\n");
 
     /* test reserved parameters */
     ret = pLCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE,
@@ -3141,7 +3168,6 @@ static void test_LocaleNameToLCID(void)
     else win_skip( "NlsValidateLocale not available\n" );
 }
 
-/* this requires collation table patch to make it MS compatible */
 static const char * const strings_sorted[] =
 {
 "'",
@@ -3228,9 +3254,11 @@ static int compare_string3(const void *e1, const void *e2)
     const char *s2 = *(const char *const *)e2;
     char key1[256], key2[256];
 
-    LCMapStringA(0, LCMAP_SORTKEY, s1, -1, key1, sizeof(key1));
-    LCMapStringA(0, LCMAP_SORTKEY, s2, -1, key2, sizeof(key2));
-    return strcmp(key1, key2);
+    int len1 = LCMapStringA(0, LCMAP_SORTKEY, s1, -1, key1, sizeof(key1));
+    int len2 = LCMapStringA(0, LCMAP_SORTKEY, s2, -1, key2, sizeof(key2));
+    int ret = memcmp(key1, key2, min(len1, len2));
+    if (!ret) ret = len1 - len2;
+    return ret;
 }
 
 static void test_sorting(void)
@@ -3240,13 +3268,6 @@ static void test_sorting(void)
     int i;
 
     assert(sizeof(buf) >= sizeof(strings));
-
-    /* this requires the collation table patch to make it MS compatible */
-    if (strcmp(winetest_platform, "wine") == 0)
-    {
-        skip("in Wine due to the lack of a compatible collation table\n");
-        return;
-    }
 
     /* 1. sort using lstrcmpA */
     memcpy(buf, strings, sizeof(strings));
@@ -3281,266 +3302,329 @@ struct sorting_test_entry {
     DWORD flags;
     const WCHAR *first;
     const WCHAR *second;
-    BOOL broken_on_xp;
 };
 
 static const struct sorting_test_entry unicode_sorting_tests[] =
 {
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0037", L"\x277c", TRUE }, /* Normal character */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x1eca", L"\x1ecb" }, /* Normal character */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x1d05", L"\x1d48" }, /* Normal character */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x19d7", L"\x096d" }, /* Normal character diacritics */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x00f5", L"\x1ecf" }, /* Normal character diacritics */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x2793", L"\x0d70", TRUE }, /* Normal character diacritics */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"A", L"a" }, /* Normal character case weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"z", L"Z" }, /* Normal character case weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xe5a6", L"\xe5a5\x0333", TRUE }, /* PUA character */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xe5d7", L"\xe5d6\x0330", TRUE }, /* PUA character */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\u276a", L"\u2768" }, /* Symbols add diacritic weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\u204d", L"\uff02" }, /* Symbols add case weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\ue6e3\u0a02", L"\ue6e3\u20dc", TRUE }, /* Default character, when there is main weight extra there must be no diacritic weight */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"a \u2060 b", L"a  b" }, /* Unsortable characters */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"a \xfff0 b", L"a  b" }, /* Invalid/undefined characters */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"a\x139F a", L"a a" }, /* Invalid/undefined characters  */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"a\x139F a", L"a b" }, /* Invalid/undefinde characters  */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x00fc", L"\x016d" }, /* Default characters */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x3fcb\x7fd5", L"\x0006\x3032" }, /* Default characters */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x00fc\x30fd", L"\x00fa\x1833" }, /* Default characters */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x1B56\x0330", L"\x1096" }, /* Diacritic is added */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x1817\x0333", L"\x19d7" }, /* Diacritic is added */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x04de\x05ac", L"\x0499" }, /* Diacritic is added */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x01ba\x0654", L"\x01b8" }, /* Diacritic can overflow */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x06b7\x06eb", L"\x06b6" }, /* Diacritic can overflow */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x1420\x0333", L"\x141f" }, /* Diacritic can overflow */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN ,0, L"\x1b56\x0654", L"\x1b56\x0655" }, /* Diacritic can overflow */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x1b56\x0654\x0654", L"\x1b56\x0655" }, /* Diacritic can overflow */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x11bc", L"\x110b" }, /* Jamo case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x11c1", L"\x1111" }, /* Jamo case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x11af", L"\x1105" }, /* Jamo case weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x11c2", L"\x11f5" }, /* Jamo main weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x1108", L"\x1121" }, /* Jamo main weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x1116", L"\x11c7" }, /* Jamo main weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x11b1", L"\x11d1" }, /* Jamo main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x4550\x73d2", L"\x3211\x23ad" }, /* CJK main weight 1 */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x3265", L"\x4079" }, /* CJK main weight 1 */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x4c19\x68d0\x52d0", L"\x316d" }, /* CJK main weight 1 */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x72dd", L"\x6b8a" }, /* CJK main weight 2 */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x6785\x3bff\x6f83", L"\x7550\x34c9\x71a7" }, /* CJK main weight 2 */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x5d61", L"\x3aef" }, /* CJK main weight 2 */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x207a", L"\xfe62" }, /* Symbols case weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xfe65", L"\xff1e" }, /* Symbols case weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x2502", L"\xffe8" }, /* Symbols case weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x21da", L"\x21dc" }, /* Symbols diacritic weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x29fb", L"\x2295" }, /* Symbols diacritic weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0092", L"\x009c" }, /* Symbols diacritic weights */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x21da", L"\x21dc" }, /* NORM_IGNORESYMBOLS */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x29fb", L"\x2295" }, /* NORM_IGNORESYMBOLS */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0092", L"\x009c" }, /* NORM_IGNORESYMBOLS */
-    { L"en-US", CSTR_EQUAL,        CSTR_LESS_THAN,    0, L"\x3099", L"\x309a" }, /* Small diacritic weights at the end get ignored */
-    { L"en-US", CSTR_EQUAL,        CSTR_LESS_THAN,    0, L"\x309b", L"\x05a2" }, /* Small diacritic weights at the end get ignored */
-    { L"en-US", CSTR_EQUAL,        CSTR_LESS_THAN,    0, L"\xff9e", L"\x0e47" }, /* Small diacritic weights at the end get ignored */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"a b", L"\x0103 a" }, /* Main weights have priority over diacritic weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"a",   L"\x0103" },   /* Main weights have priority over diacritic weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"e x", L"\x0113 v" }, /* Main weights have priority over diacritic weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"e",   L"\x0113" },   /* Main weights have priority over diacritic weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"c s", L"\x0109 r" }, /* Main weights have priority over diacritic weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"c",   L"\x0109" },   /* Main weights have priority over diacritic weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"a \x0103", L"A a" }, /* Diacritic weights have priority over case weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"a",        L"A" },   /* Diacritic weights have priority over case weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"e \x0113", L"E e" }, /* Diacritic weights have priority over case weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"e",        L"E" },   /* Diacritic weights have priority over case weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"c \x0109", L"C c" }, /* Diacritic weights have priority over case weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"c",        L"C" },   /* Diacritic weights have priority over case weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1152", L"\x1153" }, /* Diacritic values for Jamo are not ignored */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1143", L"\x1145" }, /* Diacritic values for Jamo are not ignored */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1196", L"\x1174" }, /* Diacritic values for Jamo are not ignored */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x318e", L"\x382a" }, /* Jungseong < PUA */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xffcb", L"\x3d13" }, /* Jungseong < PUA */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xffcc", L"\x8632" }, /* Jungseong < PUA */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xd847", L"\x382a" }, /* Surrogate > PUA */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xd879", L"\x3d13" }, /* Surrogate > PUA */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xd850", L"\x8632" }, /* Surrogate > PUA */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"A\x0301\x0301", L"A\x0301\x00ad\x0301" }, /* Unsortable combined with diacritics */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"b\x07f2\x07f2", L"b\x07f2\x2064\x07f2" }, /* Unsortable combined with diacritics */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"X\x0337\x0337", L"X\x0337\xfffd\x0337" }, /* Unsortable combined with diacritics */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORECASE, L"c", L"C" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORECASE, L"e", L"E" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORECASE, L"A", L"a" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x001b", L"\x001c" }, /* Punctuation primary weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0005", L"\x0006" }, /* Punctuation primary weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0027", L"\xff07", TRUE }, /* Punctuation diacritic/case weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x07f4", L"\x07f5", TRUE }, /* Punctuation diacritic/case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x207b", L"\x0008" }, /* Punctuation diacritic/case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x207b", L"\x0008" }, /* Punctuation */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0004", L"\x0011" }, /* Punctuation */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xff07", L"\x07f4" }, /* Punctuation primary weight has priority */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xfe32", L"\x2014" }, /* Punctuation primary weight has priority */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x058a", L"\x2027" }, /* Punctuation primary weight has priority */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x207b", L"\x0008" }, /* Punctuation */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0004", L"\x0011" }, /* Punctuation */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x207b", L"\x0008" }, /* Punctuation */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x0004", L"\x0011" }, /* Punctuation */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x207b", L"\x0008" }, /* Punctuation */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x0004", L"\x0011" }, /* Punctuation */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x001a", L"\x001b" }, /* Punctuation main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x2027", L"\x2011" }, /* Punctuation main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x3030", L"\x301c" }, /* Punctuation main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x058a", L"\x2010" }, /* Punctuation diacritic weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x07F5", L"\x07F4" }, /* Punctuation diacritic weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe32", L"\x2013" }, /* Punctuation case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe31", L"\xfe58" }, /* Punctuation case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xff07", L"\x0027" }, /* Punctuation case weight */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x207b", L"\x0008" }, /* Punctuation NORM_IGNORESYMBOLS */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0004", L"\x0011" }, /* Punctuation NORM_IGNORESYMBOLS */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x207b", L"\x0008" }, /* Punctuation NORM_IGNORESYMBOLS SORT_STRINGSORT */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x0004", L"\x0011" }, /* Punctuation NORM_IGNORESYMBOLS SORT_STRINGSORT */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x001a", L"\x001b" }, /* Punctuation SORT_STRINGSORT main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x2027", L"\x2011", }, /* Punctuation SORT_STRINGSORT main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x3030", L"\x301c", }, /* Punctuation SORT_STRINGSORT main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x058a", L"\x2010" }, /* Punctuation SORT_STRINGSORT diacritic weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x07F5", L"\x07F4" }, /* Punctuation SORT_STRINGSORT diacritic weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe32", L"\x2013" }, /* Punctuation SORT_STRINGSORT case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe31", L"\xfe58" }, /* Punctuation SORT_STRINGSORT case weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xff07", L"\x0027" }, /* Punctuation SORT_STRINGSORT case weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x04b0", L"\x32db" }, /* Japanese main weight */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x3093", L"\x1e62\x013f" }, /* Japanese main weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30d3", L"\x30d4" }, /* Japanese diacritic weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x307b", L"\x307c" }, /* Japanese diacritic weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30ea", L"\x32f7" }, /* Japanese diacritic weight */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x31fb", L"\x30e9" }, /* Japanese case weight small */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30db", L"\x31f9" }, /* Japanese case weight small */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xff6d", L"\xff95" }, /* Japanese case weight small */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x31fb", L"\x30e9" }, /* Japanese case weight small */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x30db", L"\x31f9" }, /* Japanese case weight small */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\xff6d", L"\xff95" }, /* Japanese case weight small */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30d5", L"\x3075" }, /* Japanese case weight kana */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x306a", L"\x30ca" }, /* Japanese case weight kana */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x305a", L"\x30ba" }, /* Japanese case weight kana */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30d5", L"\x3075" }, /* Japanese case weight kana */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x306a", L"\x30ca" }, /* Japanese case weight kana */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x305a", L"\x30ba" }, /* Japanese case weight kana */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30bf", L"\xff80" }, /* Japanese case weight width */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30ab", L"\xff76" }, /* Japanese case weight width */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30a2", L"\xff71" }, /* Japanese case weight width */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30bf", L"\xff80" }, /* Japanese case weight width */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30ab", L"\xff76" }, /* Japanese case weight width */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30a2", L"\xff71" }, /* Japanese case weight width */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x31a2", L"\x3110" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x1342", L"\x133a" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x16a4", L"\x16a5" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30b1\x30f6", L"\xff79\x30b1" }, /* Kana small data must have priority over width data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30a6\x30a5", L"\xff73\x30a6" }, /* Kana small data must have priority over width data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30a8\x30a7", L"\xff74\x30a8" }, /* Kana small data must have priority over width data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30b1", L"\xff79" }, /* Kana small data must have priority over width data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30a6", L"\xff73" }, /* Kana small data must have priority over width data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30a8", L"\xff74" }, /* Kana small data must have priority over width data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x3046\x30a9", L"\x30a6\x30aa" }, /* Kana small data must have priority over kana type data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x304a\x3041", L"\x30aa\x3042" }, /* Kana small data must have priority over kana type data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x3059\x30a7", L"\x30b9\x30a8" }, /* Kana small data must have priority over kana type data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x3046", L"\x30a6" }, /* Kana small data must have priority over kana type data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x304a", L"\x30aa" }, /* Kana small data must have priority over kana type data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x3059", L"\x30b9" }, /* Kana small data must have priority over kana type data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30a6\x30a8", L"\xff73\x3048" }, /* Kana type data must have priority over width data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30ab\x30a3", L"\xff76\x3043" }, /* Kana type data must have priority over width data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30b5\x30ac", L"\xff7b\x304c" }, /* Kana type data must have priority over width data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30a6", L"\xff73" }, /* Kana type data must have priority over width data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30ab", L"\xff76" }, /* Kana type data must have priority over width data */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30b5", L"\xff7b" }, /* Kana type data must have priority over width data */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x305a a", L"\x30ba A" }, /* Case weights have priority over extra weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30c1 b", L"\xff81 B" }, /* Case weights have priority over extra weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xff8b x", L"\x31f6 X" }, /* Case weights have priority over extra weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x305a", L"\x30ba" }, /* Case weights have priority over extra weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30c1", L"\xff81" }, /* Case weights have priority over extra weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xff8b", L"\x31f6" }, /* Case weights have priority over extra weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0027\x31ff", L"\x007f\xff9b" }, /* Extra weights have priority over special weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x07f5\x30f3", L"\x07f4\x3093" }, /* Extra weights have priority over special weights */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xfe63\x30e0", L"\xff0d\x3080" }, /* Extra weights have priority over special weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x0027", L"\x007f" }, /* Extra weights have priority over special weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x07f5", L"\x07f4" }, /* Extra weights have priority over special weights */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xfe63", L"\xff0d" }, /* Extra weights have priority over special weights */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xff68", L"\x30a3" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xff75", L"\x30aa" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30e2", L"\xff93" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xff68", L"\x30a3" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\xff75", L"\x30aa" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x30e2", L"\xff93" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30a8", L"\x3048" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30af", L"\x304f" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x3067", L"\x30c7" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30a8", L"\x3048" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x30af", L"\x304f" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x3067", L"\x30c7" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xffb7", L"\x3147" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xffb6", L"\x3146" },
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x3145", L"\xffb5" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORECASE, L"\xffb7", L"\x3147" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORECASE, L"\xffb6", L"\x3146" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x3145", L"\xffb5" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2cff", L"\x30ba" }, /* Coptic < Japanese */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2cdb", L"\x32de" }, /* Coptic < Japanese */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2ce0", L"\x30c6" }, /* Coptic < Japanese */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05d3", L"\x30ba" }, /* Hebrew > Japanese */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05e3", L"\x32de" }, /* Hebrew > Japanese */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05d7", L"\x30c6" }, /* Hebrew > Japanese */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"\x00c6", L"\x0041\x0045" }, /* Expansion */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"\x0f5c", L"\x0f5b\x0fb7" }, /* Expansion */
-    { L"en-US", CSTR_EQUAL,        CSTR_EQUAL,        0, L"\x05f0", L"\x05d5\x05d5" }, /* Expansion */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_EQUAL,        0, L"\x0f75", L"\x0f71\x0f74" }, /* Expansion character always follow default character logic */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_EQUAL,        0, L"\xfc5e", L"\x064c\x0651" }, /* Expansion character always follow default character logic */
-    { L"en-US", CSTR_LESS_THAN,    CSTR_EQUAL,        0, L"\xfb2b", L"\x05e9\x05c2" }, /* Expansion character always follow default character logic */
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x6df8", L"\x654b\x29e9" }, /* Japanese locale */
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x685d\x1239\x1b61", L"\x59b6\x6542\x2a62\x04a7" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x62f3\x43e9", L"\x5760" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x634c", L"\x2f0d\x5f1c\x7124" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x69e7\x0502", L"\x57cc" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x7589", L"\x67c5" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x5ede\x765c", L"\x7324" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x5c7f\x5961", L"\x7cbe" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x3162", L"\x6a84\x1549\x0b60" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x769e\x448e", L"\x4e6e" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x59a4", L"\x5faa\x607c" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x529b", L"\x733f" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x6ff8\x2a0a", L"\x7953\x6712" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x6dfb", L"\x6793" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x67ed", L"\x6aa2" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x4e61", L"\x6350\x6b08" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x5118", L"\x53b3\x75b4" },
-    { L"ja-JP", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x6bbf", L"\x65a3" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x5690", L"\x5fa8" },
-    { L"ja-JP", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x61e2", L"\x76e5" },
-    { L"ko-KR", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x8db6", L"\xd198" },
-    { L"ko-KR", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x8f72", L"\xd2b9" },
-    { L"ko-KR", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x91d8", L"\xd318" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x8db6", L"\xd198" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x8f72", L"\xd2b9" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x91d8", L"\xd318" },
-    { L"cs-CZ", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x0160", L"\x0219" },
-    { L"cs-CZ", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x059a", L"\x0308" },
-    { L"cs-CZ", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x013a", L"\x013f" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0160", L"\x0219" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x059a", L"\x0308" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x013a", L"\x013f" },
-    { L"vi-VN", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x1d8f", L"\x1ea8" },
-    { L"vi-VN", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0323", L"\xfe26" },
-    { L"vi-VN", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"R",      L"\xff32" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x1d8f", L"\x1ea8" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x0323", L"\xfe26" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"R",      L"\xff32" },
-    { L"zh-HK", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x83ae", L"\x71b9" },
-    { L"zh-HK", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x7e50", L"\xc683" },
-    { L"zh-HK", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x6c69", L"\x7f8a" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x83ae", L"\x71b9" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x7e50", L"\xc683" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x6c69", L"\x7f8a" },
-    { L"tr-TR", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x00dc", L"\x1ee9" },
-    { L"tr-TR", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x00fc", L"\x1ee6" },
-    { L"tr-TR", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x0152", L"\x00d6" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x00dc", L"\x1ee9" },
-    { L"en-US", CSTR_LESS_THAN,    CSTR_LESS_THAN,    0, L"\x00fc", L"\x1ee6" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\x0152", L"\x00d6" },
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xa042\x09bc", L"\xa042" }, /* Diacritic is added */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xa063\x302b", L"\xa063" }, /* Diacritic is added */
-    { L"en-US", CSTR_GREATER_THAN, CSTR_GREATER_THAN, 0, L"\xa07e\x0c56", L"\xa07e" }, /* Diacritic is added */
+     /* Normal character */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0037", L"\x277c" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1eca", L"\x1ecb" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1d05", L"\x1d48" },
+     /* Normal character diacritics */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x19d7", L"\x096d" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00f5", L"\x1ecf" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x2793", L"\x0d70" },
+     /* Normal character case weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"A", L"a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"z", L"Z" },
+     /* PUA character */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xe5a6", L"\xe5a5\x0333" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xe5d7", L"\xe5d6\x0330" },
+     /* Symbols add diacritic weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\u276a", L"\u2768" },
+     /* Symbols add case weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\u204d", L"\uff02" },
+     /* Default character, when there is main weight extra there must be no diacritic weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\ue6e3\u0a02", L"\ue6e3\u20dc" },
+     /* Unsortable characters */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"a \u2060 b", L"a  b" },
+     /* Invalid/undefined characters */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"a \xfff0 b", L"a  b" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"a\x139F a", L"a a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"a\x139F a", L"a b" },
+     /* Default characters */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00fc", L"\x016d" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3fcb\x7fd5", L"\x0006\x3032" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00fc\x30fd", L"\x00fa\x1833" },
+     /* Diacritic is added */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1B56\x0330", L"\x1096" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1817\x0333", L"\x19d7" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x04de\x05ac", L"\x0499" },
+     /* Diacritic can overflow */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x01ba\x0654", L"\x01b8" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x06b7\x06eb", L"\x06b6" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1420\x0333", L"\x141f" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1b56\x0654", L"\x1b56\x0655" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1b56\x0654\x0654", L"\x1b56\x0655" },
+     /* Jamo case weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x11bc", L"\x110b" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x11c1", L"\x1111" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x11af", L"\x1105" },
+     /* Jamo main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x11c2", L"\x11f5" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1108", L"\x1121" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1116", L"\x11c7" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x11b1", L"\x11d1" },
+     /* CJK main weight 1 */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x4550\x73d2", L"\x3211\x23ad" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x3265", L"\x4079" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x4c19\x68d0\x52d0", L"\x316d" },
+     /* CJK main weight 2 */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x72dd", L"\x6b8a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x6785\x3bff\x6f83", L"\x7550\x34c9\x71a7" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x5d61", L"\x3aef" },
+     /* Symbols case weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x207a", L"\xfe62" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xfe65", L"\xff1e" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x2502", L"\xffe8" },
+     /* Symbols diacritic weights */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x21da", L"\x21dc" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x29fb", L"\x2295" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0092", L"\x009c" },
+     /* NORM_IGNORESYMBOLS */
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x21da", L"\x21dc" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x29fb", L"\x2295" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0092", L"\x009c" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x3099", L"\x309b" }, /* Small diacritic weights at the end get ignored */
+     /* Main weights have priority over diacritic weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"a b", L"\x0103 a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"a",   L"\x0103" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"e x", L"\x0113 v" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"e",   L"\x0113" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"c s", L"\x0109 r" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"c",   L"\x0109" },
+     /* Diacritic weights have priority over case weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"a \x0103", L"A a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"a",        L"A" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"e \x0113", L"E e" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"e",        L"E" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"c \x0109", L"C c" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"c",        L"C" },
+     /* Diacritic values for Jamo are not ignored */
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1152", L"\x1153" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1143", L"\x1145" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1196", L"\x1174" },
+     /* Jungseong < PUA */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x318e", L"\x382a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xffcb", L"\x3d13" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xffcc", L"\x8632" },
+     /* Surrogate > PUA */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xd847", L"\x382a" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xd879", L"\x3d13" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xd850", L"\x8632" },
+     /* Unsortable combined with diacritics */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"A\x0301\x0301", L"A\x0301\x00ad\x0301" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"b\x07f2\x07f2", L"b\x07f2\x2064\x07f2" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"X\x0337\x0337", L"X\x0337\xfffd\x0337" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORECASE, L"c", L"C" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORECASE, L"e", L"E" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORECASE, L"A", L"a" },
+    /* Punctuation primary weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x001b", L"\x001c" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0005", L"\x0006" },
+     /* Punctuation diacritic/case weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0027", L"\xff07" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x07f4", L"\x07f5" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x207b", L"\x0008" },
+     /* Punctuation primary weight has priority */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff07", L"\x07f4" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xfe32", L"\x2014" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x058a", L"\x2027" },
+     /* Punctuation */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x207b", L"\x0008" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0004", L"\x0011" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0004", L"\x0011" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x207b", L"\x0008" },
+    { L"en-US", -1, CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x0004", L"\x0011" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x0004", L"\x0011" },
+     /* Punctuation main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x001a", L"\x001b" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x2027", L"\x2011" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x3030", L"\x301c" },
+     /* Punctuation diacritic weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x058a", L"\x2010" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x07F5", L"\x07F4" },
+     /* Punctuation case weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe32", L"\x2013" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe31", L"\xfe58" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xff07", L"\x0027" },
+     /* Punctuation NORM_IGNORESYMBOLS */
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0004", L"\x0011" },
+     /* Punctuation NORM_IGNORESYMBOLS SORT_STRINGSORT */
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x0004", L"\x0011" },
+     /* Punctuation SORT_STRINGSORT main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x001a", L"\x001b" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x2027", L"\x2011", },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x3030", L"\x301c", },
+     /* Punctuation SORT_STRINGSORT diacritic weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x058a", L"\x2010" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x07F5", L"\x07F4" },
+     /* Punctuation SORT_STRINGSORT case weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe32", L"\x2013" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe31", L"\xfe58" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xff07", L"\x0027" },
+     /* Japanese main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x04b0", L"\x32db" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3093", L"\x1e62\x013f" },
+     /* Japanese diacritic weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30d3", L"\x30d4" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x307b", L"\x307c" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30ea", L"\x32f7" },
+     /* Japanese case weight small */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x31fb", L"\x30e9" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30db", L"\x31f9" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff6d", L"\xff95" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x31fb", L"\x30e9" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x30db", L"\x31f9" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\xff6d", L"\xff95" },
+     /* Japanese case weight kana */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30d5", L"\x3075" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x306a", L"\x30ca" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x305a", L"\x30ba" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30d5", L"\x3075" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x306a", L"\x30ca" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x305a", L"\x30ba" },
+     /* Japanese case weight width */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30bf", L"\xff80" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30ab", L"\xff76" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a2", L"\xff71" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30bf", L"\xff80" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30ab", L"\xff76" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30a2", L"\xff71" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x31a2", L"\x3110" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x1342", L"\x133a" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x16a4", L"\x16a5" },
+     /* Kana small data must have priority over width data */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30b1\x30f6", L"\xff79\x30b1" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a6\x30a5", L"\xff73\x30a6" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a8\x30a7", L"\xff74\x30a8" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30b1", L"\xff79" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a6", L"\xff73" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a8", L"\xff74" },
+     /* Kana small data must have priority over kana type data */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x3046\x30a9", L"\x30a6\x30aa" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x304a\x3041", L"\x30aa\x3042" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x3059\x30a7", L"\x30b9\x30a8" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3046", L"\x30a6" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x304a", L"\x30aa" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3059", L"\x30b9" },
+     /* Kana type data must have priority over width data */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a6\x30a8", L"\xff73\x3048" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30ab\x30a3", L"\xff76\x3043" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30b5\x30ac", L"\xff7b\x304c" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a6", L"\xff73" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30ab", L"\xff76" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30b5", L"\xff7b" },
+     /* Case weights have priority over extra weights */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x305a a", L"\x30ba A" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30c1 b", L"\xff81 B" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff8b x", L"\x31f6 X" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x305a", L"\x30ba" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30c1", L"\xff81" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xff8b", L"\x31f6" },
+     /* Extra weights have priority over special weights */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0027\x31ff", L"\x007f\xff9b" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x07f5\x30f3", L"\x07f4\x3093" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xfe63\x30e0", L"\xff0d\x3080" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x0027", L"\x007f" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x07f5", L"\x07f4" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xfe63", L"\xff0d" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xff68", L"\x30a3" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xff75", L"\x30aa" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30e2", L"\xff93" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff68", L"\x30a3" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff75", L"\x30aa" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30e2", L"\xff93" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30a8", L"\x3048" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30af", L"\x304f" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x3067", L"\x30c7" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a8", L"\x3048" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30af", L"\x304f" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3067", L"\x30c7" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xffb7", L"\x3147" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xffb6", L"\x3146" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x3145", L"\xffb5" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\xffb7", L"\x3147" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\xffb6", L"\x3146" },
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x3145", L"\xffb5" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3075\x30fc", L"\x30d5\x30fc" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a1\x30fc", L"\x30a2\x30fc" },
+     /* Coptic < Japanese */
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2cff", L"\x30ba" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2cdb", L"\x32de" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2ce0", L"\x30c6" },
+     /* Hebrew > Japanese */
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05d3", L"\x30ba" },
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05e3", L"\x32de" },
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05d7", L"\x30c6" },
+     /* Expansion */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x00c6", L"\x0041\x0045" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x0f5c", L"\x0f5b\x0fb7" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x05f0", L"\x05d5\x05d5" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\x0f75", L"\x0f71\x0f74" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\xfc5e", L"\x064c\x0651" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\xfb2b", L"\x05e9\x05c2" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\xfe71", L"\x0640\x064b" },
+     /* Japanese locale */
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x6df8", L"\x654b\x29e9" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x685d\x1239\x1b61", L"\x59b6\x6542\x2a62\x04a7" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x62f3\x43e9", L"\x5760" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x634c", L"\x2f0d\x5f1c\x7124" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x69e7\x0502", L"\x57cc" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x7589", L"\x67c5" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5ede\x765c", L"\x7324" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5c7f\x5961", L"\x7cbe" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x3162", L"\x6a84\x1549\x0b60" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x769e\x448e", L"\x4e6e" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x59a4", L"\x5faa\x607c" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x529b", L"\x733f" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x6ff8\x2a0a", L"\x7953\x6712" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x6dfb", L"\x6793" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x67ed", L"\x6aa2" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x4e61", L"\x6350\x6b08" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5118", L"\x53b3\x75b4" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x6bbf", L"\x65a3" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5690", L"\x5fa8" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x61e2", L"\x76e5" },
+     /* Misc locales */
+    { L"ko-KR", -1, CSTR_LESS_THAN,    0, L"\x8db6", L"\xd198" },
+    { L"ko-KR", -1, CSTR_LESS_THAN,    0, L"\x8f72", L"\xd2b9" },
+    { L"ko-KR", -1, CSTR_LESS_THAN,    0, L"\x91d8", L"\xd318" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x8db6", L"\xd198" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x8f72", L"\xd2b9" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x91d8", L"\xd318" },
+    { L"cs-CZ",  1, CSTR_GREATER_THAN, 0, L"\x0160", L"\x0219" },
+    { L"cs-CZ",  1, CSTR_GREATER_THAN, 0, L"\x059a", L"\x0308" },
+    { L"cs-CZ",  1, CSTR_GREATER_THAN, 0, L"\x013a", L"\x013f" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0160", L"\x0219" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x059a", L"\x0308" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x013a", L"\x013f" },
+    { L"vi-VN", -1, CSTR_LESS_THAN,    0, L"\x1d8f", L"\x1ea8" },
+    { L"vi-VN", -1, CSTR_LESS_THAN,    0, L"\x0323", L"\xfe26" },
+    { L"vi-VN",  1, CSTR_GREATER_THAN, 0, L"R",      L"\xff32" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1d8f", L"\x1ea8" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x0323", L"\xfe26" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"R",      L"\xff32" },
+    { L"zh-HK", -1, CSTR_LESS_THAN,    0, L"\x83ae", L"\x71b9" },
+    { L"zh-HK", -1, CSTR_LESS_THAN,    0, L"\x7e50", L"\xc683" },
+    { L"zh-HK",  1, CSTR_GREATER_THAN, 0, L"\x6c69", L"\x7f8a" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x83ae", L"\x71b9" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x7e50", L"\xc683" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x6c69", L"\x7f8a" },
+    { L"tr-TR",  1, CSTR_GREATER_THAN, 0, L"\x00dc", L"\x1ee9" },
+    { L"tr-TR",  1, CSTR_GREATER_THAN, 0, L"\x00fc", L"\x1ee6" },
+    { L"tr-TR", -1, CSTR_LESS_THAN,    0, L"\x0152", L"\x00d6" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00dc", L"\x1ee9" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00fc", L"\x1ee6" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x0152", L"\x00d6" },
+    /* Diacritic is added */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xa042\x09bc", L"\xa042" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xa063\x302b", L"\xa063" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xa07e\x0c56", L"\xa07e" },
+    /* Reversed diacritics */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00e9\x00e8", L"\x00e8\x00e9" },
+    { L"fr-FR",  1, CSTR_GREATER_THAN, 0, L"\x00e9\x00e8", L"\x00e8\x00e9" },
+    /* Digit sort */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"1230", L"321" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_DIGITSASNUMBERS, L"1230", L"321" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_DIGITSASNUMBERS, L"\xc6f\xc6c\xc6a", L"\xc6f\xc6e" },
+    /* Compressions */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"E\x0300", L"F" },
+    { L"rm-CH",  1, CSTR_GREATER_THAN, 0, L"E\x0300", L"F" },
 };
 
 static void test_unicode_sorting(void)
@@ -3565,15 +3649,18 @@ static void test_unicode_sorting(void)
         len1 = pLCMapStringEx(entry->locale, LCMAP_SORTKEY | entry->flags, entry->first, -1, (WCHAR*)buff1, ARRAY_SIZE(buff1), NULL, NULL, 0);
         len2 = pLCMapStringEx(entry->locale, LCMAP_SORTKEY | entry->flags, entry->second, -1, (WCHAR*)buff2, ARRAY_SIZE(buff2), NULL, NULL, 0);
 
-        result = memcmp(buff1, buff2, min(len1, len2)) + 2;
+        result = memcmp(buff1, buff2, min(len1, len2));
+        if (result < 0) result = -1;
+        else if (result > 0) result = 1;
+        else if (len1 < len2) result = -1;
+        else if (len1 > len2) result = 1;
 
-        ok (result == entry->result_sortkey || broken(entry->broken_on_xp), "Test %d (%s, %s) - Expected %d, got %d\n",
+        ok (result == entry->result_sortkey, "Test %d (%s, %s) - Expected %d, got %d\n",
             i, wine_dbgstr_w(entry->first), wine_dbgstr_w(entry->second), entry->result_sortkey, result);
 
         result = CompareStringEx(entry->locale, entry->flags,  entry->first, -1, entry->second, -1, NULL, NULL, 0);
-        if (strcmp(winetest_platform, "wine")) // Disable test on wine for now
-            ok (result == entry->result_compare || broken(entry->broken_on_xp), "Test %d (%s, %s) - Expected %d, got %d\n",
-                i, wine_dbgstr_w(entry->first), wine_dbgstr_w(entry->second), entry->result_compare, result);
+        ok (result == entry->result_compare, "Test %d (%s, %s) - Expected %d, got %d\n",
+            i, wine_dbgstr_w(entry->first), wine_dbgstr_w(entry->second), entry->result_compare, result);
     }
     /* Test diacritics when buffer is short */
     ret1 = pLCMapStringEx(L"en-US", LCMAP_SORTKEY, L"\x0e49\x0e49\x0e49\x0e49\x0e49", -1, (WCHAR*)buffer, 20, NULL, NULL, 0);
@@ -6505,43 +6592,30 @@ static void test_GetUserPreferredUILanguages(void)
 static void test_FindNLSStringEx(void)
 {
     INT res;
-    static WCHAR en_simpsimpW[] = {'S','i','m','p','l','e','S','i','m','p','l','e',0};
-    static WCHAR en_simpW[] = {'S','i','m','p','l','e',0};
-    static WCHAR comb_s_accent1W[] = {0x1e69, 'o','u','r','c','e',0};
-    static WCHAR comb_s_accent2W[] = {0x0073,0x323,0x307,'o','u','r','c','e',0};
-    static WCHAR comb_q_accent1W[] = {0x0071,0x0307,0x323,'u','o','t','e',0};
-    static WCHAR comb_q_accent2W[] = {0x0071,0x0323,0x307,'u','o','t','e',0};
+    static const WCHAR comb_s_accent1W[] = {0x1e69, 'o','u','r','c','e',0};
+    static const WCHAR comb_s_accent2W[] = {0x0073,0x323,0x307,'o','u','r','c','e',0};
+    static const WCHAR comb_q_accent1W[] = {'a','b',0x0071,0x0307,0x323,'u','o','t','e','\n',0};
+    static const WCHAR comb_q_accent2W[] = {0x0071,0x0323,0x307,'u','o','t','e',0};
     struct test_data {
         const WCHAR *locale;
         DWORD flags;
-        WCHAR *src;
-        INT src_size;
-        WCHAR *value;
-        INT val_size;
-        INT found;
+        const WCHAR *src;
+        const WCHAR *value;
         INT expected_ret;
         INT expected_found;
-        int todo;
-        BOOL broken_vista_servers;
     };
 
-    static struct test_data test_arr[] =
+    static struct test_data tests[] =
     {
-        { localeW, FIND_FROMSTART, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 0, 6, 0, FALSE},
-        { localeW, FIND_FROMEND, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 6, 6, 0, FALSE},
-        { localeW, FIND_STARTSWITH, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 0, 6, 0, FALSE},
-        { localeW, FIND_ENDSWITH, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 6, 6, 0, FALSE},
-        { localeW, FIND_FROMSTART, comb_s_accent1W, ARRAY_SIZE(comb_s_accent1W)-1,
-          comb_s_accent2W, ARRAY_SIZE(comb_s_accent2W)-1, 0, 0, 6, 1, TRUE },
-        { localeW, FIND_FROMSTART, comb_q_accent1W, ARRAY_SIZE(comb_q_accent1W)-1,
-          comb_q_accent2W, ARRAY_SIZE(comb_q_accent2W)-1, 0, 0, 7, 0, FALSE },
-        { 0 }
+        { localeW, FIND_FROMSTART, L"SimpleSimple", L"Simple", 0, 6},
+        { localeW, FIND_FROMEND, L"SimpleSimple", L"Simp", 6, 4},
+        { localeW, FIND_STARTSWITH, L"SimpleSimple", L"Simp", 0, 4},
+        { localeW, FIND_ENDSWITH, L"SimpleSimple", L"Simple", 6, 6},
+        { localeW, FIND_ENDSWITH, L"SimpleSimple", L"Simp", -1, 0xdeadbeef},
+        { localeW, FIND_FROMSTART, comb_s_accent1W, comb_s_accent2W, 0, 6 },
+        { localeW, FIND_FROMSTART, comb_q_accent1W, comb_q_accent2W, 2, 7 },
     };
-    struct test_data *ptest;
+    unsigned int i;
 
     if (!pFindNLSStringEx)
     {
@@ -6584,33 +6658,17 @@ static void test_FindNLSStringEx(void)
     ok(ERROR_INVALID_PARAMETER == GetLastError(),
        "Expected ERROR_INVALID_PARAMETER as last error; got %ld\n", GetLastError());
 
-    for (ptest = test_arr; ptest->src != NULL; ptest++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
-        todo_wine_if(ptest->todo)
-        {
-            res = pFindNLSStringEx(ptest->locale, ptest->flags, ptest->src, ptest->src_size,
-                                   ptest->value, ptest->val_size, &ptest->found, NULL, NULL, 0);
-            if (ptest->broken_vista_servers)
-            {
-                ok(res == ptest->expected_ret || /* Win 7 onwards */
-                   broken(res == -1), /* Win Vista, Server 2003 and 2008 */
-                   "Expected FindNLSStringEx to return %d. Returned value was %d\n",
-                   ptest->expected_ret, res);
-                ok(ptest->found == ptest->expected_found || /* Win 7 onwards */
-                   broken(ptest->found == 0), /* Win Vista, Server 2003 and 2008 */
-                   "Expected FindNLSStringEx to output %d. Value was %d\n",
-                   ptest->expected_found, ptest->found);
-            }
-            else
-            {
-                ok(res == ptest->expected_ret,
-                   "Expected FindNLSStringEx to return %d. Returned value was %d\n",
-                   ptest->expected_ret, res);
-                ok(ptest->found == ptest->expected_found,
-                   "Expected FindNLSStringEx to output %d. Value was %d\n",
-                   ptest->expected_found, ptest->found);
-            }
-        }
+        int found = 0xdeadbeef;
+        res = pFindNLSStringEx(tests[i].locale, tests[i].flags, tests[i].src, -1,
+                               tests[i].value, -1, &found, NULL, NULL, 0);
+        ok(res == tests[i].expected_ret,
+           "%u: Expected FindNLSStringEx to return %d. Returned value was %d\n", i,
+           tests[i].expected_ret, res);
+        ok(found == tests[i].expected_found,
+           "%u: Expected FindNLSStringEx to output %d. Value was %d\n", i,
+           tests[i].expected_found, found);
     }
 }
 
@@ -8028,9 +8086,77 @@ static void test_EnumCalendarInfoExW(void)
     }
 }
 
+/* Generate sort keys for a list of Unicode code points.
+ * Possible source files:
+ *   The Unicode collation test suite:  https://www.unicode.org/Public/UCA/latest/CollationTest.zip
+ *   The list of supported char compressions:  winedump nls/sortdefault.nls | grep \\-\>
+ */
+static void dump_sortkeys( char *argv[] )
+{
+    WCHAR data[128];
+    WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+    BYTE key[256];
+    unsigned int i, val, pos, res, flags = 0;
+    char *p, *end, buffer[1024];
+    FILE *f = fopen( argv[1], "r" );
+
+    locale[0] = 0;
+    if (argv[2])
+    {
+        MultiByteToWideChar( CP_ACP, 0, argv[2], -1, locale, LOCALE_NAME_MAX_LENGTH );
+        if (argv[3]) flags = strtoul( argv[3], NULL, 0 );
+    }
+
+    if (!f)
+    {
+        fprintf( stderr, "cannot open %s\n", argv[1] );
+        return;
+    }
+    while (fgets( buffer, sizeof(buffer), f ))
+    {
+        if (buffer[0] && buffer[strlen(buffer)-1] == '\n') buffer[strlen(buffer)-1] = 0;
+        p = buffer;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#') continue;
+        pos = 0;
+        while (*p && *p != ';' && *p != '-')
+        {
+            val = strtoul( p, &end, 16 );
+            if (end == p) break;
+            if (val >= 0x10000)
+            {
+                data[pos++] = 0xd800 | (val >> 10);
+                data[pos++] = 0xdc00 | (val & 0x3ff);
+            }
+            else data[pos++] = val;
+            p = end;
+            while (*p == ' ' || *p == '\t') p++;
+        }
+        *p = 0;
+        res = LCMapStringEx( locale, flags | LCMAP_SORTKEY, data, pos,
+                             (WCHAR *)key, sizeof(key), NULL, NULL, 0 );
+        printf( "%s:", buffer );
+        for (i = 0; i < res; i++) printf( " %02x", key[i] );
+        printf( "\n" );
+    }
+    fclose( f );
+}
+
 START_TEST(locale)
 {
+  char **argv;
+  int argc = winetest_get_mainargs( &argv );
+
   InitFunctionPointers();
+
+  if (argc >= 4)
+  {
+      if (!strcmp( argv[2], "sortkeys" ))
+      {
+          dump_sortkeys( argv + 2 );
+          return;
+      }
+  }
 
   test_EnumTimeFormatsA();
   test_EnumTimeFormatsW();

@@ -747,6 +747,21 @@ Call ok(Space(4.5) = "    ", "Space(4.5) = " & Space(4.5) & """")
 Call ok(Space(0.5) = "", "Space(0.5) = " & Space(0.5) & """")
 Call ok(Space(1.5) = "  ", "Space(1.5) = " & Space(1.5) & """")
 Call ok(Space("1") = " ", "Space(""1"") = " & Space("1") & """")
+Call ok(Space(Empty) = "", "Space(Empty) = " & Space(Empty) & """")
+
+sub testSpaceError()
+    on error resume next
+    call Err.clear()
+    call Space(-1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Space("-1")
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Space(Null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+end sub
+call testSpaceError()
 
 sub test_string(cnt, char, exp)
     call ok(String(cnt, char) = exp, "String(" & cnt & ", """ & char & """ = """ & _
@@ -2132,5 +2147,59 @@ call testWeekday(DateSerial(2000, 1, 1), vbThursday, 3)
 call testWeekday(DateSerial(2000, 1, 1), vbFriday, 2)
 call testWeekday(DateSerial(2000, 1, 1), vbSaturday, 1)
 call testWeekdayError()
+
+sub testMonthNameError()
+    on error resume next
+    call Err.clear()
+    call MonthName(null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call MonthName(1, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call MonthName(null, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call MonthName("a", null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+end sub
+call testMonthNameError()
+
+sub testTimeSerial(hh, mm, ss, hhexp, mmexp, ssexp, dateexp)
+    dim x
+    x = TimeSerial(hh, mm, ss)
+    call ok(Hour(x) = hhexp, "hour = " & Hour(x) & " expected " & hhexp)
+    call ok(Minute(x) = mmexp, "minute = " & Minute(x) & " expected " & mmexp)
+    call ok(Second(x) = ssexp, "second = " & Second(x) & " expected " & ssexp)
+    call ok(Year(x) = Year(dateexp), "year = " & Year(x))
+    call ok(Month(x) = Month(dateexp), "month = " & Month(x))
+    call ok(Day(x) = Day(dateexp), "day = " & Day(x))
+    call ok(getVT(x) = "VT_DATE*", "getVT = " & getVT(x))
+end sub
+
+sub testTimeSerialError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = TimeSerial(null, 1, 1)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    call TimeSerial(10, null, 1)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call TimeSerial(10, 1, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+end sub
+
+call testTimeSerial(0, 0, 0, 0, 0, 0, DateSerial(1899, 12, 30))
+call testTimeSerial(10, 2, 1, 10, 2, 1, DateSerial(1899, 12, 30))
+call testTimeSerial(0, 2, 1, 0, 2, 1, DateSerial(1899, 12, 30))
+call testTimeSerial(24, 2, 1, 0, 2, 1, DateSerial(1899, 12, 31))
+call testTimeSerial(25, 2, 1, 1, 2, 1, DateSerial(1899, 12, 31))
+call testTimeSerial(50, 2, 1, 2, 2, 1, DateSerial(1900, 1, 1))
+call testTimeSerial(10, 60, 2, 11, 0, 2, DateSerial(1899, 12, 30))
+call testTimeSerial(10, 0, 60, 10, 1, 0, DateSerial(1899, 12, 30))
+call testTimeSerialError()
 
 Call reportSuccess()

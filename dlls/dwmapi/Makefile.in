@@ -1,4 +1,5 @@
 MODULE    = dwmapi.dll
+IMPORTS   = user32
 IMPORTLIB = dwmapi
 IMPORTS   = user32
 

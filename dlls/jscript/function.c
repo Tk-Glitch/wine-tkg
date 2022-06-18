@@ -257,6 +257,11 @@ HRESULT Function_invoke(jsdisp_t *func_this, IDispatch *jsthis, WORD flags, unsi
     assert(is_class(func_this, JSCLASS_FUNCTION));
     function = function_from_jsdisp(func_this);
 
+    if(function->dispex.ctx->state == SCRIPTSTATE_UNINITIALIZED || function->dispex.ctx->state == SCRIPTSTATE_CLOSED) {
+        WARN("Script engine state does not allow running code.\n");
+        return E_UNEXPECTED;
+    }
+
     if(jsthis)
         vthis = jsval_disp(jsthis);
     else
@@ -614,6 +619,8 @@ static HRESULT NativeFunction_call(script_ctx_t *ctx, FunctionInstance *func, js
 {
     NativeFunction *function = (NativeFunction*)func;
 
+    if((flags & DISPATCH_CONSTRUCT) && !(function->function.flags & PROPF_CONSTR))
+        return JS_E_INVALID_ACTION;
     return function->proc(ctx, vthis, flags & ~DISPATCH_JSCRIPT_INTERNAL_MASK, argc, argv, r);
 }
 
@@ -663,6 +670,9 @@ HRESULT create_builtin_function(script_ctx_t *ctx, builtin_invoke_t value_proc, 
 {
     NativeFunction *function;
     HRESULT hres;
+
+    if(!ctx->function_constr)
+        return E_UNEXPECTED;
 
     hres = create_function(ctx, builtin_info, &NativeFunctionVtbl, sizeof(NativeFunction), flags, FALSE, NULL, (void**)&function);
     if(FAILED(hres))
@@ -721,11 +731,6 @@ static HRESULT InterpretedFunction_call(script_ctx_t *ctx, FunctionInstance *fun
     HRESULT hres;
 
     TRACE("%p\n", function);
-
-    if(ctx->state == SCRIPTSTATE_UNINITIALIZED || ctx->state == SCRIPTSTATE_CLOSED) {
-        WARN("Script engine state does not allow running code.\n");
-        return E_UNEXPECTED;
-    }
 
     if(flags & DISPATCH_CONSTRUCT) {
         hres = create_object(ctx, &function->function.dispex, &new_obj);

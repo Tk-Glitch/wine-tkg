@@ -390,7 +390,7 @@ HRESULT WINAPI async_inspectable_handler_Invoke( IAsyncOperationCompletedHandler
     return S_OK;
 }
 
-static const struct IAsyncOperationCompletedHandler_IInspectableVtbl asnyc_inspectable_handler_vtbl =
+static const struct IAsyncOperationCompletedHandler_IInspectableVtbl async_inspectable_handler_vtbl =
 {
     /* IUnknown methods */
     async_inspectable_handler_QueryInterface,
@@ -402,7 +402,7 @@ static const struct IAsyncOperationCompletedHandler_IInspectableVtbl asnyc_inspe
 
 static HRESULT WINAPI async_inspectable_handler_create_static( struct async_inspectable_handler *impl, const GUID *iid )
 {
-    impl->IAsyncOperationCompletedHandler_IInspectable_iface.lpVtbl = &asnyc_inspectable_handler_vtbl;
+    impl->IAsyncOperationCompletedHandler_IInspectable_iface.lpVtbl = &async_inspectable_handler_vtbl;
     impl->iid = iid;
     impl->ref = 1;
 
@@ -425,8 +425,8 @@ static void await_async_inspectable_( unsigned int line, IAsyncOperation_IInspec
     CloseHandle(handler->event_finished);
 }
 
-#define check_async_info(obj, exp_id, exp_status, exp_hr) check_asnyc_info_(__LINE__, obj, exp_id, exp_status, exp_hr)
-static void check_asnyc_info_( unsigned int line, IInspectable *async_obj, UINT32 expect_id, AsyncStatus expect_status, HRESULT expect_hr)
+#define check_async_info(obj, exp_id, exp_status, exp_hr) check_async_info_(__LINE__, obj, exp_id, exp_status, exp_hr)
+static void check_async_info_( unsigned int line, IInspectable *async_obj, UINT32 expect_id, AsyncStatus expect_status, HRESULT expect_hr)
 {
     IAsyncInfo *async_info;
     AsyncStatus async_status;
@@ -452,7 +452,7 @@ static void check_asnyc_info_( unsigned int line, IInspectable *async_obj, UINT3
     hr = IAsyncInfo_get_ErrorCode(async_info, &async_hr);
     if (expect_status < 4) ok_(__FILE__, line)(hr == S_OK, "IAsyncInfo_get_ErrorCode returned %#lx\n", hr);
     else ok_(__FILE__, line)(hr == E_ILLEGAL_METHOD_CALL, "IAsyncInfo_get_ErrorCode returned %#lx\n", hr);
-    if (expect_status < 4) todo_wine_if(FAILED(expect_hr)) ok_(__FILE__, line)(async_hr == expect_hr, "got async_hr %#lx\n", async_hr);
+    if (expect_status < 4) ok_(__FILE__, line)(async_hr == expect_hr, "got async_hr %#lx\n", async_hr);
     else ok_(__FILE__, line)(async_hr == E_ILLEGAL_METHOD_CALL, "got async_hr %#lx\n", async_hr);
 
     IAsyncInfo_Release(async_info);
@@ -1577,31 +1577,29 @@ static void test_Recognition(void)
     IAsyncOperation_IInspectable_Release((IAsyncOperation_IInspectable *)operation);
 
     hr = ISpeechContinuousRecognitionSession_StartAsync(session, &action);
-    todo_wine ok(hr == S_OK, "ISpeechContinuousRecognitionSession_StartAsync failed, hr %#lx.\n", hr);
-
-    if (FAILED(hr)) goto skip_action;
-
-    await_async_void(action, &action_handler);
-    check_async_info((IInspectable *)action, 1, Completed, S_OK);
+    ok(hr == S_OK, "ISpeechContinuousRecognitionSession_StartAsync failed, hr %#lx.\n", hr);
 
     handler = (void *)0xdeadbeef;
     hr = IAsyncAction_get_Completed(action, &handler);
-    todo_wine ok(hr == S_OK, "IAsyncAction_put_Completed failed, hr %#lx.\n", hr);
-    todo_wine ok(handler == NULL, "Handler was %p.\n", handler);
+    ok(hr == S_OK, "IAsyncAction_put_Completed failed, hr %#lx.\n", hr);
+    ok(handler == NULL, "Handler was %p.\n", handler);
+
+    await_async_void(action, &action_handler);
 
     hr = IAsyncAction_QueryInterface(action, &IID_IAsyncInfo, (void **)&info);
-    todo_wine ok(hr == S_OK, "IAsyncAction_QueryInterface failed, hr %#lx.\n", hr);
+    ok(hr == S_OK, "IAsyncAction_QueryInterface failed, hr %#lx.\n", hr);
+    check_async_info((IInspectable *)action, 1, Completed, S_OK);
 
     hr = IAsyncInfo_Cancel(info);
-    todo_wine ok(hr == S_OK, "IAsyncInfo_Cancel failed, hr %#lx.\n", hr);
+    ok(hr == S_OK, "IAsyncInfo_Cancel failed, hr %#lx.\n", hr);
     check_async_info((IInspectable *)action, 1, Completed, S_OK);
 
     hr = IAsyncInfo_Close(info);
-    todo_wine ok(hr == S_OK, "IAsyncInfo_Close failed, hr %#lx.\n", hr);
+    ok(hr == S_OK, "IAsyncInfo_Close failed, hr %#lx.\n", hr);
     check_async_info((IInspectable *)action, 1, AsyncStatus_Closed, S_OK);
 
     hr = IAsyncInfo_Close(info);
-    todo_wine ok(hr == S_OK, "IAsyncInfo_Close failed, hr %#lx.\n", hr);
+    ok(hr == S_OK, "IAsyncInfo_Close failed, hr %#lx.\n", hr);
     check_async_info((IInspectable *)action, 1, AsyncStatus_Closed, S_OK);
 
     hr = IAsyncInfo_Cancel(info);
@@ -1616,6 +1614,8 @@ static void test_Recognition(void)
 
     hr = ISpeechContinuousRecognitionSession_StopAsync(session, &action2);
     todo_wine ok(hr == S_OK, "ISpeechContinuousRecognitionSession_StopAsync failed, hr %#lx.\n", hr);
+
+    if (FAILED(hr)) goto skip_action;
 
     async_void_handler_create_static(&action_handler);
     action_handler.event_block = CreateEventW(NULL, FALSE, FALSE, NULL);
@@ -1660,9 +1660,9 @@ static void test_Recognition(void)
     todo_wine ok(action != action2, "actions were the same!\n");
 
     IAsyncAction_Release(action2);
+skip_action:
     IAsyncAction_Release(action);
 
-skip_action:
     hr = ISpeechContinuousRecognitionSession_remove_ResultGenerated(session, token);
     ok(hr == S_OK, "ISpeechContinuousRecognitionSession_remove_ResultGenerated failed, hr %#lx.\n", hr);
 

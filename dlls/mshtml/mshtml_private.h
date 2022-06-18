@@ -89,6 +89,7 @@ typedef struct EventTarget EventTarget;
     XDIID(DispDOMKeyboardEvent) \
     XDIID(DispDOMMessageEvent) \
     XDIID(DispDOMMouseEvent) \
+    XDIID(DispDOMProgressEvent) \
     XDIID(DispDOMUIEvent) \
     XDIID(DispHTMLAnchorElement) \
     XDIID(DispHTMLAreaElement) \
@@ -150,6 +151,7 @@ typedef struct EventTarget EventTarget;
     XIID(IDOMKeyboardEvent) \
     XIID(IDOMMessageEvent) \
     XIID(IDOMMouseEvent) \
+    XIID(IDOMProgressEvent) \
     XIID(IDOMUIEvent) \
     XIID(IDocumentEvent) \
     XIID(IDocumentRange) \
@@ -265,6 +267,7 @@ typedef struct EventTarget EventTarget;
     XIID(IHTMLWindow6) \
     XIID(IHTMLWindow7) \
     XIID(IHTMLXMLHttpRequest) \
+    XIID(IHTMLXMLHttpRequest2) \
     XIID(IHTMLXMLHttpRequestFactory) \
     XIID(IOmHistory) \
     XIID(IOmNavigator) \
@@ -941,7 +944,7 @@ HRESULT create_namespace_collection(compat_mode_t,IHTMLNamespaceCollection**) DE
 HRESULT create_dom_implementation(HTMLDocumentNode*,IHTMLDOMImplementation**) DECLSPEC_HIDDEN;
 void detach_dom_implementation(IHTMLDOMImplementation*) DECLSPEC_HIDDEN;
 
-HRESULT create_html_storage(compat_mode_t,IHTMLStorage**) DECLSPEC_HIDDEN;
+HRESULT create_html_storage(compat_mode_t,IUri*,IHTMLStorage**) DECLSPEC_HIDDEN;
 
 void HTMLDocument_Persist_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 void HTMLDocument_OleCmd_Init(HTMLDocument*) DECLSPEC_HIDDEN;
@@ -1389,11 +1392,11 @@ static inline char *heap_strndupWtoU(LPCWSTR str, unsigned len)
     char *ret = NULL;
     DWORD size;
 
-    if(str && len) {
-        size = WideCharToMultiByte(CP_UTF8, 0, str, len, NULL, 0, NULL, NULL);
+    if(str) {
+        size = len ? WideCharToMultiByte(CP_UTF8, 0, str, len, NULL, 0, NULL, NULL) : 0;
         ret = heap_alloc(size + 1);
         if(ret) {
-            WideCharToMultiByte(CP_UTF8, 0, str, len, ret, size, NULL, NULL);
+            if(len) WideCharToMultiByte(CP_UTF8, 0, str, len, ret, size, NULL, NULL);
             ret[size] = '\0';
         }
     }

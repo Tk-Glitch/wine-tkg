@@ -2937,7 +2937,8 @@ static void wined3d_bo_gl_unmap(struct wined3d_bo_gl *bo, struct wined3d_context
 {
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
 
-    if (context_gl->c.device->adapter->mapped_size <= MAX_PERSISTENT_MAPPED_BYTES)
+    if (context_gl->c.d3d_info->persistent_map
+            && context_gl->c.device->adapter->mapped_size <= MAX_PERSISTENT_MAPPED_BYTES)
     {
         TRACE("Not unmapping BO %p.\n", bo);
         return;
@@ -2960,6 +2961,7 @@ static void wined3d_bo_gl_unmap(struct wined3d_bo_gl *bo, struct wined3d_context
     if (bo->b.client_map_count)
     {
         wined3d_device_bo_map_unlock(context_gl->c.device);
+        assert(context_gl->c.d3d_info->persistent_map);
         TRACE("BO %p is still in use by a client thread; not unmapping.\n", bo);
         return;
     }
@@ -4454,7 +4456,7 @@ static void wined3d_context_gl_setup_target(struct wined3d_context_gl *context_g
         {
             /* Disable blending when the alpha mask has changed and when a format doesn't support blending. */
             if ((old->alpha_size && !new->alpha_size) || (!old->alpha_size && new->alpha_size)
-                    || !(texture->resource.format_flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
+                    || !(texture->resource.format_caps & WINED3D_FORMAT_CAP_POSTPIXELSHADER_BLENDING))
                 context_invalidate_state(&context_gl->c, STATE_BLEND);
         }
 
@@ -5176,7 +5178,7 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
         return;
     }
 
-    if (dsv && (!state->depth_stencil_state || state->depth_stencil_state->desc.depth_write))
+    if (dsv && (!state->depth_stencil_state || state->depth_stencil_state->writes_ds))
     {
         DWORD location = context->render_offscreen ? dsv->resource->draw_binding : WINED3D_LOCATION_DRAWABLE;
 
@@ -5739,7 +5741,7 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
 
         if (element->stride)
         {
-            DWORD format_flags = format_gl->f.flags[WINED3D_GL_RES_TYPE_BUFFER];
+            unsigned int format_attrs = format_gl->f.attrs;
 
             bo = wined3d_bo_gl_id(element->data.buffer_object);
             if (current_bo != bo)
@@ -5752,7 +5754,7 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
              * pointer. vb can point to a user pointer data blob. In that case
              * current_bo will be 0. If there is a vertex buffer but no vbo we
              * won't be load converted attributes anyway. */
-            if (vs && vs->reg_maps.shader_version.major >= 4 && (format_flags & WINED3DFMT_FLAG_INTEGER))
+            if (vs && vs->reg_maps.shader_version.major >= 4 && (format_attrs & WINED3D_FORMAT_ATTR_INTEGER))
             {
                 GL_EXTCALL(glVertexAttribIPointer(i, format_gl->vtx_format,
                         format_gl->vtx_type, element->stride, offset));
@@ -5760,7 +5762,7 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
             else
             {
                 GL_EXTCALL(glVertexAttribPointer(i, format_gl->vtx_format, format_gl->vtx_type,
-                        !!(format_flags & WINED3DFMT_FLAG_NORMALISED), element->stride, offset));
+                        !!(format_attrs & WINED3D_FORMAT_ATTR_NORMALISED), element->stride, offset));
             }
 
             if (!(context->numbered_array_mask & (1u << i)))

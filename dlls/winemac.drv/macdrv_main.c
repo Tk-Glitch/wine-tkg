@@ -495,7 +495,7 @@ void CDECL macdrv_ThreadDetach(void)
         macdrv_destroy_event_queue(data->queue);
         if (data->keyboard_layout_uchr)
             CFRelease(data->keyboard_layout_uchr);
-        HeapFree(GetProcessHeap(), 0, data);
+        free(data);
         /* clear data in case we get re-entered from user32 before the thread is truly dead */
         TlsSetValue(thread_data_tls_index, NULL);
     }
@@ -542,7 +542,7 @@ struct macdrv_thread_data *macdrv_init_thread_data(void)
 
     if (data) return data;
 
-    if (!(data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data))))
+    if (!(data = calloc(1, sizeof(*data))))
     {
         ERR("could not create data\n");
         ExitProcess(1);

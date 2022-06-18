@@ -394,11 +394,14 @@ static GstCaps *wg_format_to_caps_video(const struct wg_format *format)
     gst_video_info_set_format(&info, video_format, format->u.video.width, abs(format->u.video.height));
     if ((caps = gst_video_info_to_caps(&info)))
     {
-        /* Clear some fields that shouldn't prevent us from connecting. */
         for (i = 0; i < gst_caps_get_size(caps); ++i)
         {
-            gst_structure_remove_fields(gst_caps_get_structure(caps, i),
-                    "framerate", "pixel-aspect-ratio", "colorimetry", "chroma-site", NULL);
+            if (!format->u.video.width)
+                gst_structure_remove_fields(gst_caps_get_structure(caps, i), "width", NULL);
+            if (!format->u.video.height)
+                gst_structure_remove_fields(gst_caps_get_structure(caps, i), "height", NULL);
+            if (!format->u.video.fps_d && !format->u.video.fps_n)
+                gst_structure_remove_fields(gst_caps_get_structure(caps, i), "framerate", NULL);
         }
     }
     return caps;
@@ -549,7 +552,8 @@ bool wg_format_compare(const struct wg_format *a, const struct wg_format *b)
             /* Do not compare FPS. */
             return a->u.video.format == b->u.video.format
                     && a->u.video.width == b->u.video.width
-                    && abs(a->u.video.height) == abs(b->u.video.height);
+                    && abs(a->u.video.height) == abs(b->u.video.height)
+                    && EqualRect( &a->u.video.padding, &b->u.video.padding );
     }
 
     assert(0);

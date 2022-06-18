@@ -33,6 +33,11 @@ struct transform
 
     struct strmbase_sink sink;
     struct strmbase_source source;
+    struct strmbase_passthrough passthrough;
+
+    IQualityControl sink_IQualityControl_iface;
+    IQualityControl source_IQualityControl_iface;
+    IQualityControl *qc_sink;
 
     struct wg_transform *transform;
 
@@ -66,6 +71,7 @@ static void transform_destroy(struct strmbase_filter *iface)
 {
     struct transform *filter = impl_from_strmbase_filter(iface);
 
+    strmbase_passthrough_cleanup(&filter->passthrough);
     strmbase_source_cleanup(&filter->source);
     strmbase_sink_cleanup(&filter->sink);
     strmbase_filter_cleanup(&filter->filter);
@@ -270,6 +276,8 @@ static HRESULT transform_sink_query_interface(struct strmbase_pin *pin, REFIID i
 
     if (IsEqualGUID(iid, &IID_IMemInputPin))
         *out = &filter->sink.IMemInputPin_iface;
+    else if (IsEqualGUID(iid, &IID_IQualityControl))
+        *out = &filter->sink_IQualityControl_iface;
     else
         return E_NOINTERFACE;
 
@@ -342,7 +350,7 @@ static HRESULT WINAPI transform_sink_receive(struct strmbase_sink *pin, IMediaSa
             return hr;
         }
 
-        hr = wg_transform_read_data(filter->transform, &output_wg_sample);
+        hr = wg_transform_read_data(filter->transform, &output_wg_sample, NULL);
         if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
         {
             IMediaSample_Release(output_sample);
@@ -350,6 +358,8 @@ static HRESULT WINAPI transform_sink_receive(struct strmbase_sink *pin, IMediaSa
         }
         if (FAILED(hr))
         {
+            if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
+                FIXME("Unexpected stream format change!\n");
             IMediaSample_Release(output_sample);
             return hr;
         }
@@ -409,6 +419,23 @@ static HRESULT transform_source_get_media_type(struct strmbase_pin *pin, unsigne
     return filter->ops->source_get_media_type(filter, index, mt);
 }
 
+static HRESULT transform_source_query_interface(struct strmbase_pin *pin, REFIID iid, void **out)
+{
+    struct transform *filter = impl_from_strmbase_filter(pin->filter);
+
+    if (IsEqualGUID(iid, &IID_IMediaPosition))
+        *out = &filter->passthrough.IMediaPosition_iface;
+    else if (IsEqualGUID(iid, &IID_IMediaSeeking))
+        *out = &filter->passthrough.IMediaSeeking_iface;
+    else if (IsEqualGUID(iid, &IID_IQualityControl))
+        *out = &filter->source_IQualityControl_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
 static HRESULT WINAPI transform_source_DecideBufferSize(struct strmbase_source *pin, IMemAllocator *allocator, ALLOCATOR_PROPERTIES *props)
 {
     struct transform *filter = impl_from_strmbase_filter(pin->pin.filter);
@@ -420,9 +447,126 @@ static const struct strmbase_source_ops source_ops =
 {
     .base.pin_query_accept = transform_source_query_accept,
     .base.pin_get_media_type = transform_source_get_media_type,
+    .base.pin_query_interface = transform_source_query_interface,
     .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
     .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
     .pfnDecideBufferSize = transform_source_DecideBufferSize,
+};
+
+static struct transform *impl_from_sink_IQualityControl(IQualityControl *iface)
+{
+    return CONTAINING_RECORD(iface, struct transform, sink_IQualityControl_iface);
+}
+
+static HRESULT WINAPI sink_quality_control_QueryInterface(IQualityControl *iface, REFIID iid, void **out)
+{
+    struct transform *filter = impl_from_sink_IQualityControl(iface);
+    return IPin_QueryInterface(&filter->source.pin.IPin_iface, iid, out);
+}
+
+static ULONG WINAPI sink_quality_control_AddRef(IQualityControl *iface)
+{
+    struct transform *filter = impl_from_sink_IQualityControl(iface);
+    return IPin_AddRef(&filter->source.pin.IPin_iface);
+}
+
+static ULONG WINAPI sink_quality_control_Release(IQualityControl *iface)
+{
+    struct transform *filter = impl_from_sink_IQualityControl(iface);
+    return IPin_Release(&filter->source.pin.IPin_iface);
+}
+
+static HRESULT WINAPI sink_quality_control_Notify(IQualityControl *iface, IBaseFilter *sender, Quality q)
+{
+    struct transform *filter = impl_from_sink_IQualityControl(iface);
+
+    TRACE("filter %p, sender %p, type %#x, proportion %ld, late %s, timestamp %s.\n",
+            filter, sender, q.Type, q.Proportion, debugstr_time(q.Late), debugstr_time(q.TimeStamp));
+
+    return S_OK;
+}
+
+static HRESULT WINAPI sink_quality_control_SetSink(IQualityControl *iface, IQualityControl *sink)
+{
+    struct transform *filter = impl_from_sink_IQualityControl(iface);
+
+    TRACE("filter %p, sink %p.\n", filter, sink);
+
+    filter->qc_sink = sink;
+
+    return S_OK;
+}
+
+static const IQualityControlVtbl sink_quality_control_vtbl =
+{
+    sink_quality_control_QueryInterface,
+    sink_quality_control_AddRef,
+    sink_quality_control_Release,
+    sink_quality_control_Notify,
+    sink_quality_control_SetSink,
+};
+
+static struct transform *impl_from_source_IQualityControl(IQualityControl *iface)
+{
+    return CONTAINING_RECORD(iface, struct transform, source_IQualityControl_iface);
+}
+
+static HRESULT WINAPI source_quality_control_QueryInterface(IQualityControl *iface, REFIID iid, void **out)
+{
+    struct transform *filter = impl_from_source_IQualityControl(iface);
+    return IPin_QueryInterface(&filter->source.pin.IPin_iface, iid, out);
+}
+
+static ULONG WINAPI source_quality_control_AddRef(IQualityControl *iface)
+{
+    struct transform *filter = impl_from_source_IQualityControl(iface);
+    return IPin_AddRef(&filter->source.pin.IPin_iface);
+}
+
+static ULONG WINAPI source_quality_control_Release(IQualityControl *iface)
+{
+    struct transform *filter = impl_from_source_IQualityControl(iface);
+    return IPin_Release(&filter->source.pin.IPin_iface);
+}
+
+static HRESULT WINAPI source_quality_control_Notify(IQualityControl *iface, IBaseFilter *sender, Quality q)
+{
+    struct transform *filter = impl_from_source_IQualityControl(iface);
+    IQualityControl *peer;
+    HRESULT hr = VFW_E_NOT_FOUND;
+
+    TRACE("filter %p, sender %p, type %#x, proportion %ld, late %s, timestamp %s.\n",
+            filter, sender, q.Type, q.Proportion, debugstr_time(q.Late), debugstr_time(q.TimeStamp));
+
+    if (filter->qc_sink)
+        return IQualityControl_Notify(filter->qc_sink, &filter->filter.IBaseFilter_iface, q);
+
+    if (filter->sink.pin.peer
+            && SUCCEEDED(IPin_QueryInterface(filter->sink.pin.peer, &IID_IQualityControl, (void **)&peer)))
+    {
+        hr = IQualityControl_Notify(peer, &filter->filter.IBaseFilter_iface, q);
+        IQualityControl_Release(peer);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI source_quality_control_SetSink(IQualityControl *iface, IQualityControl *sink)
+{
+    struct transform *filter = impl_from_source_IQualityControl(iface);
+
+    TRACE("filter %p, sink %p.\n", filter, sink);
+
+    return S_OK;
+}
+
+static const IQualityControlVtbl source_quality_control_vtbl =
+{
+    source_quality_control_QueryInterface,
+    source_quality_control_AddRef,
+    source_quality_control_Release,
+    source_quality_control_Notify,
+    source_quality_control_SetSink,
 };
 
 static HRESULT transform_create(IUnknown *outer, const CLSID *clsid, const struct transform_ops *ops, struct transform **out)
@@ -436,6 +580,13 @@ static HRESULT transform_create(IUnknown *outer, const CLSID *clsid, const struc
     strmbase_filter_init(&object->filter, outer, clsid, &filter_ops);
     strmbase_sink_init(&object->sink, &object->filter, L"In", &sink_ops, NULL);
     strmbase_source_init(&object->source, &object->filter, L"Out", &source_ops);
+
+    strmbase_passthrough_init(&object->passthrough, (IUnknown *)&object->source.pin.IPin_iface);
+    ISeekingPassThru_Init(&object->passthrough.ISeekingPassThru_iface, FALSE,
+            &object->sink.pin.IPin_iface);
+
+    object->sink_IQualityControl_iface.lpVtbl = &sink_quality_control_vtbl;
+    object->source_IQualityControl_iface.lpVtbl = &source_quality_control_vtbl;
 
     object->ops = ops;
 

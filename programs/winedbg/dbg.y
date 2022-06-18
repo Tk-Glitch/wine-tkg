@@ -44,7 +44,7 @@ static void parser(const char*);
     dbg_lgint_t         integer;
     IMAGEHLP_LINE64     listing;
     struct expr*        expression;
-    struct type_expr_t  type;
+    struct dbg_type     type;
     struct list_string* strings;
 }
 
@@ -57,10 +57,12 @@ static void parser(const char*);
 %token tSTEPI tNEXTI tFINISH tSHOW tDIR tWHATIS tSOURCE
 %token <string> tPATH tIDENTIFIER tSTRING tINTVAR
 %token <integer> tNUM tFORMAT
+%token <type> tTYPEDEF
 %token tSYMBOLFILE tRUN tATTACH tDETACH tKILL tMAINTENANCE tTYPE tMINIDUMP
 %token tNOPROCESS
 
-%token tCHAR tSHORT tINT tLONG tFLOAT tDOUBLE tUNSIGNED tSIGNED
+/* can be prefixed by module name */
+%token <string> tVOID tCHAR tWCHAR tSHORT tINT tLONG tFLOAT tDOUBLE tUNSIGNED tSIGNED
 %token tSTRUCT tUNION tENUM
 
 /* %left ',' */
@@ -223,6 +225,7 @@ x_command:
 print_command:
       tPRINT expr_lvalue         { print_value(&$2, 0, 0); }
     | tPRINT tFORMAT expr_lvalue { if (($2 >> 8) == 1) print_value(&$3, $2 & 0xff, 0); else dbg_printf("Count is meaningless in print command\n"); }
+    | tPRINT type_expr           { types_print_type(&$2, TRUE); dbg_printf("\n"); }
     ;
 
 break_command:
@@ -305,32 +308,52 @@ noprocess_state:
     ;
 
 type_expr:
-      tCHAR			{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_char; }
-    | tINT			{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_int; }
-    | tLONG tINT		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_long_int; }
-    | tLONG     		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_long_int; }
-    | tUNSIGNED tINT		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_int; }
-    | tUNSIGNED 		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_int; }
-    | tLONG tUNSIGNED tINT	{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_long_int; }
-    | tLONG tUNSIGNED   	{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_long_int; }
-    | tSHORT tINT		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_short_int; }
-    | tSHORT    		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_short_int; }
-    | tSHORT tUNSIGNED tINT	{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_short_int; }
-    | tSHORT tUNSIGNED  	{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_short_int; }
-    | tSIGNED tCHAR		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_char_int; }
-    | tUNSIGNED tCHAR		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_char_int; }
-    | tLONG tLONG tUNSIGNED tINT{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_longlong_int; }
-    | tLONG tLONG tUNSIGNED     { $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_unsigned_longlong_int; }
-    | tLONG tLONG tINT          { $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_longlong_int; }
-    | tLONG tLONG               { $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_signed_longlong_int; }
-    | tFLOAT			{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_short_real; }
-    | tDOUBLE			{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_real; }
-    | tLONG tDOUBLE		{ $$.type = type_expr_type_id; $$.deref_count = 0; $$.u.type.module = 0; $$.u.type.id = dbg_itype_long_real; }
-    | type_expr '*'		{ $$ = $1; $$.deref_count++; }
-    | tCLASS identifier         { $$.type = type_expr_udt_class; $$.deref_count = 0; $$.u.name = $2; }
-    | tSTRUCT identifier        { $$.type = type_expr_udt_struct; $$.deref_count = 0; $$.u.name = $2; }
-    | tUNION identifier         { $$.type = type_expr_udt_union; $$.deref_count = 0; $$.u.name = $2; }
-    | tENUM identifier          { $$.type = type_expr_enumeration; $$.deref_count = 0; $$.u.name = $2; }
+      tVOID                     { if (!types_find_basic(L"void",                   $1, &$$)) YYERROR; }
+    | tCHAR                     { if (!types_find_basic(L"char",                   $1, &$$)) YYERROR; }
+    | tWCHAR                    { if (!types_find_basic(L"WCHAR",                  $1, &$$)) YYERROR; }
+    | tSIGNED tCHAR             { if (!types_find_basic(L"signed char",            $1, &$$)) YYERROR; }
+    | tUNSIGNED tCHAR           { if (!types_find_basic(L"unsigned char",          $1, &$$)) YYERROR; }
+    | tSHORT tINT               { if (!types_find_basic(L"short int",              $1, &$$)) YYERROR; }
+    | tSHORT                    { if (!types_find_basic(L"short int",              $1, &$$)) YYERROR; }
+    | tSIGNED tSHORT tINT       { if (!types_find_basic(L"short int",              $1, &$$)) YYERROR; }
+    | tSIGNED tSHORT            { if (!types_find_basic(L"short int",              $1, &$$)) YYERROR; }
+    | tSHORT tSIGNED tINT       { if (!types_find_basic(L"short int",              $1, &$$)) YYERROR; }
+    | tSHORT tSIGNED            { if (!types_find_basic(L"short int",              $1, &$$)) YYERROR; }
+    | tSHORT tUNSIGNED          { if (!types_find_basic(L"unsigned short int",     $1, &$$)) YYERROR; }
+    | tSHORT tUNSIGNED tINT     { if (!types_find_basic(L"unsigned short int",     $1, &$$)) YYERROR; }
+    | tUNSIGNED tSHORT          { if (!types_find_basic(L"unsigned short int",     $1, &$$)) YYERROR; }
+    | tUNSIGNED tSHORT tINT     { if (!types_find_basic(L"unsigned short int",     $1, &$$)) YYERROR; }
+    | tINT                      { if (!types_find_basic(L"int",                    $1, &$$)) YYERROR; }
+    | tSIGNED tINT              { if (!types_find_basic(L"int",                    $1, &$$)) YYERROR; }
+    | tUNSIGNED                 { if (!types_find_basic(L"unsigned int",           $1, &$$)) YYERROR; }
+    | tUNSIGNED tINT            { if (!types_find_basic(L"unsigned int",           $1, &$$)) YYERROR; }
+    | tLONG                     { if (!types_find_basic(L"long int",               $1, &$$)) YYERROR; }
+    | tLONG tINT                { if (!types_find_basic(L"long int",               $1, &$$)) YYERROR; }
+    | tSIGNED tLONG             { if (!types_find_basic(L"long int",               $1, &$$)) YYERROR; }
+    | tSIGNED tLONG tINT        { if (!types_find_basic(L"long int",               $1, &$$)) YYERROR; }
+    | tLONG tSIGNED             { if (!types_find_basic(L"long int",               $1, &$$)) YYERROR; }
+    | tLONG tSIGNED tINT        { if (!types_find_basic(L"long int",               $1, &$$)) YYERROR; }
+    | tLONG tUNSIGNED           { if (!types_find_basic(L"unsigned long int",      $1, &$$)) YYERROR; }
+    | tLONG tUNSIGNED tINT      { if (!types_find_basic(L"unsigned long int",      $1, &$$)) YYERROR; }
+    | tUNSIGNED tLONG           { if (!types_find_basic(L"unsigned long int",      $1, &$$)) YYERROR; }
+    | tUNSIGNED tLONG tINT      { if (!types_find_basic(L"unsigned long int",      $1, &$$)) YYERROR; }
+    | tLONG tLONG               { if (!types_find_basic(L"long long int",          $1, &$$)) YYERROR; }
+    | tLONG tLONG tINT          { if (!types_find_basic(L"long long int",          $1, &$$)) YYERROR; }
+    | tSIGNED tLONG tLONG       { if (!types_find_basic(L"long long int",          $1, &$$)) YYERROR; }
+    | tSIGNED tLONG tLONG tINT  { if (!types_find_basic(L"long long int",          $1, &$$)) YYERROR; }
+    | tUNSIGNED tLONG tLONG     { if (!types_find_basic(L"unsigned long long int", $1, &$$)) YYERROR; }
+    | tUNSIGNED tLONG tLONG tINT{ if (!types_find_basic(L"unsigned long long int", $1, &$$)) YYERROR; }
+    | tLONG tLONG tUNSIGNED     { if (!types_find_basic(L"unsigned long long int", $1, &$$)) YYERROR; }
+    | tLONG tLONG tUNSIGNED tINT{ if (!types_find_basic(L"unsigned long long int", $1, &$$)) YYERROR; }
+    | tFLOAT                    { if (!types_find_basic(L"float",                  $1, &$$)) YYERROR; }
+    | tDOUBLE                   { if (!types_find_basic(L"double",                 $1, &$$)) YYERROR; }
+    | tLONG tDOUBLE             { if (!types_find_basic(L"long double",            $1, &$$)) YYERROR; }
+    | tTYPEDEF                  { $$ = $1; }
+    | type_expr '*'             { if (!types_find_pointer(&$1, &$$)) {yyerror("Cannot find pointer type\n"); YYERROR; } }
+    | tCLASS identifier         { if (!types_find_type($2, SymTagUDT, &$$)) {yyerror("Unknown type\n"); YYERROR; } }
+    | tSTRUCT identifier        { if (!types_find_type($2, SymTagUDT, &$$)) {yyerror("Unknown type\n"); YYERROR; } }
+    | tUNION identifier         { if (!types_find_type($2, SymTagUDT, &$$)) {yyerror("Unknown type\n"); YYERROR; } }
+    | tENUM identifier          { if (!types_find_type($2, SymTagEnum, &$$)) {yyerror("Unknown type\n"); YYERROR; } }
     ;
 
 expr_lvalue:
@@ -405,7 +428,7 @@ lvalue:
     | lvalue OP_DRF tIDENTIFIER	 { $$ = expr_alloc_pstruct($1, $3); }
     | lvalue '.' tIDENTIFIER	 { $$ = expr_alloc_struct($1, $3); }
     | lvalue '[' expr ']'	 { $$ = expr_alloc_binary_op(EXP_OP_ARR, $1, $3); }
-    | '*' expr			 { $$ = expr_alloc_unary_op(EXP_OP_FORCE_DEREF, $2); }
+    | '*' expr			 { $$ = expr_alloc_unary_op(EXP_OP_DEREF, $2); }
     ;
 
 %%

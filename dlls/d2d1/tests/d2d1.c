@@ -21,6 +21,7 @@
 #include <math.h>
 #include <float.h>
 #include "d2d1_3.h"
+#include "d2d1effectauthor.h"
 #include "d3d11.h"
 #include "wincrypt.h"
 #include "wine/test.h"
@@ -28,6 +29,179 @@
 #include "dwrite.h"
 #include "wincodec.h"
 #include "wine/heap.h"
+
+DEFINE_GUID(CLSID_TestEffect, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea,0x69,0x28,0x78);
+DEFINE_GUID(GUID_TestVertexShader, 0x5bcdcfae,0x1e92,0x4dc1,0x94,0xfa,0x3b,0x01,0xca,0x54,0x59,0x20);
+DEFINE_GUID(GUID_TestPixelShader,  0x53015748,0xfc13,0x4168,0xbd,0x13,0x0f,0xcf,0x15,0x29,0x7f,0x01);
+
+static const WCHAR *effect_xml_a =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string' value='TestEffectA'/>      \
+        <Property name='Author'      type='string' value='The Wine Project'/> \
+        <Property name='Category'    type='string' value='Test'/>             \
+        <Property name='Description' type='string' value='Test effect.'/>     \
+        <Inputs>                                                              \
+            <Input name='Source'/>                                            \
+        </Inputs>                                                             \
+        <Property name='Integer' type='uint32'>                               \
+            <Property name='DisplayName' type='string' value='Integer'/>      \
+            <Property name='Min'         type='uint32' value='0'/>            \
+            <Property name='Max'         type='uint32' value='100'/>          \
+            <Property name='Default'     type='uint32' value='10'/>           \
+        </Property>                                                           \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_b =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string' value='TestEffectB'/>      \
+        <Property name='Author'      type='string' value='The Wine Project'/> \
+        <Property name='Category'    type='string' value='Test'/>             \
+        <Property name='Description' type='string' value='Test effect.'/>     \
+        <Inputs>                                                              \
+            <Input name='Source'/>                                            \
+        </Inputs>                                                             \
+        <Property name='Context' type='iunknown'>                             \
+            <Property name='DisplayName' type='string' value='Context'/>      \
+        </Property>                                                           \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_c =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string' value='TestEffectC'/>      \
+        <Property name='Author'      type='string' value='The Wine Project'/> \
+        <Property name='Category'    type='string' value='Test'/>             \
+        <Property name='Description' type='string' value='Test effect.'/>     \
+        <Inputs>                                                              \
+            <Input name='Source'/>                                            \
+        </Inputs>                                                             \
+        <Property name='Context' type='iunknown'>                             \
+            <Property name='DisplayName' type='string' value='Context'/>      \
+        </Property>                                                           \
+        <Property name='Integer' type='uint32'>                               \
+            <Property name='DisplayName' type='string' value='Integer'/>      \
+        </Property>                                                           \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_minimum =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_version =
+L"<Effect>                                                                    \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_inputs =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_name =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_author =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_category =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_description =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_type =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description'/>                                        \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const DWORD test_vs[] =
+{
+#if 0
+    void main(float4 pos : Position, out float4 output : SV_Position)
+    {
+        output = pos;
+    }
+#endif
+    0x43425844, 0xa84b398b, 0xc4047d32, 0xc19c67bb, 0x4644285e, 0x00000001, 0x000000d8, 0x00000003,
+    0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+    0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000f0f, 0x69736f50, 0x6e6f6974, 0xababab00,
+    0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001, 0x00000003,
+    0x00000000, 0x0000000f, 0x505f5653, 0x7469736f, 0x006e6f69, 0x52444853, 0x0000003c, 0x00010040,
+    0x0000000f, 0x0300005f, 0x001010f2, 0x00000000, 0x04000067, 0x001020f2, 0x00000000, 0x00000001,
+    0x05000036, 0x001020f2, 0x00000000, 0x00101e46, 0x00000000, 0x0100003e,
+};
+
+static const DWORD test_ps[] =
+{
+#if 0
+    float4 main() : SV_Target
+    {
+        return float4(0.1, 0.2, 0.3, 0.4);
+    }
+#endif
+    0x43425844, 0xf34300ae, 0x22fc6d56, 0x5cca66fa, 0x86ae3266, 0x00000001, 0x000000b0, 0x00000003,
+    0x0000002c, 0x0000003c, 0x00000070, 0x4e475349, 0x00000008, 0x00000000, 0x00000008, 0x4e47534f,
+    0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+    0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000038, 0x00000040, 0x0000000e,
+    0x03000065, 0x001020f2, 0x00000000, 0x08000036, 0x001020f2, 0x00000000, 0x00004002, 0x3dcccccd,
+    0x3e4ccccd, 0x3e99999a, 0x3ecccccd, 0x0100003e,
+};
 
 static HRESULT (WINAPI *pD2D1CreateDevice)(IDXGIDevice *dxgi_device,
         const D2D1_CREATION_PROPERTIES *properties, ID2D1Device **device);
@@ -54,6 +228,11 @@ struct d2d1_test_context
     IDXGISwapChain *swapchain;
     IDXGISurface *surface;
     ID2D1RenderTarget *rt;
+    ID2D1DeviceContext *context;
+    ID2D1Factory *factory;
+    ID2D1Factory1 *factory1;
+    ID2D1Factory2 *factory2;
+    ID2D1Factory3 *factory3;
 };
 
 struct resource_readback
@@ -116,6 +295,14 @@ struct expected_geometry_figure
     D2D1_POINT_2F start_point;
     unsigned int segment_count;
     const struct geometry_segment *segments;
+};
+
+struct effect_impl
+{
+    ID2D1EffectImpl ID2D1EffectImpl_iface;
+    LONG refcount;
+    UINT integer;
+    ID2D1EffectContext *effect_context;
 };
 
 static void queue_d3d1x_test(void (*test)(BOOL d3d11), BOOL d3d11)
@@ -961,12 +1148,17 @@ static ID2D1RenderTarget *create_render_target(IDXGISurface *surface, BOOL d3d11
 #define release_test_context(ctx) release_test_context_(__LINE__, ctx)
 static void release_test_context_(unsigned int line, struct d2d1_test_context *ctx)
 {
-    ID2D1Factory *factory;
     ULONG ref;
 
-    ID2D1RenderTarget_GetFactory(ctx->rt, &factory);
+    if (ctx->factory3)
+        ID2D1Factory3_Release(ctx->factory3);
+    if (ctx->factory2)
+        ID2D1Factory2_Release(ctx->factory2);
+    if (ctx->factory1)
+        ID2D1Factory1_Release(ctx->factory1);
+    ID2D1DeviceContext_Release(ctx->context);
     ID2D1RenderTarget_Release(ctx->rt);
-    ref = ID2D1Factory_Release(factory);
+    ref = ID2D1Factory_Release(ctx->factory);
     ok_(__FILE__, line)(!ref, "Factory has %lu references left.\n", ref);
 
     IDXGISurface_Release(ctx->surface);
@@ -1010,7 +1202,33 @@ static BOOL init_test_context_(unsigned int line, struct d2d1_test_context *ctx,
     }
     ok_(__FILE__, line)(!!ctx->rt, "Failed to create render target.\n");
 
+    hr = ID2D1RenderTarget_QueryInterface(ctx->rt, &IID_ID2D1DeviceContext, (void **)&ctx->context);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to get device context, hr %#lx.\n", hr);
+
+    ID2D1RenderTarget_GetFactory(ctx->rt, &ctx->factory);
+    ID2D1Factory_QueryInterface(ctx->factory, &IID_ID2D1Factory1, (void **)&ctx->factory1);
+    ID2D1Factory_QueryInterface(ctx->factory, &IID_ID2D1Factory2, (void **)&ctx->factory2);
+    ID2D1Factory_QueryInterface(ctx->factory, &IID_ID2D1Factory3, (void **)&ctx->factory3);
+
     return TRUE;
+}
+
+#define check_bitmap_options(b, o) check_bitmap_options_(__LINE__, b, o)
+static void check_bitmap_options_(unsigned int line, ID2D1Bitmap *bitmap, DWORD expected_options)
+{
+    D2D1_BITMAP_OPTIONS options;
+    ID2D1Bitmap1 *bitmap1;
+    HRESULT hr;
+
+    hr = ID2D1Bitmap_QueryInterface(bitmap, &IID_ID2D1Bitmap1, (void **)&bitmap1);
+    if (FAILED(hr))
+        return;
+
+    options = ID2D1Bitmap1_GetOptions(bitmap1);
+    ok_(__FILE__, line)(options == expected_options, "Got unexpected bitmap options %#x, expected %#lx.\n",
+            options, expected_options);
+
+    ID2D1Bitmap1_Release(bitmap1);
 }
 
 #define check_bitmap_surface(b, s, o) check_bitmap_surface_(__LINE__, b, s, o)
@@ -1588,7 +1806,8 @@ static void test_state_block(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
+    factory1 = ctx.factory1;
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (IUnknown **)&dwrite_factory);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDWriteFactory_CreateRenderingParams(dwrite_factory, &text_rendering_params1);
@@ -1737,7 +1956,7 @@ static void test_state_block(BOOL d3d11)
             text_rendering_params2, text_rendering_params1);
     IDWriteRenderingParams_Release(text_rendering_params2);
 
-    if (SUCCEEDED(ID2D1Factory_QueryInterface(factory, &IID_ID2D1Factory1, (void **)&factory1)))
+    if (factory1)
     {
         D2D1_DRAWING_STATE_DESCRIPTION1 drawing_state1;
         ID2D1DrawingStateBlock1 *state_block1;
@@ -1801,15 +2020,12 @@ static void test_state_block(BOOL d3d11)
         ID2D1DrawingStateBlock1_GetTextRenderingParams(state_block1, &text_rendering_params2);
         ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
         ID2D1DrawingStateBlock1_Release(state_block1);
-
-        ID2D1Factory1_Release(factory1);
     }
 
     ID2D1DrawingStateBlock_Release(state_block);
 
     refcount = IDWriteRenderingParams_Release(text_rendering_params1);
     ok(!refcount, "Rendering params %lu references left.\n", refcount);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -1971,12 +2187,9 @@ static void test_bitmap_brush(BOOL d3d11)
     ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* Vista */, "Got unexpected hr %#lx.\n", hr);
     if (hr == S_OK)
     {
-        ID2D1DeviceContext *context;
+        ID2D1DeviceContext *context = ctx.context;
         D2D1_POINT_2F offset;
         D2D1_RECT_F src_rect;
-
-        hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&context);
-        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         ID2D1RenderTarget_BeginDraw(rt);
         set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
@@ -2046,7 +2259,6 @@ static void test_bitmap_brush(BOOL d3d11)
         ok(match, "Surface does not match.\n");
 
         ID2D1RenderTarget_SetTransform(rt, &tmp_matrix);
-        ID2D1DeviceContext_Release(context);
         ID2D1Image_Release(image);
     }
 
@@ -2213,7 +2425,7 @@ static void test_bitmap_brush(BOOL d3d11)
     set_rect(&dst_rect, 0.0f, 0.0f, 80.0f, 240.0f);
     ID2D1RenderTarget_FillRectangle(rt, &dst_rect, (ID2D1Brush *)brush);
 
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     set_rect(&dst_rect, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &dst_rect, &rectangle_geometry);
@@ -2234,8 +2446,6 @@ static void test_bitmap_brush(BOOL d3d11)
     ID2D1BitmapBrush_SetTransform(brush, &matrix);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     ID2D1TransformedGeometry_Release(transformed_geometry);
-
-    ID2D1Factory_Release(factory);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -2328,8 +2538,7 @@ static void test_image_brush(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    device_context = ctx.context;
 
     set_size_u(&size, 4, 4);
     bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -2401,7 +2610,6 @@ static void test_image_brush(BOOL d3d11)
     refcount = ID2D1Bitmap_Release(bitmap);
     ok(!refcount, "Bitmap has %lu references left.\n", refcount);
 
-    ID2D1DeviceContext_Release(device_context);
     release_test_context(&ctx);
 }
 
@@ -2549,7 +2757,7 @@ static void test_linear_brush(BOOL d3d11)
     set_rect(&r, -80.0f, -60.0f, 80.0f, 60.0f);
     ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush *)brush);
 
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     set_rect(&r, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &r, &rectangle_geometry);
@@ -2572,8 +2780,6 @@ static void test_linear_brush(BOOL d3d11)
     ID2D1LinearGradientBrush_SetEndPoint(brush, p);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     ID2D1TransformedGeometry_Release(transformed_geometry);
-
-    ID2D1Factory_Release(factory);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -2746,7 +2952,7 @@ static void test_radial_brush(BOOL d3d11)
     set_rect(&r, -80.0f, -60.0f, 80.0f, 60.0f);
     ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush *)brush);
 
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     set_rect(&r, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &r, &rectangle_geometry);
@@ -2771,8 +2977,6 @@ static void test_radial_brush(BOOL d3d11)
     ID2D1RadialGradientBrush_SetGradientOriginOffset(brush, p);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     ID2D1TransformedGeometry_Release(transformed_geometry);
-
-    ID2D1Factory_Release(factory);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -3269,7 +3473,7 @@ static void test_path_geometry(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -4058,7 +4262,6 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1PathGeometry_Release(geometry);
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -5111,7 +5314,7 @@ static void test_opacity_brush(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -5243,7 +5446,6 @@ static void test_opacity_brush(BOOL d3d11)
     ID2D1BitmapBrush_Release(bitmap_brush);
     ID2D1BitmapBrush_Release(opacity_brush);
     ID2D1SolidColorBrush_Release(color_brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -6300,7 +6502,7 @@ static void test_draw_geometry(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -7223,7 +7425,6 @@ static void test_draw_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -7250,7 +7451,7 @@ static void test_fill_geometry(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -8021,7 +8222,6 @@ static void test_fill_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -8167,7 +8367,7 @@ static void test_layer(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -8190,7 +8390,6 @@ static void test_layer(BOOL d3d11)
     ok(size.height == 600.0f, "Got unexpected height %.8e.\n", size.height);
     ID2D1Layer_Release(layer);
 
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -8211,7 +8410,7 @@ static void test_bezier_intersect(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -8324,7 +8523,6 @@ static void test_bezier_intersect(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -9703,13 +9901,11 @@ static void test_unit_mode(BOOL d3d11)
     struct d2d1_test_context ctx;
     ID2D1DeviceContext *context;
     D2D1_UNIT_MODE unit_mode;
-    HRESULT hr;
 
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    context = ctx.context;
 
     unit_mode = ID2D1DeviceContext_GetUnitMode(context);
     ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
@@ -9726,7 +9922,6 @@ static void test_unit_mode(BOOL d3d11)
     unit_mode = ID2D1DeviceContext_GetUnitMode(context);
     ok(unit_mode == D2D1_UNIT_MODE_PIXELS, "Got unexpected unit mode %#x.\n", unit_mode);
 
-    ID2D1DeviceContext_Release(context);
     release_test_context(&ctx);
 }
 
@@ -10069,39 +10264,9 @@ static void test_mt_factory(BOOL d3d11)
     ID2D1Factory_Release(factory);
 }
 
-static void *create_factory(const GUID *iid, UINT32 *factory_version)
-{
-    IUnknown *factory, *tmp;
-    unsigned int i;
-
-    static const GUID *const factory_iid[] =
-    {
-        &IID_ID2D1Factory,
-        &IID_ID2D1Factory1,
-        &IID_ID2D1Factory2,
-        &IID_ID2D1Factory3,
-    };
-
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, iid, NULL, (void **)&factory)))
-        return NULL;
-
-    if (factory_version)
-    {
-        for (i = 0; i < ARRAY_SIZE(factory_iid); ++i)
-        {
-            if (FAILED(IUnknown_QueryInterface(factory, factory_iid[i], (void **)&tmp)))
-                break;
-            IUnknown_Release(tmp);
-        }
-        *factory_version = i - 1;
-    }
-
-    return factory;
-}
-
 static void test_effect(BOOL d3d11)
 {
-    unsigned int i, j, min_inputs, max_inputs, str_size, input_count, factory_version;
+    unsigned int i, j, min_inputs, max_inputs, str_size, input_count;
     D2D1_BITMAP_PROPERTIES bitmap_desc;
     D2D1_BUFFER_PRECISION precision;
     ID2D1Image *image_a, *image_b;
@@ -10137,23 +10302,23 @@ static void test_effect(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (!(factory = create_factory(&IID_ID2D1Factory1, &factory_version)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
-    if (factory_version < 3)
-        win_skip("ID2D1Factory%u is not supported.\n", factory_version + 1);
+    if (!ctx.factory3)
+        win_skip("ID2D1Factory3 is not supported.\n");
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    context = ctx.context;
 
     for (i = 0; i < ARRAY_SIZE(effect_tests); ++i)
     {
         const struct effect_test *test = effect_tests + i;
 
-        if (factory_version < test->factory_version)
+        if (test->factory_version == 3 && !ctx.factory3)
             continue;
 
         winetest_push_context("Test %u", i);
@@ -10291,8 +10456,688 @@ static void test_effect(BOOL d3d11)
         winetest_pop_context();
     }
 
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
+    release_test_context(&ctx);
+}
+
+static inline struct effect_impl *impl_from_ID2D1EffectImpl(ID2D1EffectImpl *iface)
+{
+    return CONTAINING_RECORD(iface, struct effect_impl, ID2D1EffectImpl_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_QueryInterface(ID2D1EffectImpl *iface, REFIID iid, void **out)
+{
+    if (IsEqualGUID(iid, &IID_ID2D1EffectImpl)
+            || IsEqualGUID(iid, &IID_IUnknown))
+    {
+        ID2D1EffectImpl_AddRef(iface);
+        *out = iface;
+        return S_OK;
+    }
+
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE effect_impl_AddRef(ID2D1EffectImpl *iface)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
+    ULONG refcount = InterlockedIncrement(&effect_impl->refcount);
+    return refcount;
+}
+
+static ULONG STDMETHODCALLTYPE effect_impl_Release(ID2D1EffectImpl *iface)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
+    ULONG refcount = InterlockedDecrement(&effect_impl->refcount);
+
+    if (!refcount)
+    {
+        if (effect_impl->effect_context)
+            ID2D1EffectContext_Release(effect_impl->effect_context);
+        heap_free(effect_impl);
+    }
+
+    return refcount;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_Initialize(ID2D1EffectImpl *iface,
+        ID2D1EffectContext *context,ID2D1TransformGraph *graph)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
+    ID2D1EffectContext_AddRef(effect_impl->effect_context = context);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_PrepareForRender(ID2D1EffectImpl *iface, D2D1_CHANGE_TYPE type)
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_SetGraph(ID2D1EffectImpl *iface, ID2D1TransformGraph *graph)
+{
+    return E_NOTIMPL;
+}
+
+static const ID2D1EffectImplVtbl effect_impl_vtbl =
+{
+    effect_impl_QueryInterface,
+    effect_impl_AddRef,
+    effect_impl_Release,
+    effect_impl_Initialize,
+    effect_impl_PrepareForRender,
+    effect_impl_SetGraph,
+};
+
+static HRESULT STDMETHODCALLTYPE effect_impl_create(IUnknown **effect_impl)
+{
+    struct effect_impl *object;
+
+    if (!(object = heap_alloc(sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    object->ID2D1EffectImpl_iface.lpVtbl = &effect_impl_vtbl;
+    object->refcount = 1;
+    object->integer = 10;
+    object->effect_context = NULL;
+
+    *effect_impl = (IUnknown *)&object->ID2D1EffectImpl_iface;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_set_integer(IUnknown *iface, const BYTE *data, UINT32 data_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data || data_size != sizeof(effect_impl->integer))
+        return E_INVALIDARG;
+
+    effect_impl->integer = *((UINT *)data);
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_get_integer(const IUnknown *iface,
+        BYTE *data, UINT32 data_size, UINT32 *actual_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data || data_size != sizeof(effect_impl->integer))
+        return E_INVALIDARG;
+
+    *((UINT *)data) = effect_impl->integer;
+    if (actual_size)
+        *actual_size = sizeof(effect_impl->integer);
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_get_context(const IUnknown *iface,
+        BYTE *data, UINT32 data_size, UINT32 *actual_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data || data_size != sizeof(effect_impl->effect_context))
+        return E_INVALIDARG;
+
+    *((ID2D1EffectContext **)data) = effect_impl->effect_context;
+    if (actual_size)
+        *actual_size = sizeof(effect_impl->effect_context);
+
+    return S_OK;
+}
+
+static void test_effect_register(BOOL d3d11)
+{
+    ID2D1DeviceContext *device_context;
+    ID2D1EffectContext *effect_context;
+    struct d2d1_test_context ctx;
+    unsigned int i, integer;
+    ID2D1Factory1 *factory;
+    WCHAR display_name[64];
+    ID2D1Effect *effect;
+    HRESULT hr;
+
+    const struct xml_test
+    {
+        const WCHAR *xml;
+        HRESULT hr;
+    }
+    xml_tests[] =
+    {
+        {effect_xml_a,       S_OK},
+        {effect_xml_b,       S_OK},
+        {effect_xml_c,       S_OK},
+        {effect_xml_minimum, S_OK},
+        {effect_xml_without_version,     HRESULT_FROM_WIN32(ERROR_NOT_FOUND)},
+        {effect_xml_without_inputs,      E_INVALIDARG},
+        {effect_xml_without_name,        E_INVALIDARG},
+        {effect_xml_without_author,      E_INVALIDARG},
+        {effect_xml_without_category,    E_INVALIDARG},
+        {effect_xml_without_description, E_INVALIDARG},
+        {effect_xml_without_type,        E_INVALIDARG},
+    };
+
+    const D2D1_PROPERTY_BINDING binding[] =
+    {
+        {L"Integer",  effect_impl_set_integer, effect_impl_get_integer},
+        {L"Context",  NULL,                    effect_impl_get_context},
+        {L"Integer",  NULL,                    effect_impl_get_integer},
+        {L"Integer",  effect_impl_set_integer, NULL},
+        {L"Integer",  NULL,                    NULL},
+        {L"DeadBeef", effect_impl_set_integer, effect_impl_get_integer},
+    };
+
+    const struct binding_test
+    {
+        const D2D1_PROPERTY_BINDING *binding;
+        UINT32 binding_count;
+        const WCHAR *effect_xml;
+        HRESULT hr;
+    }
+    binding_tests[] =
+    {
+        {NULL,        0, effect_xml_a, S_OK},
+        {NULL,        0, effect_xml_b, S_OK},
+        {binding,     1, effect_xml_a, S_OK},
+        {binding,     1, effect_xml_b, D2DERR_INVALID_PROPERTY},
+        {binding + 1, 1, effect_xml_b, S_OK},
+        {binding + 2, 1, effect_xml_a, S_OK},
+        {binding + 3, 1, effect_xml_a, S_OK},
+        {binding + 4, 1, effect_xml_a, S_OK},
+        {binding + 5, 1, effect_xml_a, D2DERR_INVALID_PROPERTY},
+        {binding,     2, effect_xml_a, D2DERR_INVALID_PROPERTY},
+        {binding,     2, effect_xml_b, D2DERR_INVALID_PROPERTY},
+        {binding,     2, effect_xml_c, S_OK},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    device_context = ctx.context;
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    /* Register effect once */
+    for (i = 0; i < ARRAY_SIZE(xml_tests); ++i)
+    {
+        const struct xml_test *test = &xml_tests[i];
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        todo_wine_if(test->hr != S_OK)
+        ok(hr == test->hr, "Got unexpected hr %#lx, expected %#lx.\n", hr, test->hr);
+        if (hr == S_OK)
+        {
+            effect = NULL;
+            hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+            todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+            todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+            todo_wine ok(hr == D2DERR_EFFECT_IS_NOT_REGISTERED, "Got unexpected hr %#lx.\n", hr);
+            if (effect)
+                ID2D1Effect_Release(effect);
+        }
+
+        winetest_pop_context();
+    }
+
+    /* Register effect multiple times */
+    for (i = 0; i < ARRAY_SIZE(xml_tests); ++i)
+    {
+        const struct xml_test *test = &xml_tests[i];
+
+        if (test->hr != S_OK)
+            continue;
+
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        todo_wine ok(hr == D2DERR_EFFECT_IS_NOT_REGISTERED, "Got unexpected hr %#lx.\n", hr);
+
+        winetest_pop_context();
+    }
+
+    /* Register effect multiple times with different xml */
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_a, NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr == S_OK)
+    {
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)display_name, sizeof(display_name));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(display_name, L"TestEffectA"), "Got unexpected display name %s.\n", debugstr_w(display_name));
+        ID2D1Effect_Release(effect);
+    }
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr == S_OK)
+    {
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)display_name, sizeof(display_name));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(display_name, L"TestEffectA"), "Got unexpected display name %s.\n", debugstr_w(display_name));
+        ID2D1Effect_Release(effect);
+    }
+
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Register effect with property binding */
+    for (i = 0; i < ARRAY_SIZE(binding_tests); ++i)
+    {
+        const struct binding_test *test = &binding_tests[i];
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+                test->effect_xml, test->binding, test->binding_count, effect_impl_create);
+        todo_wine_if(test->hr != S_OK)
+        ok(hr == test->hr, "Got unexpected hr %#lx, expected %#lx.\n", hr, test->hr);
+        ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+
+        winetest_pop_context();
+    }
+
+    /* Register effect multiple times with different binding */
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr == S_OK)
+    {
+        integer = 0xdeadbeef;
+        effect_context = (ID2D1EffectContext *)0xdeadbeef;
+        hr = ID2D1Effect_GetValueByName(effect, L"Integer",
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_GetValueByName(effect, L"Context",
+                D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(integer == 10, "Got unexpected integer %u.\n", integer);
+        ok(effect_context == NULL, "Got unexpected effect context %p.\n", effect_context);
+        ID2D1Effect_Release(effect);
+    }
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding + 1, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr == S_OK)
+    {
+        integer = 0xdeadbeef;
+        effect_context = (ID2D1EffectContext *)0xdeadbeef;
+        hr = ID2D1Effect_GetValueByName(effect, L"Integer",
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_GetValueByName(effect, L"Context",
+                D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(integer == 10, "Got unexpected integer %u.\n", integer);
+        ok(effect_context == NULL, "Got unexpected effect context %p.\n", effect_context);
+        ID2D1Effect_Release(effect);
+    }
+
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Unregister builtin effect */
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_D2D1Composite);
+    todo_wine ok(hr == D2DERR_EFFECT_IS_NOT_REGISTERED, "Got unexpected hr %#lx.\n", hr);
+
+    release_test_context(&ctx);
+}
+
+static void test_effect_context(BOOL d3d11)
+{
+    ID2D1EffectContext *effect_context;
+    D2D1_PROPERTY_BINDING binding;
+    struct d2d1_test_context ctx;
+    ID2D1Effect *effect = NULL;
+    ID2D1Factory1 *factory;
+    BOOL loaded;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    binding.propertyName = L"Context";
+    binding.setFunction = NULL;
+    binding.getFunction = effect_impl_get_context;
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, &binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr != S_OK)
+        goto done;
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr != S_OK)
+        goto done;
+
+    /* Test shader loading */
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestVertexShader);
+    ok(!loaded, "Shader is loaded.\n");
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestPixelShader);
+    ok(!loaded, "Shader is loaded.\n");
+
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_ps, sizeof(test_ps));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_vs, sizeof(test_vs));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestVertexShader);
+    ok(loaded, "Shader is not loaded.\n");
+
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_ps, sizeof(test_ps));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_vs, sizeof(test_vs));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1EffectContext_LoadPixelShader(effect_context,
+            &GUID_TestPixelShader, (const BYTE *)test_vs, sizeof(test_vs));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_LoadPixelShader(effect_context,
+            &GUID_TestPixelShader, (const BYTE *)test_ps, sizeof(test_ps));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestPixelShader);
+    ok(loaded, "Shader is not loaded.\n");
+
+done:
+    if (effect)
+        ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    todo_wine
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    release_test_context(&ctx);
+}
+
+static void test_effect_properties(BOOL d3d11)
+{
+    UINT32 i, min_inputs, max_inputs, integer, index;
+    ID2D1EffectContext *effect_context;
+    D2D1_BUFFER_PRECISION precision;
+    struct d2d1_test_context ctx;
+    ID2D1Factory1 *factory;
+    ID2D1Effect *effect;
+    WCHAR buffer[128];
+    CLSID clsid;
+    BOOL cached;
+    HRESULT hr;
+
+    static const WCHAR *effect_author = L"The Wine Project";
+    static const WCHAR *effect_category = L"Test";
+    static const WCHAR *effect_description = L"Test effect.";
+
+    const D2D1_PROPERTY_BINDING binding[] =
+    {
+        {L"Integer",  effect_impl_set_integer, effect_impl_get_integer},
+        {L"Context",  NULL,                    effect_impl_get_context},
+    };
+
+    const struct system_property_test
+    {
+        const WCHAR *xml;
+        const WCHAR *display_name;
+        const WCHAR *author;
+        const WCHAR *category;
+        const WCHAR *description;
+        UINT32 min_inputs;
+        UINT32 max_inputs;
+    }
+    system_property_tests[] =
+    {
+        {effect_xml_a,       L"TestEffectA", effect_author, effect_category, effect_description, 1, 1},
+        {effect_xml_b,       L"TestEffectB", effect_author, effect_category, effect_description, 1, 1},
+        {effect_xml_c,       L"TestEffectC", effect_author, effect_category, effect_description, 1, 1},
+        {effect_xml_minimum, L"", L"" ,L"", L"", 0, 0},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    /* Test system properties */
+
+    for (i = 0; i < ARRAY_SIZE(system_property_tests); ++i)
+    {
+        const struct system_property_test *test = &system_property_tests[i];
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        effect = NULL;
+        hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        if (hr != S_OK)
+            goto next;
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID,
+                D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(IsEqualGUID(&clsid, &CLSID_TestEffect), "Got unexpected clsid %s, expected %s.\n",
+                debugstr_guid(&clsid), debugstr_guid(&CLSID_TestEffect));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->display_name), "Got unexpected display name %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->display_name));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_AUTHOR,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->author), "Got unexpected author %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->author));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CATEGORY,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->category), "Got unexpected category %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->category));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DESCRIPTION,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->description), "Got unexpected description %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->description));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CACHED,
+                D2D1_PROPERTY_TYPE_BOOL, (BYTE *)&cached, sizeof(cached));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(cached == FALSE, "Got unexpected cached %d.\n", cached);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_PRECISION,
+                D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&precision, sizeof(precision));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(precision == D2D1_BUFFER_PRECISION_UNKNOWN, "Got unexpected precision %#x.\n", precision);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_MIN_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&min_inputs, sizeof(min_inputs));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(min_inputs == test->min_inputs, "Got unexpected min inputs %u, expected %u.\n",
+                min_inputs, test->min_inputs);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_MAX_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&max_inputs, sizeof(max_inputs));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(max_inputs == test->max_inputs, "Got unexpected max inputs %u, expected %u.\n",
+                max_inputs, test->max_inputs);
+
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_CLSID,
+                D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_AUTHOR,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_CATEGORY,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_CACHED,
+                D2D1_PROPERTY_TYPE_BOOL, (BYTE *)&cached, sizeof(cached));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_PRECISION,
+                D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&precision, sizeof(precision));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_MIN_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&min_inputs, sizeof(min_inputs));
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_MAX_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&max_inputs, sizeof(max_inputs));
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+
+    next:
+        if (effect)
+            ID2D1Effect_Release(effect);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        winetest_pop_context();
+    }
+
+    /* Test custom properties */
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding, 2, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    effect = NULL;
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr != S_OK)
+        goto done;
+
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Context");
+    ok(index == 0, "Got unexpected index %u.\n", index);
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Integer");
+    ok(index == 1, "Got unexpected index %u.\n", index);
+
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValueByName(effect,
+            L"Context", D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(effect_context != NULL && effect_context != (ID2D1EffectContext *)0xdeadbeef,
+       "Got unexpected effect context %p.\n", effect_context);
+
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(effect_context != NULL && effect_context != (ID2D1EffectContext *)0xdeadbeef,
+       "Got unexpected effect context %p.\n", effect_context);
+
+    hr = ID2D1Effect_SetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValueByName(effect, L"Integer", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 10, "Got unexpected integer %u.", integer);
+
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 10, "Got unexpected integer %u.", integer);
+
+    integer = 20;
+    hr = ID2D1Effect_SetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 20, "Got unexpected integer %u.", integer);
+
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Test custom properties without binding */
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, effect_xml_c, NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Context");
+    ok(index == 0, "Got unexpected index %u.\n", index);
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Integer");
+    ok(index == 1, "Got unexpected index %u.\n", index);
+
+    hr = ID2D1Effect_GetValueByName(effect, L"DeadBeef", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == D2DERR_INVALID_PROPERTY, "Got unexpected hr %#lx.\n", hr);
+
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(effect_context == NULL, "Got unexpected effect context %p.\n", effect_context);
+
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 0, "Got unexpected integer %u.", integer);
+
+    hr = ID2D1Effect_SetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_SetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+
+done:
+    if (effect)
+        ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
     release_test_context(&ctx);
 }
 
@@ -10367,15 +11212,15 @@ static void test_effect_2d_affine(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D12DAffineTransform, &effect);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -10439,8 +11284,6 @@ static void test_effect_2d_affine(BOOL d3d11)
     }
 
     ID2D1Effect_Release(effect);
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -10479,15 +11322,15 @@ static void test_effect_crop(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Crop, &effect);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -10528,8 +11371,6 @@ static void test_effect_crop(BOOL d3d11)
     }
 
     ID2D1Effect_Release(effect);
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -10553,15 +11394,15 @@ static void test_effect_grayscale(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory3, NULL, (void **)&factory)))
+    factory = ctx.factory3;
+    if (!factory)
     {
         win_skip("ID2D1Factory3 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Grayscale, &effect);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -10606,8 +11447,6 @@ static void test_effect_grayscale(BOOL d3d11)
     }
 
     ID2D1Effect_Release(effect);
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory3_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -10962,15 +11801,15 @@ static void test_image_bounds(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    context = ctx.context;
 
     for (i = 0; i < ARRAY_SIZE(bitmap_bounds_tests); ++i)
     {
@@ -11015,8 +11854,338 @@ static void test_image_bounds(BOOL d3d11)
         winetest_pop_context();
     }
 
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
+    release_test_context(&ctx);
+}
+
+static void test_bitmap_map(BOOL d3d11)
+{
+    static const struct
+    {
+        unsigned int options;
+    } invalid_map_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_NONE },
+        { D2D1_BITMAP_OPTIONS_TARGET },
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_TARGET },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+    };
+    static const struct
+    {
+        unsigned int options;
+    } valid_map_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ },
+    };
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    D3D11_TEXTURE2D_DESC texture_desc;
+    ID2D1Bitmap *bitmap2, *bitmap3;
+    struct d2d1_test_context ctx;
+    D2D1_MAPPED_RECT mapped_rect;
+    ID3D11Device *d3d_device;
+    ID3D11Texture2D *texture;
+    unsigned int i, options;
+    IDXGISurface *surface;
+    ID2D1Bitmap1 *bitmap;
+    D2D1_SIZE_U size;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    for (i = 0; i < ARRAY_SIZE(invalid_map_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = invalid_map_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_NONE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ID3D11Texture2D_GetDesc(texture, &texture_desc);
+        ok(!texture_desc.CPUAccessFlags, "Unexpected CPU access flags %#x.\n", texture_desc.CPUAccessFlags);
+        ID3D11Texture2D_Release(texture);
+        IDXGISurface_Release(surface);
+
+        ID2D1Bitmap1_Release(bitmap);
+
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(valid_map_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = valid_map_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_NONE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+        ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        todo_wine
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Unmap(bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Unmap(bitmap);
+        ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ID3D11Texture2D_GetDesc(texture, &texture_desc);
+        ok(texture_desc.Usage == D3D11_USAGE_STAGING, "Unexpected usage %u.\n", texture_desc.Usage);
+        ok(!texture_desc.BindFlags, "Unexpected bind flags %#x.\n", texture_desc.BindFlags);
+        ok(texture_desc.CPUAccessFlags == D3D11_CPU_ACCESS_READ, "Unexpected CPU access flags %#x.\n",
+                texture_desc.CPUAccessFlags);
+        ok(!texture_desc.MiscFlags, "Unexpected misc flags %#x.\n", texture_desc.MiscFlags);
+        ID3D11Texture2D_Release(texture);
+        IDXGISurface_Release(surface);
+
+        ID2D1Bitmap1_Release(bitmap);
+
+        winetest_pop_context();
+    }
+
+    hr = IDXGIDevice_QueryInterface(ctx.device, &IID_ID3D11Device, (void **)&d3d_device);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    texture_desc.Width = 4;
+    texture_desc.Height = 4;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D11_USAGE_STAGING;
+    texture_desc.BindFlags = 0;
+    texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    texture_desc.MiscFlags = 0;
+
+    hr = ID3D11Device_CreateTexture2D(d3d_device, &texture_desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11Texture2D_QueryInterface(texture, &IID_IDXGISurface, (void **)&surface);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Unmap(bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Unmap(bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_READ, &mapped_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Unmap(bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+    todo_wine
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr)) ID2D1Bitmap1_Unmap(bitmap);
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1Bitmap1_Release(bitmap);
+
+    /* Options are derived from the surface properties. */
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    bitmap_desc.dpiX = bitmap_desc.dpiY = 0.0f;
+    hr = ID2D1DeviceContext_CreateSharedBitmap(ctx.context, &IID_IDXGISurface, surface,
+            (const D2D1_BITMAP_PROPERTIES *)&bitmap_desc, &bitmap2);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_bitmap_options(bitmap2, D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ);
+
+    hr = ID2D1DeviceContext_CreateSharedBitmap(ctx.context, &IID_ID2D1Bitmap, bitmap2, NULL, &bitmap3);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_bitmap_options(bitmap3, D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ);
+    ID2D1Bitmap_Release(bitmap3);
+
+    ID2D1Bitmap_Release(bitmap2);
+
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, NULL, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    options = ID2D1Bitmap1_GetOptions(bitmap);
+    ok(options == (D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ),
+            "Unexpected options %#x.\n", options);
+    ID2D1Bitmap1_Release(bitmap);
+
+    /* Options incompatible with the surface. */
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    todo_wine
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr)) ID2D1Bitmap1_Release(bitmap);
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    /* Create without D2D1_BITMAP_OPTIONS_CPU_READ, surface supports CPU reads. */
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ID2D1Bitmap1_Release(bitmap);
+
+    ID3D11Texture2D_Release(texture);
+    IDXGISurface_Release(surface);
+
+    /* Surface D2D1_BITMAP_OPTIONS_TARGET */
+    texture_desc.Width = 4;
+    texture_desc.Height = 4;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D11_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    texture_desc.CPUAccessFlags = 0;
+    texture_desc.MiscFlags = 0;
+
+    hr = ID3D11Device_CreateTexture2D(d3d_device, &texture_desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11Texture2D_QueryInterface(texture, &IID_IDXGISurface, (void **)&surface);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_TARGET;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ID2D1Bitmap1_Release(bitmap);
+
+    bitmap_desc.bitmapOptions = 0;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_bitmap_options((ID2D1Bitmap *)bitmap, 0);
+    ID2D1Bitmap1_Release(bitmap);
+
+    ID3D11Texture2D_Release(texture);
+    IDXGISurface_Release(surface);
+
+    ID3D11Device_Release(d3d_device);
+
+    release_test_context(&ctx);
+}
+
+static void test_bitmap_create(BOOL d3d11)
+{
+    static const struct
+    {
+        unsigned int options;
+    } invalid_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW },
+        { D2D1_BITMAP_OPTIONS_CPU_READ },
+        { D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+    };
+    static const struct
+    {
+        unsigned int options;
+    } valid_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_NONE },
+        { D2D1_BITMAP_OPTIONS_TARGET },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ },
+    };
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    struct d2d1_test_context ctx;
+    ID2D1Bitmap1 *bitmap;
+    D2D1_SIZE_U size;
+    unsigned int i;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    for (i = 0; i < ARRAY_SIZE(invalid_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = invalid_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(valid_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = valid_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ID2D1Bitmap1_Release(bitmap);
+
+        winetest_pop_context();
+    }
+
     release_test_context(&ctx);
 }
 
@@ -11088,12 +12257,17 @@ START_TEST(d2d1)
     queue_d3d10_test(test_colour_space);
     queue_test(test_geometry_group);
     queue_test(test_mt_factory);
+    queue_test(test_effect_register);
+    queue_test(test_effect_context);
+    queue_test(test_effect_properties);
     queue_test(test_effect);
     queue_test(test_effect_2d_affine);
     queue_test(test_effect_crop);
     queue_test(test_effect_grayscale);
     queue_d3d10_test(test_stroke_contains_point);
     queue_test(test_image_bounds);
+    queue_test(test_bitmap_map);
+    queue_test(test_bitmap_create);
 
     run_queued_tests();
 }

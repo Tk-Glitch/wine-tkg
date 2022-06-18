@@ -74,24 +74,34 @@ struct rtl_heap_entry
 
 /* header for heap blocks */
 
-typedef struct block
+#define ALIGNMENT (2 * sizeof(void *))
+
+struct block
 {
-    DWORD  size;                    /* Block size; must be the first field */
-    DWORD  magic : 24;              /* Magic number */
-    DWORD  unused_bytes : 8;        /* Number of bytes in the block not used by user data (max value is HEAP_MIN_DATA_SIZE+HEAP_MIN_SHRINK_SIZE) */
-} ARENA_INUSE;
+    WORD block_size;   /* block size in multiple of ALIGNMENT */
+    BYTE block_flags;
+    BYTE tail_size;    /* unused size (used block) / high size bits (free block) */
+    DWORD magic;
+};
 
 C_ASSERT( sizeof(struct block) == 8 );
+
+/* block specific flags */
+
+#define BLOCK_FLAG_FREE        0x00000001
+#define BLOCK_FLAG_PREV_FREE   0x00000002
+#define BLOCK_FLAG_FREE_LINK   0x00000003
 
 
 /* entry to link free blocks in free lists */
 
-typedef struct entry
+struct DECLSPEC_ALIGN(ALIGNMENT) entry
 {
-    DWORD                 size;     /* Block size; must be the first field */
-    DWORD                 magic;    /* Magic number */
-    struct list           entry;    /* Entry in free list */
-} ARENA_FREE;
+    struct block block;
+    struct list entry;
+};
+
+C_ASSERT( sizeof(struct entry) == 2 * ALIGNMENT );
 
 typedef struct
 {
@@ -103,8 +113,6 @@ typedef struct
     DWORD                 magic;      /* these must remain at the end of the structure */
 } ARENA_LARGE;
 
-#define ARENA_FLAG_FREE        0x00000001  /* flags OR'ed with arena size */
-#define ARENA_FLAG_PREV_FREE   0x00000002
 #define ARENA_SIZE_MASK        (~3)
 #define ARENA_LARGE_SIZE       0xfedcba90  /* magic value for 'size' field in large blocks */
 
@@ -119,20 +127,19 @@ typedef struct
 #define ARENA_FREE_FILLER      0xfeeefeee
 
 /* everything is aligned on 8 byte boundaries (16 for Win64) */
-#define ALIGNMENT              (2*sizeof(void*))
 #define LARGE_ALIGNMENT        16  /* large blocks have stricter alignment */
-#define ARENA_OFFSET           (ALIGNMENT - sizeof(ARENA_INUSE))
+#define COMMIT_MASK            0xffff  /* bitmask for commit/decommit granularity */
 
 C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
 
-#define ROUND_SIZE(size)       ((((size) + ALIGNMENT - 1) & ~(ALIGNMENT-1)) + ARENA_OFFSET)
+#define ROUND_ADDR(addr, mask) ((void *)((UINT_PTR)(addr) & ~(UINT_PTR)(mask)))
+#define ROUND_SIZE(size, mask) ((((SIZE_T)(size) + (mask)) & ~(SIZE_T)(mask)))
 
-/* minimum data size (without arenas) of an allocated block */
-/* make sure that it's larger than a free list entry */
-#define HEAP_MIN_DATA_SIZE    ROUND_SIZE(2 * sizeof(struct list))
-#define HEAP_MIN_ARENA_SIZE   (HEAP_MIN_DATA_SIZE + sizeof(ARENA_INUSE))
-/* minimum size that must remain to shrink an allocated block */
-#define HEAP_MIN_SHRINK_SIZE  (HEAP_MIN_DATA_SIZE+sizeof(ARENA_FREE))
+#define HEAP_MIN_BLOCK_SIZE   ROUND_SIZE(sizeof(struct entry) + ALIGNMENT, ALIGNMENT - 1)
+
+C_ASSERT( sizeof(struct block) <= HEAP_MIN_BLOCK_SIZE );
+C_ASSERT( sizeof(struct entry) <= HEAP_MIN_BLOCK_SIZE );
+
 /* minimum size to start allocating large blocks */
 #define HEAP_MIN_LARGE_BLOCK_SIZE  (0x10000 * ALIGNMENT - 0x1000)
 /* extra size to add at the end of block for tail checking */
@@ -142,36 +149,30 @@ C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
 /* There will be a free list bucket for every arena size up to and including this value */
 #define HEAP_MAX_SMALL_FREE_LIST 0x100
 C_ASSERT( HEAP_MAX_SMALL_FREE_LIST % ALIGNMENT == 0 );
-#define HEAP_NB_SMALL_FREE_LISTS (((HEAP_MAX_SMALL_FREE_LIST - HEAP_MIN_ARENA_SIZE) / ALIGNMENT) + 1)
+#define HEAP_NB_SMALL_FREE_LISTS (((HEAP_MAX_SMALL_FREE_LIST - HEAP_MIN_BLOCK_SIZE) / ALIGNMENT) + 1)
 
 /* Max size of the blocks on the free lists above HEAP_MAX_SMALL_FREE_LIST */
-static const SIZE_T HEAP_freeListSizes[] =
+static const SIZE_T free_list_sizes[] =
 {
     0x200, 0x400, 0x1000, ~(SIZE_T)0
 };
-#define HEAP_NB_FREE_LISTS (ARRAY_SIZE( HEAP_freeListSizes ) + HEAP_NB_SMALL_FREE_LISTS)
-
-typedef union
-{
-    ARENA_FREE  arena;
-    void       *alignment[4];
-} FREE_LIST_ENTRY;
+#define HEAP_NB_FREE_LISTS (ARRAY_SIZE(free_list_sizes) + HEAP_NB_SMALL_FREE_LISTS)
 
 struct tagHEAP;
 
-typedef struct tagSUBHEAP
+typedef struct DECLSPEC_ALIGN(ALIGNMENT) tagSUBHEAP
 {
-    void               *base;       /* Base address of the sub-heap memory block */
+    SIZE_T __pad[sizeof(SIZE_T) / sizeof(DWORD)];
     SIZE_T              size;       /* Size of the whole sub-heap */
-    SIZE_T              min_commit; /* Minimum committed size */
     SIZE_T              commitSize; /* Committed size of the sub-heap */
     struct list         entry;      /* Entry in sub-heap list */
     struct tagHEAP     *heap;       /* Main heap structure */
-    DWORD               headerSize; /* Size of the heap header */
-    DWORD               magic;      /* Magic number */
+    struct block block;
 } SUBHEAP;
 
-#define SUBHEAP_MAGIC    ((DWORD)('S' | ('U'<<8) | ('B'<<16) | ('H'<<24)))
+/* block must be last and aligned */
+C_ASSERT( sizeof(SUBHEAP) == offsetof(SUBHEAP, block) + sizeof(struct block) );
+C_ASSERT( sizeof(SUBHEAP) == 4 * ALIGNMENT );
 
 typedef struct tagHEAP
 {                                  /* win32/win64 */
@@ -190,18 +191,23 @@ typedef struct tagHEAP
     struct list      subheap_list;  /* Sub-heap list */
     struct list      large_list;    /* Large blocks list */
     SIZE_T           grow_size;     /* Size of next subheap for growing heap */
+    SIZE_T           min_size;      /* Minimum committed size */
     DWORD            magic;         /* Magic number */
     DWORD            pending_pos;   /* Position in pending free requests ring */
-    ARENA_INUSE    **pending_free;  /* Ring buffer for pending free requests */
+    struct block   **pending_free;  /* Ring buffer for pending free requests */
     RTL_CRITICAL_SECTION cs;
-    FREE_LIST_ENTRY  freeList[HEAP_NB_FREE_LISTS];
+    struct entry     free_lists[HEAP_NB_FREE_LISTS];
     SUBHEAP          subheap;
 } HEAP;
 
+/* subheap must be last and aligned */
+C_ASSERT( sizeof(HEAP) == offsetof(HEAP, subheap) + sizeof(SUBHEAP) );
+C_ASSERT( sizeof(HEAP) % ALIGNMENT == 0 );
+C_ASSERT( offsetof(HEAP, subheap) <= COMMIT_MASK );
+
 #define HEAP_MAGIC       ((DWORD)('H' | ('E'<<8) | ('A'<<16) | ('P'<<24)))
 
-#define HEAP_DEF_SIZE        0x110000   /* Default heap size = 1Mb + 64Kb */
-#define COMMIT_MASK          0xffff  /* bitmask for commit/decommit granularity */
+#define HEAP_DEF_SIZE        (0x40000 * ALIGNMENT)
 #define MAX_FREE_PENDING     1024    /* max number of free requests to delay */
 
 /* some undocumented flags (names are made up) */
@@ -210,6 +216,7 @@ typedef struct tagHEAP
 #define HEAP_VALIDATE         0x10000000
 #define HEAP_VALIDATE_ALL     0x20000000
 #define HEAP_VALIDATE_PARAMS  0x40000000
+#define HEAP_CHECKING_ENABLED 0x80000000
 
 static HEAP *processHeap;  /* main process heap */
 
@@ -222,39 +229,54 @@ static inline BOOL contains( const void *a, SIZE_T a_size, const void *b, SIZE_T
 
 static inline UINT block_get_flags( const struct block *block )
 {
-    return block->size & ~ARENA_SIZE_MASK;
+    return block->block_flags;
 }
 
 static inline UINT block_get_type( const struct block *block )
 {
-    if (block_get_flags( block ) & ARENA_FLAG_FREE) return (block->unused_bytes << 24)|block->magic;
     return block->magic;
+}
+
+static inline void block_set_type( struct block *block, UINT type )
+{
+    block->magic = type;
 }
 
 static inline UINT block_get_overhead( const struct block *block )
 {
-    if (block_get_flags( block ) & ARENA_FLAG_FREE) return sizeof(struct entry);
-    return sizeof(*block) + block->unused_bytes;
+    if (block_get_flags( block ) & BLOCK_FLAG_FREE) return sizeof(*block) + sizeof(struct list);
+    return sizeof(*block) + block->tail_size;
 }
 
 /* return the size of a block, including its header */
 static inline UINT block_get_size( const struct block *block )
 {
-    UINT data_size = block->size & ARENA_SIZE_MASK, size = data_size;
-    if (block_get_flags( block ) & ARENA_FLAG_FREE) size += sizeof(struct entry);
-    else size += sizeof(*block);
-    if (size < data_size) return ~0u;
-    return size;
+    UINT block_size = block->block_size;
+    if (block_get_flags( block ) & BLOCK_FLAG_FREE) block_size += (UINT)block->tail_size << 16;
+    return block_size * ALIGNMENT;
+}
+
+static inline void block_set_size( struct block *block, UINT block_flags, UINT block_size )
+{
+    block_size /= ALIGNMENT;
+    if (block_flags & BLOCK_FLAG_FREE) block->tail_size = block_size >> 16;
+    block->block_size = block_size;
+    block->block_flags = block_flags;
 }
 
 static inline void *subheap_base( const SUBHEAP *subheap )
 {
-    return subheap->base;
+    return ROUND_ADDR( subheap, COMMIT_MASK );
 }
 
 static inline SIZE_T subheap_size( const SUBHEAP *subheap )
 {
     return subheap->size;
+}
+
+static inline SIZE_T subheap_overhead( const SUBHEAP *subheap )
+{
+    return (char *)&subheap->block - (char *)subheap_base( subheap );
 }
 
 static inline const void *subheap_commit_end( const SUBHEAP *subheap )
@@ -264,7 +286,7 @@ static inline const void *subheap_commit_end( const SUBHEAP *subheap )
 
 static inline void *first_block( const SUBHEAP *subheap )
 {
-    return (char *)subheap_base( subheap ) + subheap->headerSize;
+    return (void *)&subheap->block;
 }
 
 static inline const void *last_block( const SUBHEAP *subheap )
@@ -282,11 +304,41 @@ static inline struct block *next_block( const SUBHEAP *subheap, const struct blo
 
 static inline BOOL check_subheap( const SUBHEAP *subheap )
 {
-    const char *base = subheap->base;
-    return contains( base, subheap->size, base + subheap->headerSize, subheap->commitSize - subheap->headerSize );
+    const char *base = ROUND_ADDR( subheap, COMMIT_MASK );
+    return contains( base, subheap->size, &subheap->block, base + subheap->commitSize - (char *)&subheap->block );
 }
 
 static BOOL heap_validate( const HEAP *heap );
+
+/* mark a block of memory as innacessible for debugging purposes */
+static inline void valgrind_make_noaccess( void const *ptr, SIZE_T size )
+{
+#if defined(VALGRIND_MAKE_MEM_NOACCESS)
+    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_NOACCESS( ptr, size ) );
+#elif defined(VALGRIND_MAKE_NOACCESS)
+    VALGRIND_DISCARD( VALGRIND_MAKE_NOACCESS( ptr, size ) );
+#endif
+}
+
+/* mark a block of memory as initialized for debugging purposes */
+static inline void valgrind_make_readable( void const *ptr, SIZE_T size )
+{
+#if defined(VALGRIND_MAKE_MEM_DEFINED)
+    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_DEFINED( ptr, size ) );
+#elif defined(VALGRIND_MAKE_READABLE)
+    VALGRIND_DISCARD( VALGRIND_MAKE_READABLE( ptr, size ) );
+#endif
+}
+
+/* mark a block of memory as uninitialized for debugging purposes */
+static inline void valgrind_make_writable( void const *ptr, SIZE_T size )
+{
+#if defined(VALGRIND_MAKE_MEM_UNDEFINED)
+    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_UNDEFINED( ptr, size ) );
+#elif defined(VALGRIND_MAKE_WRITABLE)
+    VALGRIND_DISCARD( VALGRIND_MAKE_WRITABLE( ptr, size ) );
+#endif
+}
 
 /* mark a block of memory as free for debugging purposes */
 static inline void mark_block_free( void *ptr, SIZE_T size, DWORD flags )
@@ -296,71 +348,38 @@ static inline void mark_block_free( void *ptr, SIZE_T size, DWORD flags )
         SIZE_T i;
         for (i = 0; i < size / sizeof(DWORD); i++) ((DWORD *)ptr)[i] = ARENA_FREE_FILLER;
     }
-#if defined(VALGRIND_MAKE_MEM_NOACCESS)
-    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_NOACCESS( ptr, size ));
-#elif defined( VALGRIND_MAKE_NOACCESS)
-    VALGRIND_DISCARD( VALGRIND_MAKE_NOACCESS( ptr, size ));
-#endif
-}
-
-/* mark a block of memory as initialized for debugging purposes */
-static inline void mark_block_initialized( void *ptr, SIZE_T size )
-{
-#if defined(VALGRIND_MAKE_MEM_DEFINED)
-    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_DEFINED( ptr, size ));
-#elif defined(VALGRIND_MAKE_READABLE)
-    VALGRIND_DISCARD( VALGRIND_MAKE_READABLE( ptr, size ));
-#endif
-}
-
-/* mark a block of memory as uninitialized for debugging purposes */
-static inline void mark_block_uninitialized( void *ptr, SIZE_T size )
-{
-#if defined(VALGRIND_MAKE_MEM_UNDEFINED)
-    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_UNDEFINED( ptr, size ));
-#elif defined(VALGRIND_MAKE_WRITABLE)
-    VALGRIND_DISCARD( VALGRIND_MAKE_WRITABLE( ptr, size ));
-#endif
+    valgrind_make_noaccess( ptr, size );
 }
 
 /* mark a block of memory as a tail block */
-static inline void mark_block_tail( void *ptr, SIZE_T size, DWORD flags )
+static inline void mark_block_tail( struct block *block, DWORD flags )
 {
+    char *tail = (char *)block + block_get_size( block ) - block->tail_size;
     if (flags & HEAP_TAIL_CHECKING_ENABLED)
     {
-        mark_block_uninitialized( ptr, size );
-        memset( ptr, ARENA_TAIL_FILLER, size );
+        valgrind_make_writable( tail, ALIGNMENT );
+        memset( tail, ARENA_TAIL_FILLER, ALIGNMENT );
     }
-#if defined(VALGRIND_MAKE_MEM_NOACCESS)
-    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_NOACCESS( ptr, size ));
-#elif defined( VALGRIND_MAKE_NOACCESS)
-    VALGRIND_DISCARD( VALGRIND_MAKE_NOACCESS( ptr, size ));
-#endif
+    valgrind_make_noaccess( tail, ALIGNMENT );
 }
 
 /* initialize contents of a newly created block of memory */
-static inline void initialize_block( void *ptr, SIZE_T size, SIZE_T unused, DWORD flags )
+static inline void initialize_block( void *ptr, SIZE_T size, DWORD flags )
 {
     if (flags & HEAP_ZERO_MEMORY)
     {
-        mark_block_initialized( ptr, size );
+        valgrind_make_writable( ptr, size );
         memset( ptr, 0, size );
     }
-    else
+    else if (flags & HEAP_FREE_CHECKING_ENABLED)
     {
-        mark_block_uninitialized( ptr, size );
-        if (flags & HEAP_FREE_CHECKING_ENABLED)
-        {
-            memset( ptr, ARENA_INUSE_FILLER, size );
-            mark_block_uninitialized( ptr, size );
-        }
+        valgrind_make_writable( ptr, size );
+        memset( ptr, ARENA_INUSE_FILLER, size );
     }
-
-    mark_block_tail( (char *)ptr + size, unused, flags );
 }
 
 /* notify that a new block of memory has been allocated for debugging purposes */
-static inline void notify_alloc( void *ptr, SIZE_T size, BOOL init )
+static inline void valgrind_notify_alloc( void const *ptr, SIZE_T size, BOOL init )
 {
 #ifdef VALGRIND_MALLOCLIKE_BLOCK
     VALGRIND_MALLOCLIKE_BLOCK( ptr, size, 0, init );
@@ -368,14 +387,14 @@ static inline void notify_alloc( void *ptr, SIZE_T size, BOOL init )
 }
 
 /* notify that a block of memory has been freed for debugging purposes */
-static inline void notify_free( void const *ptr )
+static inline void valgrind_notify_free( void const *ptr )
 {
 #ifdef VALGRIND_FREELIKE_BLOCK
     VALGRIND_FREELIKE_BLOCK( ptr, 0 );
 #endif
 }
 
-static inline void notify_realloc( void const *ptr, SIZE_T size_old, SIZE_T size_new )
+static inline void valgrind_notify_resize( void const *ptr, SIZE_T size_old, SIZE_T size_new )
 {
 #ifdef VALGRIND_RESIZEINPLACE_BLOCK
     /* zero is not a valid size */
@@ -383,7 +402,7 @@ static inline void notify_realloc( void const *ptr, SIZE_T size_old, SIZE_T size
 #endif
 }
 
-static void notify_free_all( SUBHEAP *subheap )
+static void valgrind_notify_free_all( SUBHEAP *subheap )
 {
 #ifdef VALGRIND_FREELIKE_BLOCK
     struct block *block;
@@ -393,27 +412,27 @@ static void notify_free_all( SUBHEAP *subheap )
 
     for (block = first_block( subheap ); block; block = next_block( subheap, block ))
     {
-        if (block_get_flags( block ) & ARENA_FLAG_FREE) continue;
-        if (block_get_type( block ) == ARENA_INUSE_MAGIC) notify_free( block + 1 );
+        if (block_get_flags( block ) & BLOCK_FLAG_FREE) continue;
+        if (block_get_type( block ) == ARENA_INUSE_MAGIC) valgrind_notify_free( block + 1 );
     }
 #endif
 }
 
 /* locate a free list entry of the appropriate size */
 /* size is the size of the whole block including the arena header */
-static inline struct entry *find_free_list( HEAP *heap, SIZE_T size, BOOL last )
+static inline struct entry *find_free_list( HEAP *heap, SIZE_T block_size, BOOL last )
 {
-    FREE_LIST_ENTRY *list, *end = heap->freeList + ARRAY_SIZE(heap->freeList);
+    struct entry *list, *end = heap->free_lists + ARRAY_SIZE(heap->free_lists);
     unsigned int i;
 
-    if (size <= HEAP_MAX_SMALL_FREE_LIST)
-        i = (size - HEAP_MIN_ARENA_SIZE) / ALIGNMENT;
+    if (block_size <= HEAP_MAX_SMALL_FREE_LIST)
+        i = (block_size - HEAP_MIN_BLOCK_SIZE) / ALIGNMENT;
     else for (i = HEAP_NB_SMALL_FREE_LISTS; i < HEAP_NB_FREE_LISTS - 1; i++)
-        if (size <= HEAP_freeListSizes[i - HEAP_NB_SMALL_FREE_LISTS]) break;
+        if (block_size <= free_list_sizes[i - HEAP_NB_SMALL_FREE_LISTS]) break;
 
-    list = heap->freeList + i;
-    if (last && ++list == end) list = heap->freeList;
-    return &list->arena;
+    list = heap->free_lists + i;
+    if (last && ++list == end) list = heap->free_lists;
+    return list;
 }
 
 /* get the memory protection type to use for a given heap */
@@ -431,7 +450,8 @@ static RTL_CRITICAL_SECTION_DEBUG process_heap_cs_debug =
 
 static inline ULONG heap_get_flags( const HEAP *heap, ULONG flags )
 {
-    flags &= HEAP_GENERATE_EXCEPTIONS | HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY | HEAP_REALLOC_IN_PLACE_ONLY;
+    if (flags & (HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED)) flags |= HEAP_CHECKING_ENABLED;
+    flags &= HEAP_GENERATE_EXCEPTIONS | HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY | HEAP_REALLOC_IN_PLACE_ONLY | HEAP_CHECKING_ENABLED;
     return heap->flags | flags;
 }
 
@@ -464,14 +484,14 @@ static void heap_dump( const HEAP *heap )
     TRACE( "heap: %p\n", heap );
     TRACE( "  next %p\n", LIST_ENTRY( heap->entry.next, HEAP, entry ) );
 
-    TRACE( "  free_lists: %p\n", heap->freeList );
+    TRACE( "  free_lists: %p\n", heap->free_lists );
     for (i = 0; i < HEAP_NB_FREE_LISTS; i++)
     {
-        if (i < HEAP_NB_SMALL_FREE_LISTS) size = HEAP_MIN_ARENA_SIZE + i * ALIGNMENT;
-        else size = HEAP_freeListSizes[i - HEAP_NB_SMALL_FREE_LISTS];
-        TRACE( "    %p: size %8Ix, prev %p, next %p\n", heap->freeList + i, size,
-               LIST_ENTRY( heap->freeList[i].arena.entry.prev, struct entry, entry ),
-               LIST_ENTRY( heap->freeList[i].arena.entry.next, struct entry, entry ) );
+        if (i < HEAP_NB_SMALL_FREE_LISTS) size = HEAP_MIN_BLOCK_SIZE + i * ALIGNMENT;
+        else size = free_list_sizes[i - HEAP_NB_SMALL_FREE_LISTS];
+        TRACE( "    %p: size %8Ix, prev %p, next %p\n", heap->free_lists + i, size,
+               LIST_ENTRY( heap->free_lists[i].entry.prev, struct entry, entry ),
+               LIST_ENTRY( heap->free_lists[i].entry.next, struct entry, entry ) );
     }
 
     TRACE( "  subheaps: %p\n", &heap->subheap_list );
@@ -485,10 +505,10 @@ static void heap_dump( const HEAP *heap )
 
         if (!check_subheap( subheap )) return;
 
-        overhead += (char *)first_block( subheap ) - base;
+        overhead += subheap_overhead( subheap );
         for (block = first_block( subheap ); block; block = next_block( subheap, block ))
         {
-            if (block_get_flags( block ) & ARENA_FLAG_FREE)
+            if (block_get_flags( block ) & BLOCK_FLAG_FREE)
             {
                 TRACE( "      %p: (free) type %#10x, size %#8x, flags %#4x, prev %p, next %p\n", block,
                        block_get_type( block ), block_get_size( block ), block_get_flags( block ),
@@ -502,8 +522,8 @@ static void heap_dump( const HEAP *heap )
             {
                 TRACE( "      %p: (used) type %#10x, size %#8x, flags %#4x, unused %#4x", block,
                        block_get_type( block ), block_get_size( block ), block_get_flags( block ),
-                       block->unused_bytes );
-                if (!(block_get_flags( block ) & ARENA_FLAG_PREV_FREE)) TRACE( "\n" );
+                       block->tail_size );
+                if (!(block_get_flags( block ) & BLOCK_FLAG_PREV_FREE)) TRACE( "\n" );
                 else TRACE( ", back %p\n", *((struct block **)block - 1) );
 
                 overhead += block_get_overhead( block );
@@ -532,8 +552,8 @@ static void heap_dump( const HEAP *heap )
             if (!(block = heap->pending_free[i])) break;
 
             TRACE( "   %c%p: (pend) type %#10x, size %#8x, flags %#4x, unused %#4x", i == heap->pending_pos ? '*' : ' ',
-                   block, block_get_type( block ), block_get_size( block ), block_get_flags( block ), block->unused_bytes );
-            if (!(block_get_flags( block ) & ARENA_FLAG_PREV_FREE)) TRACE( "\n" );
+                   block, block_get_type( block ), block_get_size( block ), block_get_flags( block ), block->tail_size );
+            if (!(block_get_flags( block ) & BLOCK_FLAG_PREV_FREE)) TRACE( "\n" );
             else TRACE( ", back %p\n", *((struct block **)block - 1) );
         }
     }
@@ -582,28 +602,6 @@ static HEAP *HEAP_GetPtr(
 }
 
 
-/***********************************************************************
- *           HEAP_InsertFreeBlock
- *
- * Insert a free block into the free list.
- */
-static inline void HEAP_InsertFreeBlock( HEAP *heap, ARENA_FREE *pArena, BOOL last )
-{
-    SIZE_T block_size = (pArena->size & ARENA_SIZE_MASK) + sizeof(*pArena);
-    struct entry *list = find_free_list( heap, block_size, last );
-    if (last)
-    {
-        /* insert at end of free list, i.e. before the next free list entry */
-        list_add_before( &list->entry, &pArena->entry );
-    }
-    else
-    {
-        /* insert at head of free list */
-        list_add_after( &list->entry, &pArena->entry );
-    }
-}
-
-
 static SUBHEAP *find_subheap( const HEAP *heap, const struct block *block, BOOL heap_walk )
 {
     SUBHEAP *subheap;
@@ -621,197 +619,163 @@ static SUBHEAP *find_subheap( const HEAP *heap, const struct block *block, BOOL 
 }
 
 
-/***********************************************************************
- *           HEAP_Commit
- *
- * Make sure the heap storage is committed for a given size in the specified arena.
- */
-static inline BOOL HEAP_Commit( SUBHEAP *subheap, ARENA_INUSE *pArena, SIZE_T data_size )
+static inline BOOL subheap_commit( SUBHEAP *subheap, const struct block *block, SIZE_T block_size )
 {
-    void *ptr = (char *)(pArena + 1) + data_size + sizeof(ARENA_FREE);
-    SIZE_T size = (char *)ptr - (char *)subheap->base;
-    size = (size + COMMIT_MASK) & ~COMMIT_MASK;
-    if (size > subheap->size) size = subheap->size;
-    if (size <= subheap->commitSize) return TRUE;
-    size -= subheap->commitSize;
-    ptr = (char *)subheap->base + subheap->commitSize;
-    if (NtAllocateVirtualMemory( NtCurrentProcess(), &ptr, 0,
-                                 &size, MEM_COMMIT, get_protection_type( subheap->heap->flags ) ))
-    {
-        WARN("Could not commit %08lx bytes at %p for heap %p\n",
-                 size, ptr, subheap->heap );
-        return FALSE;
-    }
-    subheap->commitSize += size;
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           HEAP_Decommit
- *
- * If possible, decommit the heap storage from (including) 'ptr'.
- */
-static inline BOOL HEAP_Decommit( SUBHEAP *subheap, void *ptr )
-{
+    const char *end = (char *)subheap_base( subheap ) + subheap_size( subheap ), *commit_end;
+    HEAP *heap = subheap->heap;
+    ULONG flags = heap->flags;
+    SIZE_T size;
     void *addr;
-    SIZE_T decommit_size;
-    SIZE_T size = (char *)ptr - (char *)subheap->base;
 
-    /* round to next block and add one full block */
-    size = ((size + COMMIT_MASK) & ~COMMIT_MASK) + COMMIT_MASK + 1;
-    size = max( size, subheap->min_commit );
-    if (size >= subheap->commitSize) return TRUE;
-    decommit_size = subheap->commitSize - size;
-    addr = (char *)subheap->base + size;
+    commit_end = (char *)block + block_size + sizeof(struct entry);
+    commit_end = ROUND_ADDR((char *)commit_end + COMMIT_MASK, COMMIT_MASK);
 
-    if (NtFreeVirtualMemory( NtCurrentProcess(), &addr, &decommit_size, MEM_DECOMMIT ))
+    if (commit_end > end) commit_end = end;
+    if (commit_end <= (char *)subheap_commit_end( subheap )) return TRUE;
+
+    addr = (void *)subheap_commit_end( subheap );
+    size = commit_end - (char *)addr;
+
+    if (NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, &size, MEM_COMMIT,
+                                 get_protection_type( flags ) ))
     {
-        WARN("Could not decommit %08lx bytes at %p for heap %p\n",
-             decommit_size, (char *)subheap->base + size, subheap->heap );
+        WARN( "Could not commit %#Ix bytes at %p for heap %p\n", size, addr, heap );
         return FALSE;
     }
-    subheap->commitSize -= decommit_size;
+
+    subheap->commitSize = (char *)commit_end - (char *)subheap_base( subheap );
+    return TRUE;
+}
+
+static inline BOOL subheap_decommit( SUBHEAP *subheap, const void *commit_end )
+{
+    char *base = subheap_base( subheap );
+    HEAP *heap = subheap->heap;
+    SIZE_T size;
+    void *addr;
+
+    commit_end = ROUND_ADDR((char *)commit_end + COMMIT_MASK, COMMIT_MASK);
+    if (subheap == &heap->subheap) commit_end = max( (char *)commit_end, (char *)base + heap->min_size );
+    if (commit_end >= subheap_commit_end( subheap )) return TRUE;
+
+    size = (char *)subheap_commit_end( subheap ) - (char *)commit_end;
+    addr = (void *)commit_end;
+
+    if (NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_DECOMMIT ))
+    {
+        WARN( "Could not decommit %#Ix bytes at %p for heap %p\n", size, addr, heap );
+        return FALSE;
+    }
+
+    subheap->commitSize = (char *)commit_end - (char *)subheap_base( subheap );
     return TRUE;
 }
 
 
-/***********************************************************************
- *           HEAP_CreateFreeBlock
- *
- * Create a free block at a specified address. 'size' is the size of the
- * whole block, including the new arena.
- */
-static void HEAP_CreateFreeBlock( SUBHEAP *subheap, void *ptr, SIZE_T size )
+static void create_free_block( SUBHEAP *subheap, struct block *block, SIZE_T block_size )
 {
-    ARENA_FREE *pFree;
-    char *pEnd;
-    BOOL last;
-    DWORD flags = subheap->heap->flags;
+    const char *end = (char *)block + block_size, *commit_end = subheap_commit_end( subheap );
+    struct entry *entry = (struct entry *)block, *list;
+    HEAP *heap = subheap->heap;
+    DWORD flags = heap->flags;
+    struct block *next;
 
-    /* Create a free arena */
-    mark_block_uninitialized( ptr, sizeof(ARENA_FREE) );
-    pFree = ptr;
-    pFree->magic = ARENA_FREE_MAGIC;
+    valgrind_make_writable( block, sizeof(*entry) );
+    block_set_type( block, ARENA_FREE_MAGIC );
+    block_set_size( block, BLOCK_FLAG_FREE, block_size );
 
     /* If debugging, erase the freed block content */
 
-    pEnd = (char *)ptr + size;
-    if (pEnd > (char *)subheap->base + subheap->commitSize)
-        pEnd = (char *)subheap->base + subheap->commitSize;
-    if (pEnd > (char *)(pFree + 1)) mark_block_free( pFree + 1, pEnd - (char *)(pFree + 1), flags );
+    if (end > commit_end) end = commit_end;
+    if (end > (char *)(entry + 1)) mark_block_free( entry + 1, end - (char *)(entry + 1), flags );
 
-    /* Check if next block is free also */
-
-    if (((char *)ptr + size < (char *)subheap->base + subheap->size) &&
-        (*(DWORD *)((char *)ptr + size) & ARENA_FLAG_FREE))
+    if ((next = next_block( subheap, block )) && (block_get_flags( next ) & BLOCK_FLAG_FREE))
     {
-        /* Remove the next arena from the free list */
-        ARENA_FREE *pNext = (ARENA_FREE *)((char *)ptr + size);
-        list_remove( &pNext->entry );
-        size += (pNext->size & ARENA_SIZE_MASK) + sizeof(*pNext);
-        mark_block_free( pNext, sizeof(ARENA_FREE), flags );
+        /* merge with the next block if it is free */
+        struct entry *next_entry = (struct entry *)next;
+        list_remove( &next_entry->entry );
+        block_size += block_get_size( next );
+        block_set_size( block, BLOCK_FLAG_FREE, block_size );
+        mark_block_free( next_entry, sizeof(*next_entry), flags );
     }
 
-    /* Set the next block PREV_FREE flag and pointer */
-
-    last = ((char *)ptr + size >= (char *)subheap->base + subheap->size);
-    if (!last)
+    if ((next = next_block( subheap, block )))
     {
-        DWORD *pNext = (DWORD *)((char *)ptr + size);
-        *pNext |= ARENA_FLAG_PREV_FREE;
-        mark_block_initialized( (ARENA_FREE **)pNext - 1, sizeof( ARENA_FREE * ) );
-        *((ARENA_FREE **)pNext - 1) = pFree;
+        /* set the next block PREV_FREE flag and back pointer */
+        block_set_size( next, BLOCK_FLAG_PREV_FREE, block_get_size( next ) );
+        valgrind_make_writable( (struct block **)next - 1, sizeof(struct block *) );
+        *((struct block **)next - 1) = block;
     }
 
-    /* Last, insert the new block into the free list */
-
-    pFree->size = (size - sizeof(*pFree)) | ARENA_FLAG_FREE;
-    HEAP_InsertFreeBlock( subheap->heap, pFree, last );
+    list = find_free_list( heap, block_get_size( block ), !next );
+    if (!next) list_add_before( &list->entry, &entry->entry );
+    else list_add_after( &list->entry, &entry->entry );
 }
 
 
-/***********************************************************************
- *           HEAP_MakeInUseBlockFree
- *
- * Turn an in-use block into a free block. Can also decommit the end of
- * the heap, and possibly even free the sub-heap altogether.
- */
-static void HEAP_MakeInUseBlockFree( SUBHEAP *subheap, ARENA_INUSE *pArena )
+static void free_used_block( SUBHEAP *subheap, struct block *block )
 {
     HEAP *heap = subheap->heap;
-    ARENA_FREE *pFree;
-    SIZE_T size;
+    struct entry *entry;
+    SIZE_T block_size;
 
     if (heap->pending_free)
     {
-        ARENA_INUSE *prev = heap->pending_free[heap->pending_pos];
-        heap->pending_free[heap->pending_pos] = pArena;
+        struct block *tmp = heap->pending_free[heap->pending_pos];
+        heap->pending_free[heap->pending_pos] = block;
         heap->pending_pos = (heap->pending_pos + 1) % MAX_FREE_PENDING;
-        pArena->magic = ARENA_PENDING_MAGIC;
-        mark_block_free( pArena + 1, pArena->size & ARENA_SIZE_MASK, heap->flags );
-        if (!prev) return;
-        pArena = prev;
-        subheap = find_subheap( heap, pArena, FALSE );
+        block_set_type( block, ARENA_PENDING_MAGIC );
+        mark_block_free( block + 1, block_get_size( block ) - sizeof(*block), heap->flags );
+        if (!(block = tmp) || !(subheap = find_subheap( heap, block, FALSE ))) return;
     }
 
-    /* Check if we can merge with previous block */
-
-    size = (pArena->size & ARENA_SIZE_MASK) + sizeof(*pArena);
-    if (pArena->size & ARENA_FLAG_PREV_FREE)
+    block_size = block_get_size( block );
+    if (block_get_flags( block ) & BLOCK_FLAG_PREV_FREE)
     {
-        pFree = *((ARENA_FREE **)pArena - 1);
-        size += (pFree->size & ARENA_SIZE_MASK) + sizeof(ARENA_FREE);
-        /* Remove it from the free list */
-        list_remove( &pFree->entry );
+        /* merge with previous block if it is free */
+        block = *((struct block **)block - 1);
+        block_size += block_get_size( block );
+        entry = (struct entry *)block;
+        list_remove( &entry->entry );
     }
-    else pFree = (ARENA_FREE *)pArena;
+    else entry = (struct entry *)block;
 
-    /* Create a free block */
+    create_free_block( subheap, block, block_size );
+    if (next_block( subheap, block )) return;  /* not the last block */
 
-    HEAP_CreateFreeBlock( subheap, pFree, size );
-    size = (pFree->size & ARENA_SIZE_MASK) + sizeof(ARENA_FREE);
-    if ((char *)pFree + size < (char *)subheap->base + subheap->size)
-        return;  /* Not the last block, so nothing more to do */
-
-    /* Free the whole sub-heap if it's empty and not the original one */
-
-    if (((char *)pFree == (char *)subheap->base + subheap->headerSize) &&
-        (subheap != &subheap->heap->subheap))
+    if (block == first_block( subheap ) && subheap != &heap->subheap)
     {
-        void *addr = subheap->base;
+        /* free the subheap if it's empty and not the main one */
+        void *addr = subheap_base( subheap );
+        SIZE_T size = 0;
 
-        size = 0;
-        /* Remove the free block from the list */
-        list_remove( &pFree->entry );
-        /* Remove the subheap from the list */
+        list_remove( &entry->entry );
         list_remove( &subheap->entry );
-        /* Free the memory */
-        subheap->magic = 0;
         NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
-        return;
     }
-
-    /* Decommit the end of the heap */
-
-    if (!(subheap->heap->shared)) HEAP_Decommit( subheap, pFree + 1 );
+    else if (!heap->shared)
+    {
+        /* keep room for a full commited block as hysteresis */
+        subheap_decommit( subheap, (char *)(entry + 1) + (COMMIT_MASK + 1) );
+    }
 }
 
 
-static void shrink_used_block( SUBHEAP *subheap, struct block *block, SIZE_T data_size, SIZE_T size )
+static inline void shrink_used_block( SUBHEAP *subheap, struct block *block, UINT flags,
+                                      SIZE_T old_block_size, SIZE_T block_size, SIZE_T size )
 {
-    SIZE_T old_data_size = block_get_size( block ) - sizeof(*block);
-    if (old_data_size >= data_size + HEAP_MIN_SHRINK_SIZE)
+    if (old_block_size >= block_size + HEAP_MIN_BLOCK_SIZE)
     {
-        block->size = data_size | block_get_flags( block );
-        block->unused_bytes = data_size - size;
-        HEAP_CreateFreeBlock( subheap, next_block( subheap, block ), old_data_size - data_size );
+        block_set_size( block, flags, block_size );
+        block->tail_size = block_size - sizeof(*block) - size;
+        create_free_block( subheap, next_block( subheap, block ), old_block_size - block_size );
     }
     else
     {
         struct block *next;
-        block->unused_bytes = old_data_size - size;
-        if ((next = next_block( subheap, block ))) next->size &= ~ARENA_FLAG_PREV_FREE;
+        block_set_size( block, flags, old_block_size );
+        block->tail_size = old_block_size - sizeof(*block) - size;
+        if ((next = next_block( subheap, block ))) next->block_flags &= ~BLOCK_FLAG_PREV_FREE;
     }
 }
 
@@ -822,7 +786,7 @@ static void shrink_used_block( SUBHEAP *subheap, struct block *block, SIZE_T dat
 static void *allocate_large_block( HEAP *heap, DWORD flags, SIZE_T size )
 {
     ARENA_LARGE *arena;
-    SIZE_T block_size = sizeof(*arena) + ROUND_SIZE(size) + HEAP_TAIL_EXTRA_SIZE(flags);
+    SIZE_T block_size = ROUND_SIZE( sizeof(*arena) + size, COMMIT_MASK );
     LPVOID address = NULL;
 
     if (!(flags & HEAP_GROWABLE)) return NULL;
@@ -838,9 +802,9 @@ static void *allocate_large_block( HEAP *heap, DWORD flags, SIZE_T size )
     arena->block_size = block_size;
     arena->size = ARENA_LARGE_SIZE;
     arena->magic = ARENA_LARGE_MAGIC;
-    mark_block_tail( (char *)(arena + 1) + size, block_size - sizeof(*arena) - size, flags );
     list_add_tail( &heap->large_list, &arena->entry );
-    notify_alloc( arena + 1, size, flags & HEAP_ZERO_MEMORY );
+    valgrind_make_noaccess( (char *)arena + sizeof(*arena) + arena->data_size,
+                            arena->block_size - sizeof(*arena) - arena->data_size );
     return arena + 1;
 }
 
@@ -865,23 +829,17 @@ static void free_large_block( HEAP *heap, void *ptr )
 static void *realloc_large_block( HEAP *heap, DWORD flags, void *ptr, SIZE_T size )
 {
     ARENA_LARGE *arena = (ARENA_LARGE *)ptr - 1;
+    SIZE_T old_size = arena->data_size;
     void *new_ptr;
 
     if (arena->block_size - sizeof(*arena) >= size)
     {
-        SIZE_T unused = arena->block_size - sizeof(*arena) - size;
-
         /* FIXME: we could remap zero-pages instead */
-#ifdef VALGRIND_RESIZEINPLACE_BLOCK
-        if (RUNNING_ON_VALGRIND)
-            notify_realloc( arena + 1, arena->data_size, size );
-        else
-#endif
-        if (size > arena->data_size)
-            initialize_block( (char *)ptr + arena->data_size, size - arena->data_size, unused, flags );
-        else
-            mark_block_tail( (char *)ptr + size, unused, flags );
+        valgrind_notify_resize( arena + 1, old_size, size );
+        if (size > old_size) initialize_block( (char *)ptr + old_size, size - old_size, flags );
         arena->data_size = size;
+        valgrind_make_noaccess( (char *)arena + sizeof(*arena) + arena->data_size,
+                                arena->block_size - sizeof(*arena) - arena->data_size );
         return ptr;
     }
     if (flags & HEAP_REALLOC_IN_PLACE_ONLY) return NULL;
@@ -890,9 +848,10 @@ static void *realloc_large_block( HEAP *heap, DWORD flags, void *ptr, SIZE_T siz
         WARN("Could not allocate block for %08lx bytes\n", size );
         return NULL;
     }
-    memcpy( new_ptr, ptr, arena->data_size );
+    valgrind_notify_alloc( new_ptr, size, 0 );
+    memcpy( new_ptr, ptr, old_size );
+    valgrind_notify_free( ptr );
     free_large_block( heap, ptr );
-    notify_free( ptr );
     return new_ptr;
 }
 
@@ -920,12 +879,6 @@ static BOOL validate_large_arena( const HEAP *heap, const ARENA_LARGE *arena )
         err = "invalid block header";
     else if (!contains( arena, arena->block_size, arena + 1, arena->data_size ))
         err = "invalid block size";
-    else if (heap->flags & HEAP_TAIL_CHECKING_ENABLED)
-    {
-        SIZE_T i, unused = arena->block_size - sizeof(*arena) - arena->data_size;
-        const unsigned char *data = (const unsigned char *)(arena + 1) + arena->data_size;
-        for (i = 0; i < unused && !err; i++) if (data[i] != ARENA_TAIL_FILLER) err = "invalid block tail";
-    }
 
     if (err)
     {
@@ -942,8 +895,9 @@ static BOOL validate_large_arena( const HEAP *heap, const ARENA_LARGE *arena )
 static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
                                     SIZE_T commitSize, SIZE_T totalSize )
 {
+    struct entry *pEntry;
+    SIZE_T block_size;
     SUBHEAP *subheap;
-    FREE_LIST_ENTRY *pEntry;
     unsigned int i;
 
     if (!address)
@@ -974,13 +928,9 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
         /* If this is a secondary subheap, insert it into list */
 
         subheap = address;
-        subheap->base       = address;
         subheap->heap       = heap;
         subheap->size       = totalSize;
-        subheap->min_commit = 0x10000;
         subheap->commitSize = commitSize;
-        subheap->magic      = SUBHEAP_MAGIC;
-        subheap->headerSize = ROUND_SIZE( sizeof(SUBHEAP) );
         list_add_head( &heap->subheap_list, &subheap->entry );
     }
     else
@@ -994,27 +944,24 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
         heap->shared        = (flags & HEAP_SHARED) != 0;
         heap->magic         = HEAP_MAGIC;
         heap->grow_size     = max( HEAP_DEF_SIZE, totalSize );
+        heap->min_size      = commitSize;
         list_init( &heap->subheap_list );
         list_init( &heap->large_list );
 
         subheap = &heap->subheap;
-        subheap->base       = address;
         subheap->heap       = heap;
         subheap->size       = totalSize;
-        subheap->min_commit = commitSize;
         subheap->commitSize = commitSize;
-        subheap->magic      = SUBHEAP_MAGIC;
-        subheap->headerSize = ROUND_SIZE( sizeof(HEAP) );
         list_add_head( &heap->subheap_list, &subheap->entry );
 
         /* Build the free lists */
 
-        list_init( &heap->freeList[0].arena.entry );
-        for (i = 0, pEntry = heap->freeList; i < HEAP_NB_FREE_LISTS; i++, pEntry++)
+        list_init( &heap->free_lists[0].entry );
+        for (i = 0, pEntry = heap->free_lists; i < HEAP_NB_FREE_LISTS; i++, pEntry++)
         {
-            pEntry->arena.size = 0 | ARENA_FLAG_FREE;
-            pEntry->arena.magic = ARENA_FREE_MAGIC;
-            if (i) list_add_after( &pEntry[-1].arena.entry, &pEntry->arena.entry );
+            block_set_size( &pEntry->block, BLOCK_FLAG_FREE_LINK, 0 );
+            block_set_type( &pEntry->block, ARENA_FREE_MAGIC );
+            if (i) list_add_after( &pEntry[-1].entry, &pEntry->entry );
         }
 
         /* Initialize critical section */
@@ -1049,33 +996,34 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
         }
     }
 
-    /* Create the first free block */
-
-    HEAP_CreateFreeBlock( subheap, (LPBYTE)subheap->base + subheap->headerSize,
-                          subheap->size - subheap->headerSize );
+    block_size = subheap_size( subheap ) - subheap_overhead( subheap );
+    block_size &= ~(ALIGNMENT - 1);
+    create_free_block( subheap, first_block( subheap ), block_size );
 
     return subheap;
 }
 
 
-static struct block *find_free_block( HEAP *heap, SIZE_T data_size, SUBHEAP **subheap )
+static struct block *find_free_block( HEAP *heap, SIZE_T block_size, SUBHEAP **subheap )
 {
-    struct list *ptr = &find_free_list( heap, data_size + sizeof(ARENA_INUSE), FALSE )->entry;
-    SIZE_T total_size, arena_size;
+    struct list *ptr = &find_free_list( heap, block_size, FALSE )->entry;
     struct entry *entry;
+    struct block *block;
+    SIZE_T total_size;
 
     /* Find a suitable free list, and in it find a block large enough */
 
-    while ((ptr = list_next( &heap->freeList[0].arena.entry, ptr )))
+    while ((ptr = list_next( &heap->free_lists[0].entry, ptr )))
     {
         entry = LIST_ENTRY( ptr, struct entry, entry );
-        arena_size = (entry->size & ARENA_SIZE_MASK) + sizeof(ARENA_FREE) - sizeof(ARENA_INUSE);
-        if (arena_size >= data_size)
+        block = (struct block *)entry;
+        if (block_get_flags( block ) == BLOCK_FLAG_FREE_LINK) continue;
+        if (block_get_size( block ) >= block_size)
         {
-            *subheap = find_subheap( heap, (struct block *)entry, FALSE );
-            if (!HEAP_Commit( *subheap, (struct block *)entry, data_size )) return NULL;
+            *subheap = find_subheap( heap, block, FALSE );
+            if (!subheap_commit( *subheap, block, block_size )) return NULL;
             list_remove( &entry->entry );
-            return (struct block *)entry;
+            return block;
         }
     }
 
@@ -1083,16 +1031,13 @@ static struct block *find_free_block( HEAP *heap, SIZE_T data_size, SUBHEAP **su
 
     if (!(heap->flags & HEAP_GROWABLE))
     {
-        WARN("Not enough space in heap %p for %08lx bytes\n", heap, data_size );
+        WARN("Not enough space in heap %p for %08lx bytes\n", heap, block_size );
         return NULL;
     }
-    /* make sure that we have a big enough size *committed* to fit another
-     * last free arena in !
-     * So just one heap struct, one first free arena which will eventually
-     * get used, and a second free arena that might get assigned all remaining
-     * free space in shrink_used_block() */
-    total_size = data_size + ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
-    if (total_size < data_size) return NULL;  /* overflow */
+
+    /* make sure we can fit the block and a free entry at the end */
+    total_size = sizeof(SUBHEAP) + block_size + sizeof(struct entry);
+    if (total_size < block_size) return NULL;  /* overflow */
 
     if ((*subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
                                         max( heap->grow_size, total_size ) )))
@@ -1121,7 +1066,7 @@ static BOOL is_valid_free_block( const HEAP *heap, const struct block *block )
     unsigned int i;
 
     if ((subheap = find_subheap( heap, block, FALSE ))) return TRUE;
-    for (i = 0; i < HEAP_NB_FREE_LISTS; i++) if (block == (struct block *)&heap->freeList[i].arena) return TRUE;
+    for (i = 0; i < HEAP_NB_FREE_LISTS; i++) if (block == &heap->free_lists[i].block) return TRUE;
     return FALSE;
 }
 
@@ -1137,21 +1082,21 @@ static BOOL validate_free_block( const SUBHEAP *subheap, const struct block *blo
         err = "invalid block alignment";
     else if (block_get_type( block ) != ARENA_FREE_MAGIC)
         err = "invalid block header";
-    else if (!(block_get_flags( block ) & ARENA_FLAG_FREE) || (block_get_flags( block ) & ARENA_FLAG_PREV_FREE))
+    else if (!(block_get_flags( block ) & BLOCK_FLAG_FREE) || (block_get_flags( block ) & BLOCK_FLAG_PREV_FREE))
         err = "invalid block flags";
     else if (!contains( base, subheap_size( subheap ), block, block_get_size( block ) ))
         err = "invalid block size";
     else if (!is_valid_free_block( heap, (next = (struct block *)LIST_ENTRY( entry->entry.next, struct entry, entry )) ))
         err = "invalid next free block pointer";
-    else if (!(block_get_flags( next ) & ARENA_FLAG_FREE) || block_get_type( next ) != ARENA_FREE_MAGIC)
+    else if (!(block_get_flags( next ) & BLOCK_FLAG_FREE) || block_get_type( next ) != ARENA_FREE_MAGIC)
         err = "invalid next free block header";
     else if (!is_valid_free_block( heap, (prev = (struct block *)LIST_ENTRY( entry->entry.prev, struct entry, entry )) ))
         err = "invalid previous free block pointer";
-    else if (!(block_get_flags( prev ) & ARENA_FLAG_FREE) || block_get_type( prev ) != ARENA_FREE_MAGIC)
+    else if (!(block_get_flags( prev ) & BLOCK_FLAG_FREE) || block_get_type( prev ) != ARENA_FREE_MAGIC)
         err = "invalid previous free block header";
     else if ((next = next_block( subheap, (struct block *)block )))
     {
-        if (!(block_get_flags( next ) & ARENA_FLAG_PREV_FREE))
+        if (!(block_get_flags( next ) & BLOCK_FLAG_PREV_FREE))
             err = "invalid next block flags";
         if (*((struct block **)next - 1) != block)
             err = "invalid next block back pointer";
@@ -1191,20 +1136,20 @@ static BOOL validate_used_block( const SUBHEAP *subheap, const struct block *blo
         err = "invalid block alignment";
     else if (block_get_type( block ) != ARENA_INUSE_MAGIC && block_get_type( block ) != ARENA_PENDING_MAGIC)
         err = "invalid block header";
-    else if (block_get_flags( block ) & ARENA_FLAG_FREE)
+    else if (block_get_flags( block ) & BLOCK_FLAG_FREE)
         err = "invalid block flags";
     else if (!contains( base, commit_end - base, block, block_get_size( block ) ))
         err = "invalid block size";
-    else if (block->unused_bytes > block_get_size( block ) - sizeof(*block))
+    else if (block->tail_size > block_get_size( block ) - sizeof(*block))
         err = "invalid block unused size";
-    else if ((next = next_block( subheap, block )) && (block_get_flags( next ) & ARENA_FLAG_PREV_FREE))
+    else if ((next = next_block( subheap, block )) && (block_get_flags( next ) & BLOCK_FLAG_PREV_FREE))
         err = "invalid next block flags";
-    else if (block_get_flags( block ) & ARENA_FLAG_PREV_FREE)
+    else if (block_get_flags( block ) & BLOCK_FLAG_PREV_FREE)
     {
         const struct block *prev = *((struct block **)block - 1);
         if (!is_valid_free_block( heap, prev ))
             err = "invalid previous block pointer";
-        else if (!(block_get_flags( prev ) & ARENA_FLAG_FREE) || block_get_type( prev ) != ARENA_FREE_MAGIC)
+        else if (!(block_get_flags( prev ) & BLOCK_FLAG_FREE) || block_get_type( prev ) != ARENA_FREE_MAGIC)
             err = "invalid previous block flags";
         if ((char *)prev + block_get_size( prev ) != (char *)block)
             err = "invalid previous block size";
@@ -1221,8 +1166,8 @@ static BOOL validate_used_block( const SUBHEAP *subheap, const struct block *blo
     }
     else if (!err && (flags & HEAP_TAIL_CHECKING_ENABLED))
     {
-        const unsigned char *tail = (unsigned char *)block + block_get_size( block ) - block->unused_bytes;
-        for (i = 0; !err && i < block->unused_bytes; i++) if (tail[i] != ARENA_TAIL_FILLER) err = "invalid block tail";
+        const unsigned char *tail = (unsigned char *)block + block_get_size( block ) - block->tail_size;
+        for (i = 0; !err && i < ALIGNMENT; i++) if (tail[i] != ARENA_TAIL_FILLER) err = "invalid block tail";
     }
 
     if (err)
@@ -1271,7 +1216,7 @@ static BOOL heap_validate( const HEAP *heap )
 
         for (block = first_block( subheap ); block; block = next_block( subheap, block ))
         {
-            if (block_get_flags( block ) & ARENA_FLAG_FREE)
+            if (block_get_flags( block ) & BLOCK_FLAG_FREE)
             {
                 if (!validate_free_block( subheap, block )) return FALSE;
             }
@@ -1312,7 +1257,7 @@ static inline struct block *unsafe_block_from_ptr( const HEAP *heap, const void 
     }
     else if ((ULONG_PTR)ptr % ALIGNMENT)
         err = "invalid ptr alignment";
-    else if (block_get_type( block ) == ARENA_PENDING_MAGIC || (block_get_flags( block ) & ARENA_FLAG_FREE))
+    else if (block_get_type( block ) == ARENA_PENDING_MAGIC || (block_get_flags( block ) & BLOCK_FLAG_FREE))
         err = "already freed block";
     else if (block_get_type( block ) != ARENA_INUSE_MAGIC)
         err = "invalid block header";
@@ -1369,7 +1314,6 @@ static void heap_set_debug_flags( HANDLE handle )
     if (flags & (HEAP_FREE_CHECKING_ENABLED | HEAP_TAIL_CHECKING_ENABLED))  /* fix existing blocks */
     {
         struct block *block;
-        ARENA_LARGE *large;
         SUBHEAP *subheap;
 
         LIST_FOR_EACH_ENTRY( subheap, &heap->subheap_list, SUBHEAP, entry )
@@ -1380,23 +1324,20 @@ static void heap_set_debug_flags( HANDLE handle )
 
             for (block = first_block( subheap ); block; block = next_block( subheap, block ))
             {
-                if (block_get_flags( block ) & ARENA_FLAG_FREE)
+                if (block_get_flags( block ) & BLOCK_FLAG_FREE)
                 {
                     char *data = (char *)block + block_get_overhead( block ), *end = (char *)block + block_get_size( block );
-                    if (end >= commit_end) mark_block_free( data, commit_end - data, flags );
-                    else mark_block_free( data, end - sizeof(struct block *) - data, flags );
+                    if (next_block( subheap, block )) end -= sizeof(struct block *);
+                    if (end > commit_end) mark_block_free( data, commit_end - data, flags );
+                    else mark_block_free( data, end - data, flags );
                 }
                 else
                 {
                     if (block_get_type( block ) == ARENA_PENDING_MAGIC) mark_block_free( block + 1, block_get_size( block ) - sizeof(*block), flags );
-                    else mark_block_tail( (char *)block + block_get_size( block ) - block->unused_bytes, block->unused_bytes, flags );
+                    else mark_block_tail( block, flags );
                 }
             }
         }
-
-        LIST_FOR_EACH_ENTRY( large, &heap->large_list, ARENA_LARGE, entry )
-            mark_block_tail( (char *)(large + 1) + large->data_size,
-                             large->block_size - sizeof(*large) - large->data_size, flags );
     }
 
     if ((heap->flags & HEAP_GROWABLE) && !heap->pending_free &&
@@ -1430,6 +1371,7 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, PVOID addr, SIZE_T totalSize, SIZE_T c
                              PVOID unknown, PRTL_HEAP_DEFINITION definition )
 {
     SUBHEAP *subheap;
+    HEAP *heap;
 
     /* Allocate the heap block */
 
@@ -1439,24 +1381,24 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, PVOID addr, SIZE_T totalSize, SIZE_T c
     if (!totalSize) totalSize = HEAP_DEF_SIZE;
 
     if (!(subheap = HEAP_CreateSubHeap( NULL, addr, flags, commitSize, totalSize ))) return 0;
+    heap = subheap->heap;
 
-    heap_set_debug_flags( subheap->heap );
+    heap_set_debug_flags( heap );
 
     /* link it into the per-process heap list */
     if (processHeap)
     {
-        HEAP *heapPtr = subheap->heap;
         enter_critical_section( &processHeap->cs );
-        list_add_head( &processHeap->entry, &heapPtr->entry );
+        list_add_head( &processHeap->entry, &heap->entry );
         leave_critical_section( &processHeap->cs );
     }
     else if (!addr)
     {
-        processHeap = subheap->heap;  /* assume the first heap we create is the process main heap */
+        processHeap = heap;  /* assume the first heap we create is the process main heap */
         list_init( &processHeap->entry );
     }
 
-    return subheap->heap;
+    return heap;
 }
 
 
@@ -1477,6 +1419,7 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE heap )
     HEAP *heapPtr = HEAP_GetPtr( heap );
     SUBHEAP *subheap, *next;
     ARENA_LARGE *arena, *arena_next;
+    struct block **pending, **tmp;
     SIZE_T size;
     void *addr;
 
@@ -1488,6 +1431,15 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE heap )
         DbgBreakPoint();
     }
     if (!heapPtr) return heap;
+
+    if ((pending = heapPtr->pending_free))
+    {
+        heapPtr->pending_free = NULL;
+        for (tmp = pending; *tmp && tmp != pending + MAX_FREE_PENDING; ++tmp)
+            if ((subheap = find_subheap( heap, *tmp, FALSE )))
+                free_used_block( subheap, *tmp );
+        RtlFreeHeap( heap, 0, pending );
+    }
 
     if (heap == processHeap) return heap; /* cannot delete the main process heap */
 
@@ -1509,31 +1461,46 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE heap )
     LIST_FOR_EACH_ENTRY_SAFE( subheap, next, &heapPtr->subheap_list, SUBHEAP, entry )
     {
         if (subheap == &heapPtr->subheap) continue;  /* do this one last */
-        notify_free_all( subheap );
+        valgrind_notify_free_all( subheap );
         list_remove( &subheap->entry );
         size = 0;
-        addr = subheap->base;
+        addr = ROUND_ADDR( subheap, COMMIT_MASK );
         NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
     }
-    notify_free_all( &heapPtr->subheap );
-    RtlFreeHeap( GetProcessHeap(), 0, heapPtr->pending_free );
+    valgrind_notify_free_all( &heapPtr->subheap );
     size = 0;
-    addr = heapPtr->subheap.base;
+    addr = heap;
     NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
     return 0;
 }
 
+static SIZE_T heap_get_block_size( HEAP *heap, ULONG flags, SIZE_T size )
+{
+    static const ULONG padd_flags = HEAP_VALIDATE | HEAP_VALIDATE_ALL | HEAP_VALIDATE_PARAMS;
+    static const ULONG check_flags = HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED | HEAP_CHECKING_ENABLED;
+    SIZE_T overhead;
+
+    if ((flags & check_flags)) overhead = ALIGNMENT;
+    else overhead = sizeof(struct block);
+
+    if ((flags & HEAP_TAIL_CHECKING_ENABLED) || RUNNING_ON_VALGRIND) overhead += ALIGNMENT;
+    if (flags & padd_flags) overhead += ALIGNMENT;
+
+    if (size < ALIGNMENT) size = ALIGNMENT;
+    return ROUND_SIZE( size + overhead, ALIGNMENT - 1 );
+}
+
 static NTSTATUS heap_allocate( HEAP *heap, ULONG flags, SIZE_T size, void **ret )
 {
+    SIZE_T old_block_size, block_size;
     struct block *block;
-    SIZE_T data_size;
     SUBHEAP *subheap;
 
-    data_size = ROUND_SIZE(size) + HEAP_TAIL_EXTRA_SIZE(flags);
-    if (data_size < size) return STATUS_NO_MEMORY;  /* overflow */
-    if (data_size < HEAP_MIN_DATA_SIZE) data_size = HEAP_MIN_DATA_SIZE;
+    block_size = heap_get_block_size( heap, flags, size );
+    if (block_size < size) return STATUS_NO_MEMORY;  /* overflow */
+    if (block_size < HEAP_MIN_BLOCK_SIZE) block_size = HEAP_MIN_BLOCK_SIZE;
 
-    if (data_size >= HEAP_MIN_LARGE_BLOCK_SIZE)
+    if (block_size >= HEAP_MIN_LARGE_BLOCK_SIZE)
     {
         if (!(*ret = allocate_large_block( heap, flags, size ))) return STATUS_NO_MEMORY;
         return STATUS_SUCCESS;
@@ -1541,19 +1508,14 @@ static NTSTATUS heap_allocate( HEAP *heap, ULONG flags, SIZE_T size, void **ret 
 
     /* Locate a suitable free block */
 
-    if (!(block = find_free_block( heap, data_size, &subheap ))) return STATUS_NO_MEMORY;
+    if (!(block = find_free_block( heap, block_size, &subheap ))) return STATUS_NO_MEMORY;
+    /* read the free block size, changing block type or flags may alter it */
+    old_block_size = block_get_size( block );
 
-    /* in-use arena is smaller than free arena,
-     * so we have to add the difference to the size */
-    block->size  = (block->size & ~ARENA_FLAG_FREE) + sizeof(struct entry) - sizeof(*block);
-    block->magic = ARENA_INUSE_MAGIC;
-
-    /* Shrink the block */
-
-    shrink_used_block( subheap, block, data_size, size );
-
-    notify_alloc( block + 1, size, flags & HEAP_ZERO_MEMORY );
-    initialize_block( block + 1, size, block->unused_bytes, flags );
+    block_set_type( block, ARENA_INUSE_MAGIC );
+    shrink_used_block( subheap, block, 0, old_block_size, block_size, size );
+    initialize_block( block + 1, size, flags );
+    mark_block_tail( block, flags );
 
     *ret = block + 1;
     return STATUS_SUCCESS;
@@ -1577,6 +1539,8 @@ void *WINAPI DECLSPEC_HOTPATCH RtlAllocateHeap( HANDLE heap, ULONG flags, SIZE_T
         heap_unlock( heapPtr, flags );
     }
 
+    if (!status) valgrind_notify_alloc( ptr, size, flags & HEAP_ZERO_MEMORY );
+
     TRACE( "heap %p, flags %#x, size %#Ix, return %p, status %#x.\n", heap, flags, size, ptr, status );
     heap_set_status( heapPtr, flags, status );
     return ptr;
@@ -1585,15 +1549,12 @@ void *WINAPI DECLSPEC_HOTPATCH RtlAllocateHeap( HANDLE heap, ULONG flags, SIZE_T
 
 static NTSTATUS heap_free( HEAP *heap, void *ptr )
 {
-    ARENA_INUSE *block;
+    struct block *block;
     SUBHEAP *subheap;
-
-    /* Inform valgrind we are trying to free memory, so it can throw up an error message */
-    notify_free( ptr );
 
     if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap ))) return STATUS_INVALID_PARAMETER;
     if (!subheap) free_large_block( heap, ptr );
-    else HEAP_MakeInUseBlockFree( subheap, block );
+    else free_used_block( subheap, block );
 
     return STATUS_SUCCESS;
 }
@@ -1607,6 +1568,8 @@ BOOLEAN WINAPI DECLSPEC_HOTPATCH RtlFreeHeap( HANDLE heap, ULONG flags, void *pt
     HEAP *heapPtr;
 
     if (!ptr) return TRUE;
+
+    valgrind_notify_free( ptr );
 
     if (!(heapPtr = HEAP_GetPtr( heap )))
         status = STATUS_INVALID_PARAMETER;
@@ -1625,14 +1588,14 @@ BOOLEAN WINAPI DECLSPEC_HOTPATCH RtlFreeHeap( HANDLE heap, ULONG flags, void *pt
 
 static NTSTATUS heap_reallocate( HEAP *heap, ULONG flags, void *ptr, SIZE_T size, void **ret )
 {
-    SIZE_T old_data_size, old_size, data_size;
+    SIZE_T old_block_size, old_size, block_size;
     struct block *next, *block;
     SUBHEAP *subheap;
     NTSTATUS status;
 
-    data_size = ROUND_SIZE(size) + HEAP_TAIL_EXTRA_SIZE(flags);
-    if (data_size < size) return STATUS_NO_MEMORY;  /* overflow */
-    if (data_size < HEAP_MIN_DATA_SIZE) data_size = HEAP_MIN_DATA_SIZE;
+    block_size = heap_get_block_size( heap, flags, size );
+    if (block_size < size) return STATUS_NO_MEMORY;  /* overflow */
+    if (block_size < HEAP_MIN_BLOCK_SIZE) block_size = HEAP_MIN_BLOCK_SIZE;
 
     if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap ))) return STATUS_INVALID_PARAMETER;
     if (!subheap)
@@ -1643,42 +1606,37 @@ static NTSTATUS heap_reallocate( HEAP *heap, ULONG flags, void *ptr, SIZE_T size
 
     /* Check if we need to grow the block */
 
-    old_data_size = block_get_size( block ) - sizeof(*block);
-    old_size = block_get_size( block ) - block_get_overhead( block );
-    if (data_size > old_data_size)
+    old_block_size = block_get_size( block );
+    old_size = old_block_size - block_get_overhead( block );
+    if (block_size > old_block_size)
     {
-        if ((next = next_block( subheap, block )) && (block_get_flags( next ) & ARENA_FLAG_FREE) &&
-            data_size < HEAP_MIN_LARGE_BLOCK_SIZE && data_size <= old_data_size + block_get_size( next ))
+        if ((next = next_block( subheap, block )) && (block_get_flags( next ) & BLOCK_FLAG_FREE) &&
+            block_size < HEAP_MIN_LARGE_BLOCK_SIZE && block_size <= old_block_size + block_get_size( next ))
         {
             /* The next block is free and large enough */
             struct entry *entry = (struct entry *)next;
             list_remove( &entry->entry );
-            block->size += block_get_size( next );
-            if (!HEAP_Commit( subheap, block, data_size )) return STATUS_NO_MEMORY;
-            notify_realloc( block + 1, old_size, size );
-            shrink_used_block( subheap, block, data_size, size );
+            old_block_size += block_get_size( next );
+            if (!subheap_commit( subheap, block, block_size )) return STATUS_NO_MEMORY;
         }
         else
         {
             if (flags & HEAP_REALLOC_IN_PLACE_ONLY) return STATUS_NO_MEMORY;
             if ((status = heap_allocate( heap, flags & ~HEAP_ZERO_MEMORY, size, ret ))) return status;
+            valgrind_notify_alloc( *ret, size, 0 );
             memcpy( *ret, block + 1, old_size );
             if (flags & HEAP_ZERO_MEMORY) memset( (char *)*ret + old_size, 0, size - old_size );
-            notify_free( ptr );
-            HEAP_MakeInUseBlockFree( subheap, block );
+            valgrind_notify_free( ptr );
+            free_used_block( subheap, block );
             return STATUS_SUCCESS;
         }
     }
-    else
-    {
-        notify_realloc( block + 1, old_size, size );
-        shrink_used_block( subheap, block, data_size, size );
-    }
 
-    /* Clear the extra bytes if needed */
+    valgrind_notify_resize( block + 1, old_size, size );
+    shrink_used_block( subheap, block, block_get_flags( block ), old_block_size, block_size, size );
 
-    if (size <= old_size) mark_block_tail( (char *)(block + 1) + size, block->unused_bytes, flags );
-    else initialize_block( (char *)(block + 1) + old_size, size - old_size, block->unused_bytes, flags );
+    if (size > old_size) initialize_block( (char *)(block + 1) + old_size, size - old_size, flags );
+    mark_block_tail( block, flags );
 
     /* Return the new arena */
 
@@ -1779,7 +1737,7 @@ BOOLEAN WINAPI RtlUnlockHeap( HANDLE heap )
 
 static NTSTATUS heap_size( HEAP *heap, const void *ptr, SIZE_T *size )
 {
-    const ARENA_INUSE *block;
+    const struct block *block;
     SUBHEAP *subheap;
 
     if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap ))) return STATUS_INVALID_PARAMETER;
@@ -1845,11 +1803,15 @@ static NTSTATUS heap_walk_blocks( const HEAP *heap, const SUBHEAP *subheap, stru
 {
     const char *base = subheap_base( subheap ), *commit_end = subheap_commit_end( subheap ), *end = base + subheap_size( subheap );
     const struct block *block, *blocks = first_block( subheap );
+    char *data = entry->lpData;
 
     if (entry->lpData == commit_end) return STATUS_NO_MORE_ENTRIES;
 
+    if (entry->wFlags & RTL_HEAP_ENTRY_BUSY) block = (struct block *)data - 1;
+    else block = (struct block *)(data - sizeof(struct list)) - 1;
+
     if (entry->lpData == base) block = blocks;
-    else if (!(block = next_block( subheap, (struct block *)entry->lpData - 1 )))
+    else if (!(block = next_block( subheap, block )))
     {
         entry->lpData = (void *)commit_end;
         entry->cbData = end - commit_end;
@@ -1859,14 +1821,14 @@ static NTSTATUS heap_walk_blocks( const HEAP *heap, const SUBHEAP *subheap, stru
         return STATUS_SUCCESS;
     }
 
-    if (block_get_flags( block ) & ARENA_FLAG_FREE)
+    if (block_get_flags( block ) & BLOCK_FLAG_FREE)
     {
         entry->lpData = (char *)block + block_get_overhead( block );
         entry->cbData = block_get_size( block ) - block_get_overhead( block );
         /* FIXME: last free block should not include uncommitted range, which also has its own overhead */
         if (!contains( blocks, commit_end - (char *)blocks, block, block_get_size( block ) ))
-            entry->cbData = commit_end - (char *)entry->lpData - 8 * sizeof(void *);
-        entry->cbOverhead = 4 * sizeof(void *);
+            entry->cbData = commit_end - (char *)entry->lpData - 4 * ALIGNMENT;
+        entry->cbOverhead = 2 * ALIGNMENT;
         entry->iRegionIndex = 0;
         entry->wFlags = 0;
     }
@@ -1909,7 +1871,7 @@ static NTSTATUS heap_walk( const HEAP *heap, struct rtl_heap_entry *entry )
         subheap = LIST_ENTRY( next, SUBHEAP, entry );
         base = subheap_base( subheap );
         entry->lpData = base;
-        entry->cbData = (char *)first_block( subheap ) - base;
+        entry->cbData = subheap_overhead( subheap );
         entry->cbOverhead = 0;
         entry->iRegionIndex = 0;
         entry->wFlags = RTL_HEAP_ENTRY_REGION;

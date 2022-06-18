@@ -58,8 +58,6 @@ static void check_buffer_( int line, HID_XFER_PACKET *packet, struct hid_expect 
     }
 }
 
-#define EXPECT_QUEUE_BUFFER_SIZE (64 * sizeof(struct hid_expect))
-
 struct expect_queue
 {
     KSPIN_LOCK lock;
@@ -1244,40 +1242,33 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
     return fdo_internal_ioctl( device, irp );
 }
 
-static NTSTATUS WINAPI pdo_ioctl( DEVICE_OBJECT *device, IRP *irp )
+static NTSTATUS pdo_handle_ioctl( struct phys_device *impl, IRP *irp, ULONG code, void *in_buffer, ULONG in_size )
 {
-    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation( irp );
-    struct phys_device *impl = pdo_from_DEVICE_OBJECT( device );
-    ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
-    ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
-    NTSTATUS status;
     KIRQL irql;
-
-    if (winetest_debug > 1) trace( "%s: device %p, code %#lx %s\n", __func__, device, code, debugstr_ioctl(code) );
 
     switch (code)
     {
     case IOCTL_WINETEST_HID_SET_EXPECT:
-        expect_queue_reset( &impl->expect_queue, irp->AssociatedIrp.SystemBuffer, in_size );
-        status = STATUS_SUCCESS;
-        break;
+        if (in_size > EXPECT_QUEUE_BUFFER_SIZE) return STATUS_BUFFER_OVERFLOW;
+        expect_queue_reset( &impl->expect_queue, in_buffer, in_size );
+        return STATUS_SUCCESS;
     case IOCTL_WINETEST_HID_WAIT_EXPECT:
     {
-        struct wait_expect_params wait_params = *(struct wait_expect_params *)irp->AssociatedIrp.SystemBuffer;
-        if (!wait_params.wait_pending) status = expect_queue_wait( &impl->expect_queue, irp );
-        else status = expect_queue_wait_pending( &impl->expect_queue, irp );
-        break;
+        struct wait_expect_params *wait_params = (struct wait_expect_params *)in_buffer;
+        if (in_size < sizeof(*wait_params)) return STATUS_BUFFER_TOO_SMALL;
+        if (!wait_params->wait_pending) return expect_queue_wait( &impl->expect_queue, irp );
+        else return expect_queue_wait_pending( &impl->expect_queue, irp );
     }
     case IOCTL_WINETEST_HID_SEND_INPUT:
-        input_queue_reset( &impl->input_queue, irp->AssociatedIrp.SystemBuffer, in_size );
-        status = STATUS_SUCCESS;
-        break;
+        if (in_size > EXPECT_QUEUE_BUFFER_SIZE) return STATUS_BUFFER_OVERFLOW;
+        input_queue_reset( &impl->input_queue, in_buffer, in_size );
+        return STATUS_SUCCESS;
     case IOCTL_WINETEST_HID_SET_CONTEXT:
+        if (in_size > sizeof(impl->expect_queue.context)) return STATUS_BUFFER_OVERFLOW;
         KeAcquireSpinLock( &impl->expect_queue.lock, &irql );
-        memcpy( impl->expect_queue.context, irp->AssociatedIrp.SystemBuffer, in_size );
+        memcpy( impl->expect_queue.context, in_buffer, in_size );
         KeReleaseSpinLock( &impl->expect_queue.lock, irql );
-        status = STATUS_SUCCESS;
-        break;
+        return STATUS_SUCCESS;
     case IOCTL_WINETEST_REMOVE_DEVICE:
         KeAcquireSpinLock( &impl->base.lock, &irql );
         impl->base.state = PNP_DEVICE_REMOVED;
@@ -1285,17 +1276,28 @@ static NTSTATUS WINAPI pdo_ioctl( DEVICE_OBJECT *device, IRP *irp )
         KeReleaseSpinLock( &impl->base.lock, irql );
         impl->pending_remove = irp;
         IoMarkIrpPending( irp );
-        status = STATUS_PENDING;
-        break;
+        return STATUS_PENDING;
     case IOCTL_WINETEST_CREATE_DEVICE:
         ok( 0, "unexpected call\n" );
-        status = irp->IoStatus.Status;
-        break;
+        return irp->IoStatus.Status;
     default:
         ok( 0, "unexpected call\n" );
-        status = irp->IoStatus.Status;
-        break;
+        return irp->IoStatus.Status;
     }
+}
+
+static NTSTATUS WINAPI pdo_ioctl( DEVICE_OBJECT *device, IRP *irp )
+{
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation( irp );
+    struct phys_device *impl = pdo_from_DEVICE_OBJECT( device );
+    ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
+    struct hid_device_desc *desc = irp->AssociatedIrp.SystemBuffer;
+    ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
+    NTSTATUS status;
+
+    if (winetest_debug > 1) trace( "%s: device %p, code %#lx %s\n", __func__, device, code, debugstr_ioctl(code) );
+
+    status = pdo_handle_ioctl( impl, irp, code, desc + 1, in_size - sizeof(*desc) );
 
     if (status != STATUS_PENDING)
     {
@@ -1309,8 +1311,10 @@ static NTSTATUS WINAPI fdo_ioctl( DEVICE_OBJECT *device, IRP *irp )
 {
     IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation( irp );
     ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
+    struct hid_device_desc *desc = irp->AssociatedIrp.SystemBuffer;
     ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
     struct func_device *impl = fdo_from_DEVICE_OBJECT( device );
+    struct phys_device *pdo;
     NTSTATUS status;
 
     if (winetest_debug > 1) trace( "%s: device %p, code %#lx %s\n", __func__, device, code, debugstr_ioctl(code) );
@@ -1318,18 +1322,31 @@ static NTSTATUS WINAPI fdo_ioctl( DEVICE_OBJECT *device, IRP *irp )
     switch (code)
     {
     case IOCTL_WINETEST_CREATE_DEVICE:
-        if (in_size < sizeof(struct hid_device_desc)) status = STATUS_INVALID_PARAMETER;
-        else status = create_child_pdo( device, irp->AssociatedIrp.SystemBuffer );
+        if (in_size < sizeof(*desc)) status = STATUS_INVALID_PARAMETER;
+        else status = create_child_pdo( device, desc );
         break;
     case IOCTL_WINETEST_REMOVE_DEVICE:
-        if ((device = find_child_device( impl, irp->AssociatedIrp.SystemBuffer )) &&
-            !remove_child_device( impl, device ))
+        if (in_size < sizeof(*desc))
+            status = STATUS_INVALID_PARAMETER;
+        else if (!(device = find_child_device( impl, desc )) || remove_child_device( impl, device ))
+            status = STATUS_NO_SUCH_DEVICE;
+        else
         {
             status = pdo_ioctl( device, irp );
             IoInvalidateDeviceRelations( impl->pdo, BusRelations );
             return status;
         }
-        status = STATUS_NO_SUCH_DEVICE;
+        break;
+    case IOCTL_WINETEST_HID_SET_EXPECT:
+    case IOCTL_WINETEST_HID_WAIT_EXPECT:
+    case IOCTL_WINETEST_HID_SEND_INPUT:
+    case IOCTL_WINETEST_HID_SET_CONTEXT:
+        if (in_size < sizeof(*desc))
+            status = STATUS_INVALID_PARAMETER;
+        else if (!(device = find_child_device( impl, desc )) || !(pdo = pdo_from_DEVICE_OBJECT( device )))
+            status = STATUS_NO_SUCH_DEVICE;
+        else
+            status = pdo_handle_ioctl( pdo, irp, code, desc + 1, in_size - sizeof(*desc) );
         break;
     default:
         ok( 0, "unexpected call\n" );

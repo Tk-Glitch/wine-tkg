@@ -539,10 +539,12 @@ static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFS
 
     /* WMA transform uses fixed size input samples and ignores samples with invalid sizes */
     if (wg_sample->size % info.cbSize)
-        hr = S_OK;
-    else
-        hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
+    {
+        mf_destroy_wg_sample(wg_sample);
+        return S_OK;
+    }
 
+    hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
     mf_destroy_wg_sample(wg_sample);
     return hr;
 }
@@ -579,14 +581,26 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
 
     wg_sample->size = 0;
     if (wg_sample->max_size < info.cbSize)
-        hr = MF_E_BUFFERTOOSMALL;
-    else if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, wg_sample)))
+    {
+        mf_destroy_wg_sample(wg_sample);
+        return MF_E_BUFFERTOOSMALL;
+    }
+
+    if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, wg_sample, NULL)))
     {
         if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
             samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
     }
 
     mf_destroy_wg_sample(wg_sample);
+
+    if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
+    {
+        FIXME("Unexpected stream format change!\n");
+        samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
+        *status |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
+    }
+
     return hr;
 }
 

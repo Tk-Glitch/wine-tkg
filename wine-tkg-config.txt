@@ -1,15 +1,20 @@
-# Last wine-tkg-staging-fsync-git configuration - sam. 18 juin 2022 20:30:56 CEST :
+# Last wine-tkg-staging-fsync-git configuration - sam. 18 juin 2022 20:34:20 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.9.r0.g230e953e31f
-Using wine-staging patchset (version 7.9.r0.g2a411514)
+Wine (plain) version: 7.10.r0.g631f4d5e42b
+Using wine-staging patchset (version 7.10.r0.g94f00cd9)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+Applied hotfix win32u_reverts25.earlystagingpatch
+Applied hotfix win32u_reverts24.earlystagingpatch
+Applied hotfix win32u_reverts23.earlystagingpatch
+Applied hotfix win32u_reverts22.earlystagingpatch
+Applied hotfix win32u_reverts21.earlystagingpatch
 Applied hotfix win32u_reverts20.earlystagingpatch
 Applied hotfix win32u_reverts19.earlystagingpatch
 Applied hotfix win32u_reverts18.earlystagingpatch
@@ -65,7 +70,6 @@ Applied hotfix ef6e33f.mypatch
 Applied hotfix 0001-proton-bcrypt_rdr2_fixes4.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix a608ef1.mypatch
-Applied hotfix dwmapi_EGS_fixup.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch

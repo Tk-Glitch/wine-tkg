@@ -1566,6 +1566,14 @@ typedef enum _PROCESSINFOCLASS {
     ProcessThreadStackAllocation = 41,
     ProcessWorkingSetWatchEx = 42,
     ProcessImageFileNameWin32 = 43,
+    ProcessImageFileMapping = 44,
+    ProcessAffinityUpdateMode = 45,
+    ProcessMemoryAllocationMode = 46,
+    ProcessGroupInformation = 47,
+    ProcessTokenVirtualizationEnabled = 48,
+    ProcessConsoleHostProcess = 49,
+    ProcessWindowInformation = 50,
+    ProcessHandleInformation = 51,
     MaxProcessInfoClass,
 #ifdef __WINESRC__
     ProcessWineMakeProcessSystem = 1000,
@@ -4459,7 +4467,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlQueueWorkItem(PRTL_WORK_ITEM_ROUTINE,PVOID,ULONG);
 NTSYSAPI void      WINAPI RtlRaiseException(PEXCEPTION_RECORD);
 NTSYSAPI void      WINAPI RtlRaiseStatus(NTSTATUS);
 NTSYSAPI ULONG     WINAPI RtlRandom(PULONG);
-NTSYSAPI PVOID     WINAPI RtlReAllocateHeap(HANDLE,ULONG,PVOID,SIZE_T) __WINE_ALLOC_SIZE(4);
+NTSYSAPI PVOID     WINAPI RtlReAllocateHeap(HANDLE,ULONG,PVOID,SIZE_T) __WINE_ALLOC_SIZE(4) __WINE_DEALLOC(RtlFreeHeap,3);
 NTSYSAPI NTSTATUS  WINAPI RtlRegisterWait(PHANDLE,HANDLE,RTL_WAITORTIMERCALLBACKFUNC,PVOID,ULONG,ULONG);
 NTSYSAPI void      WINAPI RtlReleaseActivationContext(HANDLE);
 NTSYSAPI void      WINAPI RtlReleasePath(PWSTR);

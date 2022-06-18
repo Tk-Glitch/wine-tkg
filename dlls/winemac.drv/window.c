@@ -238,7 +238,7 @@ static struct macdrv_win_data *alloc_win_data(HWND hwnd)
 {
     struct macdrv_win_data *data;
 
-    if ((data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data))))
+    if ((data = calloc(1, sizeof(*data))))
     {
         data->hwnd = hwnd;
         data->color_key = CLR_INVALID;
@@ -425,7 +425,7 @@ static void sync_window_region(struct macdrv_win_data *data, HRGN win_region)
     TRACE("win %p/%p win_region %p rects %p count %d\n", data->hwnd, data->cocoa_window, win_region, rects, count);
     macdrv_set_window_shape(data->cocoa_window, rects, count);
 
-    HeapFree(GetProcessHeap(), 0, region_data);
+    free(region_data);
     data->shaped = (region_data != NULL);
 
     if (hrgn && hrgn != win_region) NtGdiDeleteObjectApp(hrgn);
@@ -1041,8 +1041,7 @@ static void sync_window_z_order(struct macdrv_win_data *data)
  *              get_region_data
  *
  * Calls GetRegionData on the given region and converts the rectangle
- * array to CGRect format. The returned buffer must be freed by
- * caller using HeapFree(GetProcessHeap(),...).
+ * array to CGRect format. The returned buffer must be freed by caller.
  * If hdc_lptodp is not 0, the rectangles are converted through LPtoDP.
  */
 RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp)
@@ -1060,10 +1059,10 @@ RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp)
         int count = (size - sizeof(RGNDATAHEADER)) / sizeof(RECT);
         size += count * (sizeof(CGRect) - sizeof(RECT));
     }
-    if (!(data = HeapAlloc(GetProcessHeap(), 0, size))) return NULL;
+    if (!(data = malloc(size))) return NULL;
     if (!NtGdiGetRegionData(hrgn, size, data))
     {
-        HeapFree(GetProcessHeap(), 0, data);
+        free(data);
         return NULL;
     }
 
@@ -1620,7 +1619,7 @@ void CDECL macdrv_DestroyWindow(HWND hwnd)
 
     CFDictionaryRemoveValue(win_datas, hwnd);
     release_win_data(data);
-    HeapFree(GetProcessHeap(), 0, data);
+    free(data);
 }
 
 
@@ -2677,8 +2676,7 @@ static BOOL CALLBACK get_process_windows(HWND hwnd, LPARAM lp)
         if (qi->count >= qi->capacity)
         {
             UINT new_cap = qi->capacity * 2;
-            HWND *new_wins = HeapReAlloc(GetProcessHeap(), 0, qi->wins,
-                                         new_cap * sizeof(*qi->wins));
+            HWND *new_wins = realloc(qi->wins, new_cap * sizeof(*qi->wins));
             if (!new_wins) return FALSE;
             qi->wins = new_wins;
             qi->capacity = new_cap;
@@ -2757,8 +2755,8 @@ static void CALLBACK quit_callback(HWND hwnd, UINT msg, ULONG_PTR data, LRESULT 
             if (qi->result)
                 TerminateProcess(GetCurrentProcess(), 0);
 
-            HeapFree(GetProcessHeap(), 0, qi->wins);
-            HeapFree(GetProcessHeap(), 0, qi);
+            free(qi->wins);
+            free(qi);
         }
     }
 }
@@ -2776,12 +2774,12 @@ void macdrv_app_quit_requested(const macdrv_event *event)
 
     TRACE("reason %d\n", event->app_quit_requested.reason);
 
-    qi = HeapAlloc(GetProcessHeap(), 0, sizeof(*qi));
+    qi = malloc(sizeof(*qi));
     if (!qi)
         goto fail;
 
     qi->capacity = 32;
-    qi->wins = HeapAlloc(GetProcessHeap(), 0, qi->capacity * sizeof(*qi->wins));
+    qi->wins = malloc(qi->capacity * sizeof(*qi->wins));
     qi->count = qi->done = 0;
 
     if (!qi->wins || !EnumWindows(get_process_windows, (LPARAM)qi))
@@ -2827,8 +2825,8 @@ fail:
     WARN("failed to allocate window list\n");
     if (qi)
     {
-        HeapFree(GetProcessHeap(), 0, qi->wins);
-        HeapFree(GetProcessHeap(), 0, qi);
+        free(qi->wins);
+        free(qi);
     }
     macdrv_quit_reply(FALSE);
 }

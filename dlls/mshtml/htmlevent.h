@@ -17,6 +17,7 @@
  */
 
 typedef enum {
+    EVENTID_DOMCONTENTLOADED,
     EVENTID_ABORT,
     EVENTID_ANIMATIONEND,
     EVENTID_ANIMATIONSTART,
@@ -28,7 +29,6 @@ typedef enum {
     EVENTID_CONTEXTMENU,
     EVENTID_DATAAVAILABLE,
     EVENTID_DBLCLICK,
-    EVENTID_DOMCONTENTLOADED,
     EVENTID_DRAG,
     EVENTID_DRAGSTART,
     EVENTID_ERROR,
@@ -56,6 +56,7 @@ typedef enum {
     EVENTID_SELECTIONCHANGE,
     EVENTID_SELECTSTART,
     EVENTID_SUBMIT,
+    EVENTID_TIMEOUT,
     EVENTID_UNLOAD,
     EVENTID_LAST
 } eventid_t;
@@ -93,6 +94,7 @@ typedef struct DOMEvent {
     BOOL no_event_obj;
 } DOMEvent;
 
+const WCHAR *get_event_name(eventid_t) DECLSPEC_HIDDEN;
 void check_event_attr(HTMLDocumentNode*,nsIDOMElement*) DECLSPEC_HIDDEN;
 void release_event_target(EventTarget*) DECLSPEC_HIDDEN;
 HRESULT set_event_handler(EventTarget*,eventid_t,VARIANT*) DECLSPEC_HIDDEN;
