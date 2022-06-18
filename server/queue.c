@@ -1137,6 +1137,7 @@ static void msg_queue_destroy( struct object *obj )
     release_object( queue->input );
     if (queue->hooks) release_object( queue->hooks );
     if (queue->fd) release_object( queue->fd );
+    if (do_esync()) close( queue->esync_fd );
 }
 
 static void msg_queue_poll_event( struct fd *fd, int event )
@@ -2534,6 +2535,8 @@ DECL_HANDLER(set_queue_mask)
             if (req->skip_wait) queue->wake_mask = queue->changed_mask = 0;
             else wake_up( &queue->obj, 0 );
         }
+        if (do_fsync() && !is_signaled( queue ))
+            fsync_clear( &queue->obj );
 
         if (do_esync() && !is_signaled( queue ))
             esync_clear( queue->esync_fd );
@@ -2804,6 +2807,9 @@ DECL_HANDLER(get_message)
     queue->wake_mask = req->wake_mask;
     queue->changed_mask = req->changed_mask;
     set_error( STATUS_PENDING );  /* FIXME */
+
+    if (do_fsync() && !is_signaled( queue ))
+        fsync_clear( &queue->obj );
 
     if (do_esync() && !is_signaled( queue ))
         esync_clear( queue->esync_fd );

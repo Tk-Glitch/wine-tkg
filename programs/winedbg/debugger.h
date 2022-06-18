@@ -265,6 +265,7 @@ struct dbg_process
     char                        source_current_file[MAX_PATH];
     int                         source_start_line;
     int                         source_end_line;
+    const struct data_model*    data_model;
 };
 
 /* describes the way the debugger interacts with a given process */
@@ -543,6 +544,16 @@ static inline void* dbg_heap_realloc(void* buffer, size_t size)
     return (buffer) ? HeapReAlloc(GetProcessHeap(), 0, buffer, size) :
         HeapAlloc(GetProcessHeap(), 0, size);
 }
+
+struct data_model
+{
+    unsigned            base_type;
+    unsigned            size;
+    const WCHAR*        name;
+};
+extern const struct data_model ilp32_data_model[];
+extern const struct data_model lp64_data_model[];
+extern const struct data_model llp64_data_model[];
 
 extern struct dbg_internal_var          dbg_internal_vars[];
 

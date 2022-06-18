@@ -69,7 +69,7 @@ struct MSVCRT_JUMP_BUFFER
 };
 
 
-static void dump_scope_table( ULONG64 base, const SCOPE_TABLE *table )
+static void dump_scope_table( ULONG base, const SCOPE_TABLE *table )
 {
     unsigned int i;
 
@@ -972,7 +972,7 @@ static void *unwind_full_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION *f
     end = (BYTE *)data + codes * 4;
 
     TRACE( "function %lx-%lx: len=%#x ver=%u X=%u E=%u F=%u epilogs=%u codes=%u\n",
-           base + func->BeginAddress, base + func->BeginAddress + info->function_length * 4,
+           base + func->BeginAddress, base + func->BeginAddress + info->function_length * 2,
            info->function_length, info->version, info->x, info->e, info->f, epilogs, codes * 4 );
 
     /* check for prolog */
@@ -1240,7 +1240,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
         }
         else  /* hack: call builtin handlers registered in the tib list */
         {
-            DWORD64 backup_frame = dispatch.EstablisherFrame;
+            DWORD backup_frame = dispatch.EstablisherFrame;
             while ((DWORD)teb_frame < new_context.Sp && (DWORD)teb_frame < (DWORD)end_frame)
             {
                 TRACE( "found builtin frame %p handler %p\n", teb_frame, teb_frame->Handler );
@@ -1333,7 +1333,7 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
 {
     SCOPE_TABLE *table = dispatch->HandlerData;
     ULONG i;
-    DWORD64 ControlPc = dispatch->ControlPc;
+    DWORD ControlPc = dispatch->ControlPc;
 
     TRACE( "%p %p %p %p\n", rec, frame, context, dispatch );
     if (TRACE_ON(seh)) dump_scope_table( dispatch->ImageBase, table );

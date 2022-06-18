@@ -32,15 +32,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(cursor);
 
 
-static CRITICAL_SECTION cursor_cache_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &cursor_cache_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": cursor_cache_section") }
-};
-static CRITICAL_SECTION cursor_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
-
+static pthread_mutex_t cursor_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 static CFMutableDictionaryRef cursor_cache;
 
 
@@ -196,17 +188,17 @@ CFStringRef copy_system_cursor_name(ICONINFOEXW *info)
     else sprintfW(p, idW, info->wResID);
 
     /* @@ Wine registry key: HKCU\Software\Wine\Mac Driver\Cursors */
-    if (!RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Mac Driver\\Cursors", &key))
+    if (!(key = open_hkcu_key("Software\\Wine\\Mac Driver\\Cursors")))
     {
-        WCHAR value[64];
-        DWORD size, ret;
+        char buffer[2048];
+        KEY_VALUE_PARTIAL_INFORMATION *info = (void *)buffer;
+        DWORD ret;
 
-        value[0] = 0;
-        size = sizeof(value);
-        ret = RegQueryValueExW(key, name, NULL, NULL, (BYTE *)value, &size);
-        RegCloseKey(key);
-        if (!ret)
+        ret = query_reg_value(key, name, info, sizeof(buffer));
+        NtClose(key);
+        if (ret)
         {
+            const WCHAR *value = (const WCHAR *)info->Data;
             if (!value[0])
             {
                 TRACE("registry forces standard cursor for %s\n", debugstr_w(name));
@@ -299,7 +291,7 @@ CFArrayRef create_monochrome_cursor(HDC hdc, const ICONINFOEXW *icon, int width,
     }
     xor_bits = (unsigned long*)((char*)and_bits + info->bmiHeader.biSizeImage / 2);
 
-    if (!GetDIBits(hdc, icon->hbmMask, 0, height * 2, and_bits, info, DIB_RGB_COLORS))
+    if (!NtGdiGetDIBitsInternal(hdc, icon->hbmMask, 0, height * 2, and_bits, info, DIB_RGB_COLORS, 0, 0))
     {
         WARN("GetDIBits failed\n");
         HeapFree(GetProcessHeap(), 0, and_bits);
@@ -588,7 +580,8 @@ static CFArrayRef create_color_cursor(HDC hdc, const ICONINFOEXW *iinfo, HANDLE 
     info->bmiHeader.biBitCount = 32;
     color_size = width * height * 4;
     info->bmiHeader.biSizeImage = color_size;
-    hbmColor = CreateDIBSection(hdc, info, DIB_RGB_COLORS, (VOID **) &color_bits, NULL, 0);
+    hbmColor = NtGdiCreateDIBSection(hdc, NULL, 0, info, DIB_RGB_COLORS,
+                                     0, 0, 0, (void **)&color_bits);
     if (!hbmColor)
     {
         WARN("failed to create DIB section for cursor color data\n");
@@ -606,7 +599,8 @@ static CFArrayRef create_color_cursor(HDC hdc, const ICONINFOEXW *iinfo, HANDLE 
 
     mask_size = ((width + 31) / 32 * 4) * height; /* width_bytes * height */
     info->bmiHeader.biSizeImage = mask_size;
-    hbmMask = CreateDIBSection(hdc, info, DIB_RGB_COLORS, (VOID **) &mask_bits, NULL, 0);
+    hbmMask = NtGdiCreateDIBSection(hdc, NULL, 0, info, DIB_RGB_COLORS,
+                                    0, 0, 0, (void **)&mask_bits);
     if (!hbmMask)
     {
         WARN("failed to create DIB section for cursor mask data\n");
@@ -634,8 +628,8 @@ cleanup:
     else
         TRACE("returning cursor with %d frames\n", nFrames);
     /* Cleanup all of the resources used to obtain the frame data */
-    if (hbmColor) DeleteObject(hbmColor);
-    if (hbmMask) DeleteObject(hbmMask);
+    if (hbmColor) NtGdiDeleteObjectApp(hbmColor);
+    if (hbmMask) NtGdiDeleteObjectApp(hbmMask);
     HeapFree(GetProcessHeap(), 0, info);
     return frames;
 }
@@ -648,10 +642,10 @@ void CDECL macdrv_DestroyCursorIcon(HCURSOR cursor)
 {
     TRACE("cursor %p\n", cursor);
 
-    EnterCriticalSection(&cursor_cache_section);
+    pthread_mutex_lock(&cursor_cache_mutex);
     if (cursor_cache)
         CFDictionaryRemoveValue(cursor_cache, cursor);
-    LeaveCriticalSection(&cursor_cache_section);
+    pthread_mutex_unlock(&cursor_cache_mutex);
 }
 
 
@@ -732,7 +726,7 @@ void CDECL macdrv_SetCursor(HCURSOR cursor)
     {
         ICONINFOEXW info;
 
-        EnterCriticalSection(&cursor_cache_section);
+        pthread_mutex_lock(&cursor_cache_mutex);
         if (cursor_cache)
         {
             CFTypeRef cached_cursor = CFDictionaryGetValue(cursor_cache, cursor);
@@ -744,7 +738,7 @@ void CDECL macdrv_SetCursor(HCURSOR cursor)
                     cursor_frames = CFRetain(cached_cursor);
             }
         }
-        LeaveCriticalSection(&cursor_cache_section);
+        pthread_mutex_unlock(&cursor_cache_mutex);
         if (cursor_name || cursor_frames)
             goto done;
 
@@ -757,15 +751,15 @@ void CDECL macdrv_SetCursor(HCURSOR cursor)
 
         if ((cursor_name = copy_system_cursor_name(&info)))
         {
-            DeleteObject(info.hbmColor);
-            DeleteObject(info.hbmMask);
+            NtGdiDeleteObjectApp(info.hbmColor);
+            NtGdiDeleteObjectApp(info.hbmMask);
         }
         else
         {
             BITMAP bm;
             HDC hdc;
 
-            GetObjectW(info.hbmMask, sizeof(bm), &bm);
+            NtGdiExtGetObjectW(info.hbmMask, sizeof(bm), &bm);
             if (!info.hbmColor) bm.bmHeight = max(1, bm.bmHeight / 2);
 
             /* make sure hotspot is valid */
@@ -775,29 +769,29 @@ void CDECL macdrv_SetCursor(HCURSOR cursor)
                 info.yHotspot = bm.bmHeight / 2;
             }
 
-            hdc = CreateCompatibleDC(0);
+            hdc = NtGdiCreateCompatibleDC(0);
 
             if (info.hbmColor)
             {
                 cursor_frames = create_color_cursor(hdc, &info, cursor, bm.bmWidth, bm.bmHeight);
-                DeleteObject(info.hbmColor);
+                NtGdiDeleteObjectApp(info.hbmColor);
             }
             else
                 cursor_frames = create_monochrome_cursor(hdc, &info, bm.bmWidth, bm.bmHeight);
 
-            DeleteObject(info.hbmMask);
-            DeleteDC(hdc);
+            NtGdiDeleteObjectApp(info.hbmMask);
+            NtGdiDeleteObjectApp(hdc);
         }
 
         if (cursor_name || cursor_frames)
         {
-            EnterCriticalSection(&cursor_cache_section);
+            pthread_mutex_lock(&cursor_cache_mutex);
             if (!cursor_cache)
                 cursor_cache = CFDictionaryCreateMutable(NULL, 0, NULL,
                                                          &kCFTypeDictionaryValueCallBacks);
             CFDictionarySetValue(cursor_cache, cursor,
                                  cursor_name ? (CFTypeRef)cursor_name : (CFTypeRef)cursor_frames);
-            LeaveCriticalSection(&cursor_cache_section);
+            pthread_mutex_unlock(&cursor_cache_mutex);
         }
         else
             cursor_name = CFRetain(CFSTR("arrowCursor"));

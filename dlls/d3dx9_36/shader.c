@@ -148,7 +148,7 @@ HRESULT WINAPI D3DXFindShaderComment(const DWORD *byte_code, DWORD fourcc, const
     const DWORD *ptr = byte_code;
     DWORD version;
 
-    TRACE("byte_code %p, fourcc %x, data %p, size %p\n", byte_code, fourcc, data, size);
+    TRACE("byte_code %p, fourcc %#lx, data %p, size %p.\n", byte_code, fourcc, data, size);
 
     if (data) *data = NULL;
     if (size) *size = 0;
@@ -198,7 +198,7 @@ HRESULT WINAPI D3DXAssembleShader(const char *data, UINT data_len, const D3DXMAC
 {
     HRESULT hr;
 
-    TRACE("data %p, data_len %u, defines %p, include %p, flags %#x, shader %p, error_messages %p\n",
+    TRACE("data %p, data_len %u, defines %p, include %p, flags %#lx, shader %p, error_messages %p.\n",
           data, data_len, defines, include, flags, shader, error_messages);
 
     /* Forward to d3dcompiler: the parameter types aren't really different,
@@ -321,7 +321,7 @@ HRESULT WINAPI D3DXAssembleShaderFromFileA(const char *filename, const D3DXMACRO
     DWORD len;
     HRESULT ret;
 
-    TRACE("filename %s, defines %p, include %p, flags %#x, shader %p, error_messages %p.\n",
+    TRACE("filename %s, defines %p, include %p, flags %#lx, shader %p, error_messages %p.\n",
             debugstr_a(filename), defines, include, flags, shader, error_messages);
 
     if (!filename) return D3DXERR_INVALIDDATA;
@@ -346,7 +346,7 @@ HRESULT WINAPI D3DXAssembleShaderFromFileW(const WCHAR *filename, const D3DXMACR
     char *filename_a;
     HRESULT hr;
 
-    TRACE("filename %s, defines %p, include %p, flags %#x, shader %p, error_messages %p.\n",
+    TRACE("filename %s, defines %p, include %p, flags %#lx, shader %p, error_messages %p.\n",
             debugstr_w(filename), defines, include, flags, shader, error_messages);
 
     if(!include)
@@ -385,7 +385,7 @@ HRESULT WINAPI D3DXAssembleShaderFromResourceA(HMODULE module, const char *resou
     HRSRC res;
     DWORD len;
 
-    TRACE("module %p, resource %s, defines %p, include %p, flags %#x, shader %p, error_messages %p.\n",
+    TRACE("module %p, resource %s, defines %p, include %p, flags %#lx, shader %p, error_messages %p.\n",
             module, debugstr_a(resource), defines, include, flags, shader, error_messages);
 
     if (!(res = FindResourceA(module, resource, (const char *)RT_RCDATA)))
@@ -403,7 +403,7 @@ HRESULT WINAPI D3DXAssembleShaderFromResourceW(HMODULE module, const WCHAR *reso
     HRSRC res;
     DWORD len;
 
-    TRACE("module %p, resource %s, defines %p, include %p, flags %#x, shader %p, error_messages %p.\n",
+    TRACE("module %p, resource %s, defines %p, include %p, flags %#lx, shader %p, error_messages %p.\n",
             module, debugstr_w(resource), defines, include, flags, shader, error_messages);
 
     if (!(res = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
@@ -421,7 +421,7 @@ HRESULT WINAPI D3DXCompileShader(const char *data, UINT length, const D3DXMACRO 
     HRESULT hr;
 
     TRACE("data %s, length %u, defines %p, include %p, function %s, profile %s, "
-            "flags %#x, shader %p, error_msgs %p, constant_table %p.\n",
+            "flags %#lx, shader %p, error_msgs %p, constant_table %p.\n",
             debugstr_a(data), length, defines, include, debugstr_a(function), debugstr_a(profile),
             flags, shader, error_msgs, constant_table);
 
@@ -488,7 +488,7 @@ HRESULT WINAPI D3DXCompileShaderFromFileA(const char *filename, const D3DXMACRO 
     HRESULT ret;
 
     TRACE("filename %s, defines %p, include %p, entrypoint %s, profile %s, "
-            "flags %#x, shader %p, error_messages %p, constant_table %p.\n",
+            "flags %#lx, shader %p, error_messages %p, constant_table %p.\n",
             debugstr_a(filename), defines, include, debugstr_a(entrypoint),
             debugstr_a(profile), flags, shader, error_messages, constant_table);
 
@@ -519,7 +519,7 @@ HRESULT WINAPI D3DXCompileShaderFromFileW(const WCHAR *filename, const D3DXMACRO
     UINT len;
 
     TRACE("filename %s, defines %p, include %p, entrypoint %s, profile %s, "
-            "flags %#x, shader %p, error_messages %p, constant_table %p.\n",
+            "flags %#lx, shader %p, error_messages %p, constant_table %p.\n",
             debugstr_w(filename), defines, include, debugstr_a(entrypoint), debugstr_a(profile),
             flags, shader, error_messages, constant_table);
 
@@ -570,7 +570,7 @@ HRESULT WINAPI D3DXCompileShaderFromResourceA(HMODULE module, const char *resour
     DWORD len;
 
     TRACE("module %p, resource %s, defines %p, include %p, entrypoint %s, profile %s, "
-            "flags %#x, shader %p, error_messages %p, constant_table %p.\n",
+            "flags %#lx, shader %p, error_messages %p, constant_table %p.\n",
             module, debugstr_a(resource), defines, include, debugstr_a(entrypoint), debugstr_a(profile),
             flags, shader, error_messages, constant_table);
 
@@ -591,7 +591,7 @@ HRESULT WINAPI D3DXCompileShaderFromResourceW(HMODULE module, const WCHAR *resou
     DWORD len;
 
     TRACE("module %p, resource %s, defines %p, include %p, entrypoint %s, profile %s, "
-            "flags %#x, shader %p, error_messages %p, constant_table %p.\n",
+            "flags %#lx, shader %p, error_messages %p, constant_table %p.\n",
             module, debugstr_w(resource), defines, include, debugstr_a(entrypoint), debugstr_a(profile),
             flags, shader, error_messages, constant_table);
 
@@ -926,27 +926,28 @@ static HRESULT WINAPI ID3DXConstantTableImpl_QueryInterface(ID3DXConstantTable *
 
 static ULONG WINAPI ID3DXConstantTableImpl_AddRef(ID3DXConstantTable *iface)
 {
-    struct ID3DXConstantTableImpl *This = impl_from_ID3DXConstantTable(iface);
+    struct ID3DXConstantTableImpl *table = impl_from_ID3DXConstantTable(iface);
+    ULONG refcount = InterlockedIncrement(&table->ref);
 
-    TRACE("(%p)->(): AddRef from %d\n", This, This->ref);
+    TRACE("%p increasing refcount to %lu.\n", table, refcount);
 
-    return InterlockedIncrement(&This->ref);
+    return refcount;
 }
 
 static ULONG WINAPI ID3DXConstantTableImpl_Release(ID3DXConstantTable *iface)
 {
-    struct ID3DXConstantTableImpl *This = impl_from_ID3DXConstantTable(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    struct ID3DXConstantTableImpl *table = impl_from_ID3DXConstantTable(iface);
+    ULONG refcount = InterlockedDecrement(&table->ref);
 
-    TRACE("(%p)->(): Release from %d\n", This, ref + 1);
+    TRACE("%p decreasing refcount to %lu.\n", table, refcount);
 
-    if (!ref)
+    if (!refcount)
     {
-        free_constant_table(This);
-        HeapFree(GetProcessHeap(), 0, This);
+        free_constant_table(table);
+        HeapFree(GetProcessHeap(), 0, table);
     }
 
-    return ref;
+    return refcount;
 }
 
 /*** ID3DXBuffer methods ***/
@@ -2001,7 +2002,7 @@ HRESULT WINAPI D3DXGetShaderConstantTableEx(const DWORD *byte_code, DWORD flags,
     const D3DXSHADER_CONSTANTINFO *constant_info;
     DWORD i;
 
-    TRACE("byte_code %p, flags %#x, constant_table %p.\n", byte_code, flags, constant_table);
+    TRACE("byte_code %p, flags %#lx, constant_table %p.\n", byte_code, flags, constant_table);
 
     if (constant_table)
         *constant_table = NULL;
@@ -2019,7 +2020,7 @@ HRESULT WINAPI D3DXGetShaderConstantTableEx(const DWORD *byte_code, DWORD flags,
     }
 
     if (flags & ~D3DXCONSTTABLE_LARGEADDRESSAWARE)
-        FIXME("Flags %#x not handled.\n", flags);
+        FIXME("Flags %#lx not handled.\n", flags);
 
     hr = D3DXFindShaderComment(byte_code, MAKEFOURCC('C','T','A','B'), &data, &size);
     if (hr != D3D_OK)
@@ -2062,7 +2063,7 @@ HRESULT WINAPI D3DXGetShaderConstantTableEx(const DWORD *byte_code, DWORD flags,
     object->desc.Creator = ctab_header->Creator ? object->ctab + ctab_header->Creator : NULL;
     object->desc.Version = ctab_header->Version;
     object->desc.Constants = ctab_header->Constants;
-    TRACE("Creator %s, Version %x, Constants %u, Target %s\n",
+    TRACE("Creator %s, Version %#lx, Constants %u, Target %s.\n",
             debugstr_a(object->desc.Creator), object->desc.Version, object->desc.Constants,
             debugstr_a(ctab_header->Target ? object->ctab + ctab_header->Target : NULL));
 
@@ -2155,7 +2156,7 @@ static ULONG WINAPI d3dx9_fragment_linker_AddRef(ID3DXFragmentLinker *iface)
     struct d3dx9_fragment_linker *linker = impl_from_ID3DXFragmentLinker(iface);
     ULONG refcount = InterlockedIncrement(&linker->ref);
 
-    TRACE("%p increasing refcount to %u.\n", linker, refcount);
+    TRACE("%p increasing refcount to %lu.\n", linker, refcount);
 
     return refcount;
 }
@@ -2165,7 +2166,7 @@ static ULONG WINAPI d3dx9_fragment_linker_Release(ID3DXFragmentLinker *iface)
     struct d3dx9_fragment_linker *linker = impl_from_ID3DXFragmentLinker(iface);
     ULONG refcount = InterlockedDecrement(&linker->ref);
 
-    TRACE("%p decreasing refcount to %u.\n", linker, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", linker, refcount);
 
     if (!refcount)
     {
@@ -2251,7 +2252,7 @@ static HRESULT WINAPI d3dx9_fragment_linker_LinkShader(ID3DXFragmentLinker *ifac
         DWORD flags, const D3DXHANDLE *handles, UINT fragment_count, ID3DXBuffer **buffer,
         ID3DXBuffer **errors)
 {
-    FIXME("iface %p, profile %s, flags %#x, handles %p, fragment_count %u, buffer %p, errors %p: stub.\n",
+    FIXME("iface %p, profile %s, flags %#lx, handles %p, fragment_count %u, buffer %p, errors %p: stub.\n",
             iface, debugstr_a(profile), flags, handles, fragment_count, buffer, errors);
 
     return E_NOTIMPL;
@@ -2261,7 +2262,7 @@ static HRESULT WINAPI d3dx9_fragment_linker_LinkVertexShader(ID3DXFragmentLinker
         DWORD flags, const D3DXHANDLE *handles, UINT fragment_count, IDirect3DVertexShader9 **shader,
         ID3DXBuffer **errors)
 {
-    FIXME("iface %p, profile %s, flags %#x, handles %p, fragment_count %u, shader %p, errors %p: stub.\n",
+    FIXME("iface %p, profile %s, flags %#lx, handles %p, fragment_count %u, shader %p, errors %p: stub.\n",
             iface, debugstr_a(profile), flags, handles, fragment_count, shader, errors);
 
     return E_NOTIMPL;
@@ -2271,7 +2272,7 @@ static HRESULT WINAPI d3dx9_fragment_linker_LinkPixelShader(ID3DXFragmentLinker 
         DWORD flags, const D3DXHANDLE *handles, UINT fragment_count, IDirect3DPixelShader9 **shader,
         ID3DXBuffer **errors)
 {
-    FIXME("iface %p, profile %s, flags %#x, handles %p, fragment_count %u, shader %p, errors %p: stub.\n",
+    FIXME("iface %p, profile %s, flags %#lx, handles %p, fragment_count %u, shader %p, errors %p: stub.\n",
         iface, debugstr_a(profile), flags, handles, fragment_count, shader, errors);
 
     return E_NOTIMPL;
@@ -2308,7 +2309,7 @@ HRESULT WINAPI D3DXCreateFragmentLinkerEx(IDirect3DDevice9 *device, UINT size, D
 {
     struct d3dx9_fragment_linker *object;
 
-    TRACE("device %p, size %u, flags %#x, linker %p.\n", device, size, flags, linker);
+    TRACE("device %p, size %u, flags %#lx, linker %p.\n", device, size, flags, linker);
 
     object = heap_alloc(sizeof(*object));
     if (!object)
@@ -2746,7 +2747,7 @@ static ULONG WINAPI d3dx9_texture_shader_AddRef(ID3DXTextureShader *iface)
     struct d3dx9_texture_shader *texture_shader = impl_from_ID3DXTextureShader(iface);
     ULONG refcount = InterlockedIncrement(&texture_shader->ref);
 
-    TRACE("%p increasing refcount to %u.\n", texture_shader, refcount);
+    TRACE("%p increasing refcount to %lu.\n", texture_shader, refcount);
 
     return refcount;
 }
@@ -2756,7 +2757,7 @@ static ULONG WINAPI d3dx9_texture_shader_Release(ID3DXTextureShader *iface)
     struct d3dx9_texture_shader *texture_shader = impl_from_ID3DXTextureShader(iface);
     ULONG refcount = InterlockedDecrement(&texture_shader->ref);
 
-    TRACE("%p decreasing refcount to %u.\n", texture_shader, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", texture_shader, refcount);
 
     if (!refcount)
     {
@@ -3052,7 +3053,7 @@ static HRESULT get_shader_semantics(const DWORD *byte_code, D3DXSEMANTIC *semant
         D3DDECLUSAGE_FOG,
         D3DDECLUSAGE_PSIZE
     };
-    DWORD reg_type, usage, index, version_token = *byte_code;
+    uint32_t reg_type, usage, index, version_token = *byte_code;
     BOOL is_ps = version_token >> 16 == 0xffff;
     unsigned int major, minor, i = 0, j;
     BYTE colors = 0, rastout = 0;
@@ -3074,8 +3075,8 @@ static HRESULT get_shader_semantics(const DWORD *byte_code, D3DXSEMANTIC *semant
     {
         if (has_dcl && (*byte_code & 0xffff) == D3DSIO_DCL)
         {
-            DWORD usage_token = byte_code[1];
-            DWORD reg = byte_code[2];
+            uint32_t usage_token = byte_code[1];
+            uint32_t reg = byte_code[2];
 
             reg_type = ((reg & D3DSP_REGTYPE_MASK) >> D3DSP_REGTYPE_SHIFT)
                     | ((reg & D3DSP_REGTYPE_MASK2) >> D3DSP_REGTYPE_SHIFT2);

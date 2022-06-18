@@ -162,11 +162,6 @@ typedef struct dwarf2_traverse_context_s
     const unsigned char*        end_data;
 } dwarf2_traverse_context_t;
 
-/* symt_cache indexes */
-#define sc_void         0
-#define sc_unknown      1
-#define sc_num          2
-
 typedef struct dwarf2_cuhead_s
 {
     unsigned char               word_size; /* size of a word on target machine */
@@ -180,7 +175,6 @@ typedef struct dwarf2_parse_module_context_s
     const dwarf2_section_t*     sections;
     struct module*              module;
     const struct elf_thunk_area*thunks;
-    struct symt*                symt_cache[sc_num]; /* void, unknown */
     struct vector               unit_contexts;
     struct dwarf2_dwz_alternate_s* dwz;
     DWORD                       cu_versions;
@@ -219,6 +213,7 @@ typedef struct dwarf2_parse_context_s
     dwarf2_cuhead_t             head;
     enum unit_status            status;
     dwarf2_traverse_context_t   traverse_DIE;
+    unsigned                    language;
 } dwarf2_parse_context_t;
 
 /* stored in the dbghelp's module internal structure for later reuse */
@@ -1138,14 +1133,14 @@ static struct symt* dwarf2_lookup_type(const dwarf2_debug_info_t* di)
 
     if (!dwarf2_find_attribute(di, DW_AT_type, &attr))
         /* this is only valid if current language of CU is C or C++ */
-        return di->unit_ctx->module_ctx->symt_cache[sc_void];
+        return &symt_get_basic(btVoid, 0)->symt;
     if (!(type = dwarf2_jump_to_debug_info(&attr)))
-        return di->unit_ctx->module_ctx->symt_cache[sc_unknown];
+        return &symt_get_basic(btNoType, 0)->symt;
 
     if (type == di)
     {
         FIXME("Reference to itself\n");
-        return di->unit_ctx->module_ctx->symt_cache[sc_unknown];
+        return &symt_get_basic(btNoType, 0)->symt;
     }
     if (!type->symt)
     {
@@ -1154,7 +1149,7 @@ static struct symt* dwarf2_lookup_type(const dwarf2_debug_info_t* di)
         if (!type->symt)
         {
             FIXME("Unable to load forward reference for tag %Ix\n", type->abbrev->tag);
-            return di->unit_ctx->module_ctx->symt_cache[sc_unknown];
+            return &symt_get_basic(btNoType, 0)->symt;
         }
     }
     return type->symt;
@@ -1456,15 +1451,42 @@ static struct vector* dwarf2_get_di_children(dwarf2_debug_info_t* di)
     return NULL;
 }
 
+/* reconstruct whether integer is long (contains 'long' only once) */
+static BOOL is_long(const char* name)
+{
+    /* we assume name is made only of basic C keywords:
+     *    int long short unsigned signed void float double char _Bool _Complex
+     */
+    const char* p = strstr(name, "long");
+    return p && strstr(p + 4, "long") == NULL;
+}
+
+static BOOL is_c_language(dwarf2_parse_context_t* unit_ctx)
+{
+    return unit_ctx->language == DW_LANG_C ||
+        unit_ctx->language == DW_LANG_C89 ||
+        unit_ctx->language == DW_LANG_C99;
+}
+
+static BOOL is_cpp_language(dwarf2_parse_context_t* unit_ctx)
+{
+    return unit_ctx->language == DW_LANG_C_plus_plus;
+}
+
 static struct symt* dwarf2_parse_base_type(dwarf2_debug_info_t* di)
 {
     struct attribute name;
     struct attribute size;
     struct attribute encoding;
     enum BasicType bt;
+    BOOL c_language, cpp_language;
+
     if (di->symt) return di->symt;
 
     TRACE("%s\n", dwarf2_debug_di(di));
+
+    c_language = is_c_language(di->unit_ctx);
+    cpp_language = is_cpp_language(di->unit_ctx);
 
     if (!dwarf2_find_attribute(di, DW_AT_name, &name))
         name.u.string = NULL;
@@ -1478,13 +1500,22 @@ static struct symt* dwarf2_parse_base_type(dwarf2_debug_info_t* di)
     case DW_ATE_boolean:        bt = btBool; break;
     case DW_ATE_complex_float:  bt = btComplex; break;
     case DW_ATE_float:          bt = btFloat; break;
-    case DW_ATE_signed:         bt = btInt; break;
-    case DW_ATE_unsigned:       bt = btUInt; break;
-    case DW_ATE_signed_char:    bt = btChar; break;
-    case DW_ATE_unsigned_char:  bt = btChar; break;
+    case DW_ATE_signed:         bt = ((c_language || cpp_language) && is_long(name.u.string)) ? btLong : btInt; break;
+    case DW_ATE_unsigned:
+        if ((c_language || cpp_language) && is_long(name.u.string)) bt = btULong;
+        else if (cpp_language && !strcmp(name.u.string, "wchar_t")) bt = btWChar;
+        else if (cpp_language && !strcmp(name.u.string, "char8_t")) bt = btChar8;
+        else if (cpp_language && !strcmp(name.u.string, "char16_t")) bt = btChar16;
+        else if (cpp_language && !strcmp(name.u.string, "char32_t")) bt = btChar32;
+        else bt = btUInt;
+        break;
+    /* on Windows, in C, char == signed char, but not in C++ */
+    case DW_ATE_signed_char:    bt = (cpp_language && !strcmp(name.u.string, "signed char")) ? btInt : btChar; break;
+    case DW_ATE_unsigned_char:  bt = btUInt; break;
+    case DW_ATE_UTF:            bt = (size.u.uvalue == 1) ? btChar8 : (size.u.uvalue == 2 ? btChar16 : btChar32); break;
     default:                    bt = btNoType; break;
     }
-    di->symt = &symt_new_basic(di->unit_ctx->module_ctx->module, bt, name.u.string, size.u.uvalue)->symt;
+    di->symt = &symt_get_basic(bt, size.u.uvalue)->symt;
 
     if (dwarf2_get_di_children(di)) FIXME("Unsupported children\n");
     return di->symt;
@@ -1503,7 +1534,15 @@ static struct symt* dwarf2_parse_typedef(dwarf2_debug_info_t* di)
     ref_type = dwarf2_lookup_type(di);
 
     if (name.u.string)
+    {
+        /* Note: The MS C compiler has tweaks for WCHAR support.
+         *       Even if WCHAR is a typedef to wchar_t, wchar_t is emitted as btUInt/2 (it's defined as
+         *          unsigned short, so far so good), while WCHAR is emitted as btWChar/2).
+         */
+        if ((is_c_language(di->unit_ctx) || is_cpp_language(di->unit_ctx)) && !strcmp(name.u.string, "WCHAR"))
+            ref_type = &symt_get_basic(btWChar, 2)->symt;
         di->symt = &symt_new_typedef(di->unit_ctx->module_ctx->module, ref_type, name.u.string)->symt;
+    }
     if (dwarf2_get_di_children(di)) FIXME("Unsupported children\n");
     return di->symt;
 }
@@ -1566,14 +1605,14 @@ static struct symt* dwarf2_parse_array_type(dwarf2_debug_info_t* di)
     {
         /* fake an array with unknown size */
         /* FIXME: int4 even on 64bit machines??? */
-        idx_type = &symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "int", 4)->symt;
+        idx_type = &symt_get_basic(btInt, 4)->symt;
         min.u.uvalue = 0;
         cnt.u.uvalue = 0;
     }
     else for (i = 0; i < vector_length(children); i++)
     {
         child = *(dwarf2_debug_info_t**)vector_at(children, i);
-        if (child->symt == di->unit_ctx->module_ctx->symt_cache[sc_unknown]) continue;
+        if (child->symt == &symt_get_basic(btNoType, 0)->symt) continue;
         switch (child->abbrev->tag)
         {
         case DW_TAG_subrange_type:
@@ -1665,19 +1704,18 @@ static struct symt* dwarf2_parse_restrict_type(dwarf2_debug_info_t* di)
 static struct symt* dwarf2_parse_unspecified_type(dwarf2_debug_info_t* di)
 {
     struct attribute name;
-    struct attribute size;
-    struct symt_basic *basic;
+    struct symt* basic;
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
     if (di->symt) return di->symt;
 
-    if (!dwarf2_find_attribute(di, DW_AT_name, &name))
-        name.u.string = "void";
-    size.u.uvalue = di->unit_ctx->module_ctx->module->cpu->word_size;
-
-    basic = symt_new_basic(di->unit_ctx->module_ctx->module, btVoid, name.u.string, size.u.uvalue);
-    di->symt = &basic->symt;
+    basic = &symt_get_basic(btVoid, 0)->symt;
+    if (dwarf2_find_attribute(di, DW_AT_name, &name))
+        /* define the missing type as a typedef to void... */
+        di->symt = &symt_new_typedef(di->unit_ctx->module_ctx->module, basic, name.u.string)->symt;
+    else /* or use void if it doesn't even have a name */
+        di->symt = basic;
 
     if (dwarf2_get_di_children(di)) FIXME("Unsupported children\n");
     return di->symt;
@@ -1878,10 +1916,10 @@ static struct symt* dwarf2_parse_enumeration_type(dwarf2_debug_info_t* di)
 
         switch (size.u.uvalue) /* FIXME: that's wrong */
         {
-        case 1: basetype = symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "char", 1); break;
-        case 2: basetype = symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "short", 2); break;
+        case 1: basetype = symt_get_basic(btInt, 1); break;
+        case 2: basetype = symt_get_basic(btInt, 2); break;
         default:
-        case 4: basetype = symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "int", 4); break;
+        case 4: basetype = symt_get_basic(btInt, 4); break;
         }
         type = &basetype->symt;
     }
@@ -2457,7 +2495,7 @@ static void dwarf2_parse_namespace(dwarf2_debug_info_t* di)
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    di->symt = di->unit_ctx->module_ctx->symt_cache[sc_void];
+    di->symt = &symt_get_basic(btVoid, 0)->symt;
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -2924,6 +2962,7 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
             unsigned int                i;
             struct attribute            stmt_list, low_pc;
             struct attribute            comp_dir;
+            struct attribute            language;
 
             if (!dwarf2_find_attribute(di, DW_AT_name, &name))
                 name.u.string = NULL;
@@ -2934,6 +2973,12 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
 
             if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc))
                 low_pc.u.uvalue = 0;
+
+            if (!dwarf2_find_attribute(di, DW_AT_language, &language))
+                language.u.uvalue = DW_LANG_C;
+
+            ctx->language = language.u.uvalue;
+
             ctx->compiland = symt_new_compiland(ctx->module_ctx->module, ctx->module_ctx->load_offset + low_pc.u.uvalue,
                                                 source_new(ctx->module_ctx->module, comp_dir.u.string, name.u.string));
             dwarf2_cache_cuhead(ctx->module_ctx->module->format_info[DFI_DWARF]->u.dwarf2_info, ctx->compiland, &ctx->head);
@@ -4071,9 +4116,6 @@ static BOOL dwarf2_load_CU_module(dwarf2_parse_module_context_t* module_ctx, str
     module_ctx->module = module;
     module_ctx->thunks = thunks;
     module_ctx->load_offset = load_offset;
-    memset(module_ctx->symt_cache, 0, sizeof(module_ctx->symt_cache));
-    module_ctx->symt_cache[sc_void] = &symt_new_basic(module_ctx->module, btVoid, "void", 0)->symt;
-    module_ctx->symt_cache[sc_unknown] = &symt_new_basic(module_ctx->module, btNoType, "# unknown", 0)->symt;
     vector_init(&module_ctx->unit_contexts, sizeof(dwarf2_parse_context_t), 16);
     module_ctx->cu_versions = 0;
 

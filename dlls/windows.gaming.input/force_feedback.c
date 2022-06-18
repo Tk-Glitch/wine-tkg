@@ -19,13 +19,373 @@
 
 #include "private.h"
 
+#include "math.h"
+
 #include "ddk/hidsdi.h"
 #include "dinput.h"
 #include "hidusage.h"
+#include "provider.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(input);
+
+struct effect
+{
+    IWineForceFeedbackEffectImpl IWineForceFeedbackEffectImpl_iface;
+    IForceFeedbackEffect IForceFeedbackEffect_iface;
+    IInspectable *IInspectable_outer;
+    LONG ref;
+
+    CRITICAL_SECTION cs;
+    IDirectInputEffect *effect;
+
+    GUID type;
+    DWORD axes[3];
+    LONG directions[3];
+    ULONG repeat_count;
+    DICONSTANTFORCE constant_force;
+    DIRAMPFORCE ramp_force;
+    DICONDITION condition;
+    DIPERIODIC periodic;
+    DIENVELOPE envelope;
+    DIEFFECT params;
+};
+
+static inline struct effect *impl_from_IWineForceFeedbackEffectImpl( IWineForceFeedbackEffectImpl *iface )
+{
+    return CONTAINING_RECORD( iface, struct effect, IWineForceFeedbackEffectImpl_iface );
+}
+
+static HRESULT WINAPI effect_impl_QueryInterface( IWineForceFeedbackEffectImpl *iface, REFIID iid, void **out )
+{
+    struct effect *impl = impl_from_IWineForceFeedbackEffectImpl( iface );
+
+    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
+
+    if (IsEqualGUID( iid, &IID_IUnknown ) ||
+        IsEqualGUID( iid, &IID_IInspectable ) ||
+        IsEqualGUID( iid, &IID_IAgileObject ) ||
+        IsEqualGUID( iid, &IID_IWineForceFeedbackEffectImpl ))
+    {
+        IWineForceFeedbackEffectImpl_AddRef( (*out = &impl->IWineForceFeedbackEffectImpl_iface) );
+        return S_OK;
+    }
+
+    if (IsEqualGUID( iid, &IID_IForceFeedbackEffect ))
+    {
+        IInspectable_AddRef( (*out = &impl->IForceFeedbackEffect_iface) );
+        return S_OK;
+    }
+
+    FIXME( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI effect_impl_AddRef( IWineForceFeedbackEffectImpl *iface )
+{
+    struct effect *impl = impl_from_IWineForceFeedbackEffectImpl( iface );
+    ULONG ref = InterlockedIncrement( &impl->ref );
+    TRACE( "iface %p increasing refcount to %lu.\n", iface, ref );
+    return ref;
+}
+
+static ULONG WINAPI effect_impl_Release( IWineForceFeedbackEffectImpl *iface )
+{
+    struct effect *impl = impl_from_IWineForceFeedbackEffectImpl( iface );
+    ULONG ref = InterlockedDecrement( &impl->ref );
+
+    TRACE( "iface %p decreasing refcount to %lu.\n", iface, ref );
+
+    if (!ref)
+    {
+        if (impl->effect) IDirectInputEffect_Release( impl->effect );
+        impl->cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection( &impl->cs );
+        free( impl );
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI effect_impl_put_Parameters( IWineForceFeedbackEffectImpl *iface, WineForceFeedbackEffectParameters params,
+                                                  WineForceFeedbackEffectEnvelope *envelope )
+{
+    struct effect *impl = impl_from_IWineForceFeedbackEffectImpl( iface );
+    HRESULT hr;
+
+    TRACE( "iface %p, params %p, envelope %p.\n", iface, &params, envelope );
+
+    EnterCriticalSection( &impl->cs );
+    switch (params.type)
+    {
+    case WineForceFeedbackEffectType_Constant:
+        impl->repeat_count = params.constant.repeat_count;
+        impl->constant_force.lMagnitude = round( params.constant.gain * params.constant.direction.X * 10000 );
+        impl->params.dwDuration = params.constant.duration.Duration / 10;
+        impl->params.dwStartDelay = params.constant.start_delay.Duration / 10;
+        impl->directions[0] = round( -params.constant.direction.X * 10000 );
+        impl->directions[1] = round( -params.constant.direction.Y * 10000 );
+        impl->directions[2] = round( -params.constant.direction.Z * 10000 );
+        break;
+
+    case WineForceFeedbackEffectType_Ramp:
+        impl->repeat_count = params.ramp.repeat_count;
+        impl->ramp_force.lStart = round( params.ramp.gain * params.ramp.start_vector.X * 10000 );
+        impl->ramp_force.lEnd = round( params.ramp.gain * params.ramp.end_vector.X * 10000 );
+        impl->params.dwDuration = params.ramp.duration.Duration / 10;
+        impl->params.dwStartDelay = params.ramp.start_delay.Duration / 10;
+        impl->directions[0] = round( -params.ramp.start_vector.X * 10000 );
+        impl->directions[1] = round( -params.ramp.start_vector.Y * 10000 );
+        impl->directions[2] = round( -params.ramp.start_vector.Z * 10000 );
+        break;
+
+    case WineForceFeedbackEffectType_Periodic_SineWave:
+    case WineForceFeedbackEffectType_Periodic_TriangleWave:
+    case WineForceFeedbackEffectType_Periodic_SquareWave:
+    case WineForceFeedbackEffectType_Periodic_SawtoothWaveDown:
+    case WineForceFeedbackEffectType_Periodic_SawtoothWaveUp:
+        impl->repeat_count = params.periodic.repeat_count;
+        impl->periodic.dwMagnitude = round( params.periodic.gain * 10000 );
+        impl->periodic.dwPeriod = 1000000 / params.periodic.frequency;
+        impl->periodic.dwPhase = round( params.periodic.phase * 36000 );
+        impl->periodic.lOffset = round( params.periodic.bias * 10000 );
+        impl->params.dwDuration = params.periodic.duration.Duration / 10;
+        impl->params.dwStartDelay = params.periodic.start_delay.Duration / 10;
+        impl->directions[0] = round( -params.periodic.direction.X * 10000 );
+        impl->directions[1] = round( -params.periodic.direction.Y * 10000 );
+        impl->directions[2] = round( -params.periodic.direction.Z * 10000 );
+        break;
+
+    case WineForceFeedbackEffectType_Condition_Spring:
+    case WineForceFeedbackEffectType_Condition_Damper:
+    case WineForceFeedbackEffectType_Condition_Inertia:
+    case WineForceFeedbackEffectType_Condition_Friction:
+        impl->repeat_count = 1;
+        impl->condition.lPositiveCoefficient = round( atan( params.condition.positive_coeff ) / M_PI_2 * 10000 );
+        impl->condition.lNegativeCoefficient = round( atan( params.condition.negative_coeff ) / M_PI_2 * 10000 );
+        impl->condition.dwPositiveSaturation = round( params.condition.max_positive_magnitude * 10000 );
+        impl->condition.dwNegativeSaturation = round( params.condition.max_negative_magnitude * 10000 );
+        impl->condition.lDeadBand = round( params.condition.deadzone * 10000 );
+        impl->condition.lOffset = round( params.condition.bias * 10000 );
+        impl->params.dwDuration = -1;
+        impl->params.dwStartDelay = 0;
+        impl->directions[0] = round( params.condition.direction.X * 10000 );
+        impl->directions[1] = round( params.condition.direction.Y * 10000 );
+        impl->directions[2] = round( params.condition.direction.Z * 10000 );
+        break;
+    }
+
+    if (!envelope) impl->params.lpEnvelope = NULL;
+    else
+    {
+        impl->envelope.dwAttackTime = envelope->attack_duration.Duration / 10;
+        impl->envelope.dwAttackLevel = round( envelope->attack_gain * 10000 );
+        impl->envelope.dwFadeTime = impl->params.dwDuration - envelope->release_duration.Duration / 10;
+        impl->envelope.dwFadeLevel = round( envelope->release_gain * 10000 );
+        impl->params.lpEnvelope = &impl->envelope;
+    }
+
+    if (!impl->effect) hr = S_OK;
+    else hr = IDirectInputEffect_SetParameters( impl->effect, &impl->params, DIEP_ALLPARAMS & ~DIEP_AXES );
+    LeaveCriticalSection( &impl->cs );
+
+    return hr;
+}
+
+static const struct IWineForceFeedbackEffectImplVtbl effect_impl_vtbl =
+{
+    effect_impl_QueryInterface,
+    effect_impl_AddRef,
+    effect_impl_Release,
+    /* IWineForceFeedbackEffectImpl methods */
+    effect_impl_put_Parameters,
+};
+
+DEFINE_IINSPECTABLE_OUTER( effect, IForceFeedbackEffect, struct effect, IInspectable_outer )
+
+static HRESULT WINAPI effect_get_Gain( IForceFeedbackEffect *iface, DOUBLE *value )
+{
+    struct effect *impl = impl_from_IForceFeedbackEffect( iface );
+
+    TRACE( "iface %p, value %p.\n", iface, value );
+
+    EnterCriticalSection( &impl->cs );
+    *value = impl->params.dwGain / 10000.;
+    LeaveCriticalSection( &impl->cs );
+
+    return S_OK;
+}
+
+static HRESULT WINAPI effect_put_Gain( IForceFeedbackEffect *iface, DOUBLE value )
+{
+    struct effect *impl = impl_from_IForceFeedbackEffect( iface );
+    HRESULT hr;
+
+    TRACE( "iface %p, value %f.\n", iface, value );
+
+    EnterCriticalSection( &impl->cs );
+    impl->params.dwGain = round( value * 10000 );
+    if (!impl->effect) hr = S_FALSE;
+    else hr = IDirectInputEffect_SetParameters( impl->effect, &impl->params, DIEP_GAIN );
+    LeaveCriticalSection( &impl->cs );
+
+    return hr;
+}
+
+static HRESULT WINAPI effect_get_State( IForceFeedbackEffect *iface, ForceFeedbackEffectState *value )
+{
+    struct effect *impl = impl_from_IForceFeedbackEffect( iface );
+    DWORD status;
+    HRESULT hr;
+
+    TRACE( "iface %p, value %p.\n", iface, value );
+
+    EnterCriticalSection( &impl->cs );
+    if (!impl->effect)
+        *value = ForceFeedbackEffectState_Stopped;
+    else if (FAILED(hr = IDirectInputEffect_GetEffectStatus( impl->effect, &status )))
+        *value = ForceFeedbackEffectState_Faulted;
+    else
+    {
+        if (status == DIEGES_PLAYING) *value = ForceFeedbackEffectState_Running;
+        else *value = ForceFeedbackEffectState_Stopped;
+    }
+    LeaveCriticalSection( &impl->cs );
+
+    return S_OK;
+}
+
+static HRESULT WINAPI effect_Start( IForceFeedbackEffect *iface )
+{
+    struct effect *impl = impl_from_IForceFeedbackEffect( iface );
+    HRESULT hr = E_UNEXPECTED;
+    DWORD flags = 0;
+
+    TRACE( "iface %p.\n", iface );
+
+    EnterCriticalSection( &impl->cs );
+    if (impl->effect) hr = IDirectInputEffect_Start( impl->effect, impl->repeat_count, flags );
+    LeaveCriticalSection( &impl->cs );
+
+    return hr;
+}
+
+static HRESULT WINAPI effect_Stop( IForceFeedbackEffect *iface )
+{
+    struct effect *impl = impl_from_IForceFeedbackEffect( iface );
+    HRESULT hr = E_UNEXPECTED;
+
+    TRACE( "iface %p.\n", iface );
+
+    EnterCriticalSection( &impl->cs );
+    if (impl->effect) hr = IDirectInputEffect_Stop( impl->effect );
+    LeaveCriticalSection( &impl->cs );
+
+    return hr;
+}
+
+static const struct IForceFeedbackEffectVtbl effect_vtbl =
+{
+    effect_QueryInterface,
+    effect_AddRef,
+    effect_Release,
+    /* IInspectable methods */
+    effect_GetIids,
+    effect_GetRuntimeClassName,
+    effect_GetTrustLevel,
+    /* IForceFeedbackEffect methods */
+    effect_get_Gain,
+    effect_put_Gain,
+    effect_get_State,
+    effect_Start,
+    effect_Stop,
+};
+
+HRESULT force_feedback_effect_create( enum WineForceFeedbackEffectType type, IInspectable *outer, IWineForceFeedbackEffectImpl **out )
+{
+    struct effect *impl;
+
+    TRACE( "outer %p, out %p\n", outer, out );
+
+    if (!(impl = calloc( 1, sizeof(*impl) ))) return E_OUTOFMEMORY;
+    impl->IWineForceFeedbackEffectImpl_iface.lpVtbl = &effect_impl_vtbl;
+    impl->IForceFeedbackEffect_iface.lpVtbl = &effect_vtbl;
+    impl->IInspectable_outer = outer;
+    impl->ref = 1;
+
+    switch (type)
+    {
+    case WineForceFeedbackEffectType_Constant:
+        impl->type = GUID_ConstantForce;
+        impl->params.lpvTypeSpecificParams = &impl->constant_force;
+        impl->params.cbTypeSpecificParams = sizeof(impl->constant_force);
+        break;
+
+    case WineForceFeedbackEffectType_Ramp:
+        impl->type = GUID_RampForce;
+        impl->params.lpvTypeSpecificParams = &impl->ramp_force;
+        impl->params.cbTypeSpecificParams = sizeof(impl->ramp_force);
+        break;
+
+    case WineForceFeedbackEffectType_Periodic_SineWave:
+        impl->type = GUID_Sine;
+        goto WineForceFeedbackEffectType_Periodic;
+    case WineForceFeedbackEffectType_Periodic_TriangleWave:
+        impl->type = GUID_Triangle;
+        goto WineForceFeedbackEffectType_Periodic;
+    case WineForceFeedbackEffectType_Periodic_SquareWave:
+        impl->type = GUID_Square;
+        goto WineForceFeedbackEffectType_Periodic;
+    case WineForceFeedbackEffectType_Periodic_SawtoothWaveDown:
+        impl->type = GUID_SawtoothDown;
+        goto WineForceFeedbackEffectType_Periodic;
+    case WineForceFeedbackEffectType_Periodic_SawtoothWaveUp:
+        impl->type = GUID_SawtoothUp;
+        goto WineForceFeedbackEffectType_Periodic;
+    WineForceFeedbackEffectType_Periodic:
+        impl->params.lpvTypeSpecificParams = &impl->periodic;
+        impl->params.cbTypeSpecificParams = sizeof(impl->periodic);
+        break;
+
+    case WineForceFeedbackEffectType_Condition_Spring:
+        impl->type = GUID_Spring;
+        goto WineForceFeedbackEffectType_Condition;
+    case WineForceFeedbackEffectType_Condition_Damper:
+        impl->type = GUID_Damper;
+        goto WineForceFeedbackEffectType_Condition;
+    case WineForceFeedbackEffectType_Condition_Inertia:
+        impl->type = GUID_Inertia;
+        goto WineForceFeedbackEffectType_Condition;
+    case WineForceFeedbackEffectType_Condition_Friction:
+        impl->type = GUID_Friction;
+        goto WineForceFeedbackEffectType_Condition;
+    WineForceFeedbackEffectType_Condition:
+        impl->params.lpvTypeSpecificParams = &impl->condition;
+        impl->params.cbTypeSpecificParams = sizeof(impl->condition);
+        break;
+    }
+
+    impl->envelope.dwSize = sizeof(DIENVELOPE);
+    impl->params.dwSize = sizeof(DIEFFECT);
+    impl->params.rgdwAxes = impl->axes;
+    impl->params.rglDirection = impl->directions;
+    impl->params.dwTriggerButton = -1;
+    impl->params.dwGain = 10000;
+    impl->params.dwFlags = DIEFF_CARTESIAN|DIEFF_OBJECTOFFSETS;
+    impl->params.cAxes = 2;
+    impl->axes[0] = DIJOFS_X;
+    impl->axes[1] = DIJOFS_Y;
+    impl->axes[2] = DIJOFS_Z;
+
+    InitializeCriticalSection( &impl->cs );
+    impl->cs.DebugInfo->Spare[0] = (DWORD_PTR)( __FILE__ ": effect.cs" );
+
+    *out = &impl->IWineForceFeedbackEffectImpl_iface;
+    TRACE( "created ForceFeedbackEffect %p\n", *out );
+    return S_OK;
+}
 
 struct motor
 {
@@ -178,11 +538,38 @@ static HRESULT WINAPI motor_get_SupportedAxes( IForceFeedbackMotor *iface, enum 
     return E_NOTIMPL;
 }
 
+static HRESULT WINAPI motor_load_effect_async( IUnknown *invoker, IUnknown *param, PROPVARIANT *result )
+{
+    struct effect *effect = impl_from_IForceFeedbackEffect( (IForceFeedbackEffect *)param );
+    struct motor *impl = impl_from_IForceFeedbackMotor( (IForceFeedbackMotor *)invoker );
+    IDirectInputEffect *dinput_effect;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = IDirectInputDevice8_CreateEffect( impl->device, &effect->type, &effect->params, &dinput_effect, NULL )))
+    {
+        EnterCriticalSection( &effect->cs );
+        if (!effect->effect)
+        {
+            effect->effect = dinput_effect;
+            IDirectInputEffect_AddRef( effect->effect );
+        }
+        LeaveCriticalSection( &effect->cs );
+        IDirectInputEffect_Release( dinput_effect );
+    }
+
+    result->vt = VT_UI4;
+    if (SUCCEEDED(hr)) result->ulVal = ForceFeedbackLoadEffectResult_Succeeded;
+    else if (hr == DIERR_DEVICEFULL) result->ulVal = ForceFeedbackLoadEffectResult_EffectStorageFull;
+    else result->ulVal = ForceFeedbackLoadEffectResult_EffectNotSupported;
+
+    return hr;
+}
+
 static HRESULT WINAPI motor_LoadEffectAsync( IForceFeedbackMotor *iface, IForceFeedbackEffect *effect,
                                              IAsyncOperation_ForceFeedbackLoadEffectResult **async_op )
 {
-    FIXME( "iface %p, effect %p, async_op %p stub!\n", iface, effect, async_op );
-    return E_NOTIMPL;
+    TRACE( "iface %p, effect %p, async_op %p.\n", iface, effect, async_op );
+    return async_operation_effect_result_create( (IUnknown *)iface, (IUnknown *)effect, motor_load_effect_async, async_op );
 }
 
 static HRESULT WINAPI motor_PauseAllEffects( IForceFeedbackMotor *iface )
@@ -266,11 +653,43 @@ static HRESULT WINAPI motor_TryResetAsync( IForceFeedbackMotor *iface, IAsyncOpe
     return async_operation_boolean_create( (IUnknown *)iface, NULL, motor_try_reset_async, async_op );
 }
 
+static HRESULT WINAPI motor_unload_effect_async( IUnknown *iface, IUnknown *param, PROPVARIANT *result )
+{
+    struct effect *effect = impl_from_IForceFeedbackEffect( (IForceFeedbackEffect *)param );
+    IDirectInputEffect *dinput_effect;
+    HRESULT hr;
+
+    EnterCriticalSection( &effect->cs );
+    dinput_effect = effect->effect;
+    effect->effect = NULL;
+    LeaveCriticalSection( &effect->cs );
+
+    if (!dinput_effect) hr = S_OK;
+    else
+    {
+        hr = IDirectInputEffect_Unload( dinput_effect );
+        IDirectInputEffect_Release( dinput_effect );
+    }
+
+    result->vt = VT_BOOL;
+    result->boolVal = SUCCEEDED(hr);
+    return hr;
+}
+
 static HRESULT WINAPI motor_TryUnloadEffectAsync( IForceFeedbackMotor *iface, IForceFeedbackEffect *effect,
                                                   IAsyncOperation_boolean **async_op )
 {
-    FIXME( "iface %p, effect %p, async_op %p stub!\n", iface, effect, async_op );
-    return E_NOTIMPL;
+    struct effect *impl = impl_from_IForceFeedbackEffect( (IForceFeedbackEffect *)effect );
+    HRESULT hr = S_OK;
+
+    TRACE( "iface %p, effect %p, async_op %p.\n", iface, effect, async_op );
+
+    EnterCriticalSection( &impl->cs );
+    if (!impl->effect) hr = E_FAIL;
+    LeaveCriticalSection( &impl->cs );
+    if (FAILED(hr)) return hr;
+
+    return async_operation_boolean_create( (IUnknown *)iface, (IUnknown *)effect, motor_unload_effect_async, async_op );
 }
 
 static const struct IForceFeedbackMotorVtbl motor_vtbl =

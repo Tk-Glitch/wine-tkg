@@ -1277,12 +1277,6 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
                       (LPARAM)previous );
         if (NtUserGetAncestor( hwnd, GA_PARENT ) == get_desktop_window())
             post_message( get_desktop_window(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
-
-        if (NtUserGetProp( hwnd, L"__WINE_RESTORE_WINDOW" ))
-        {
-            NtUserSetProp( hwnd, L"__WINE_RESTORE_WINDOW", NULL );
-            send_message( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
-        }
     }
 
     /* now change focus if necessary */

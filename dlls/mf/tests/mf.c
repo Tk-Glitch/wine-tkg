@@ -29,6 +29,7 @@
 #include "d3d9types.h"
 
 #include "initguid.h"
+#include "control.h"
 #include "dmo.h"
 #include "mediaobj.h"
 #include "ole2.h"
@@ -65,6 +66,7 @@ DEFINE_GUID(DMOVideoFormat_RGB8, D3DFMT_P8, 0x524f, 0x11ce, 0x9f, 0x53, 0x00, 0x
 static HRESULT (WINAPI *pMFCreateSampleCopierMFT)(IMFTransform **copier);
 static HRESULT (WINAPI *pMFGetTopoNodeCurrentType)(IMFTopologyNode *node, DWORD stream, BOOL output, IMFMediaType **type);
 
+static BOOL has_video_processor;
 static BOOL is_vista(void)
 {
     return !pMFGetTopoNodeCurrentType;
@@ -1885,6 +1887,7 @@ enum loader_test_flags
     LOADER_EXPECTED_DECODER = 0x1,
     LOADER_EXPECTED_CONVERTER = 0x2,
     LOADER_TODO = 0x4,
+    LOADER_NEEDS_VIDEO_PROCESSOR = 0x8,
 };
 
 static void test_topology_loader(void)
@@ -1972,7 +1975,7 @@ static void test_topology_loader(void)
 
             MF_CONNECT_ALLOW_CONVERTER,
             S_OK,
-            LOADER_EXPECTED_CONVERTER | LOADER_TODO,
+            LOADER_NEEDS_VIDEO_PROCESSOR | LOADER_EXPECTED_CONVERTER | LOADER_TODO,
         },
 
         {
@@ -2021,7 +2024,7 @@ static void test_topology_loader(void)
 
             MF_CONNECT_ALLOW_CONVERTER,
             MF_E_TRANSFORM_NOT_POSSIBLE_FOR_CURRENT_MEDIATYPE_COMBINATION,
-            LOADER_TODO,
+            LOADER_NEEDS_VIDEO_PROCESSOR | LOADER_TODO,
         },
 
         {
@@ -2185,9 +2188,14 @@ static void test_topology_loader(void)
         ok(!count, "Unexpected count %u.\n", count);
 
         hr = IMFTopoLoader_Load(loader, topology, &full_topology, NULL);
-        todo_wine_if(test->flags & LOADER_TODO)
-        ok(hr == test->expected_result, "Unexpected hr %#lx on test %u.\n", hr, i);
-        ok(full_topology != topology, "Unexpected instance.\n");
+        if (test->flags & LOADER_NEEDS_VIDEO_PROCESSOR && !has_video_processor)
+            ok(hr == MF_E_INVALIDMEDIATYPE, "Unexpected hr %#lx on test %u.\n", hr, i);
+        else
+        {
+            todo_wine_if(test->flags & LOADER_TODO)
+            ok(hr == test->expected_result, "Unexpected hr %#lx on test %u.\n", hr, i);
+            ok(full_topology != topology, "Unexpected instance.\n");
+        }
 
         if (test->expected_result == S_OK && hr == S_OK)
         {
@@ -3629,6 +3637,7 @@ static void test_video_processor(void)
             transform_inputs, ARRAY_SIZE(transform_inputs), transform_outputs, ARRAY_SIZE(transform_outputs),
             &transform, &CLSID_VideoProcessorMFT, &class_id))
         goto failed;
+    has_video_processor = TRUE;
 
     todo_wine
     check_interface(transform, &IID_IMFVideoProcessorControl, TRUE);
@@ -4813,7 +4822,7 @@ todo_wine {
 
     /* Same test for a substream. */
     hr = IMFMediaSink_AddStreamSink(sink, 1, NULL, &stream_sink2);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(hr == S_OK || broken(hr == E_INVALIDARG), "Unexpected hr %#lx.\n", hr);
 
     if (SUCCEEDED(hr))
     {
@@ -6212,6 +6221,7 @@ static void test_wma_decoder(void)
 
     MFT_REGISTER_TYPE_INFO input_type = {MFMediaType_Audio, MFAudioFormat_WMAudioV8};
     MFT_REGISTER_TYPE_INFO output_type = {MFMediaType_Audio, MFAudioFormat_Float};
+    IUnknown *unknown, *tmp_unknown, outer = {&test_unk_vtbl};
     ULONG wmadec_data_len, wmaenc_data_len;
     const BYTE *wmadec_data, *wmaenc_data;
     MFT_OUTPUT_STREAM_INFO output_info;
@@ -6220,15 +6230,17 @@ static void test_wma_decoder(void)
     MFT_OUTPUT_DATA_BUFFER output;
     DWORD status, flags, length;
     WCHAR output_path[MAX_PATH];
+    IMediaObject *media_object;
+    IPropertyBag *property_bag;
     IMFMediaType *media_type;
     IMFTransform *transform;
     LONGLONG time, duration;
     HANDLE output_file;
     IMFSample *sample;
+    ULONG i, ret, ref;
     HRSRC resource;
     GUID class_id;
     UINT32 value;
-    ULONG i, ret;
     HRESULT hr;
 
     hr = CoInitialize(NULL);
@@ -6574,6 +6586,42 @@ static void test_wma_decoder(void)
     ok(ret == 0, "Release returned %lu\n", ret);
     ret = IMFSample_Release(sample);
     ok(ret == 0, "Release returned %lu\n", ret);
+
+    hr = CoCreateInstance( &CLSID_CWMADecMediaObject, &outer, CLSCTX_INPROC_SERVER, &IID_IUnknown,
+                           (void **)&unknown );
+    ok( hr == S_OK, "CoCreateInstance returned %#lx\n", hr );
+    hr = IUnknown_QueryInterface( unknown, &IID_IMFTransform, (void **)&transform );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IUnknown_QueryInterface( unknown, &IID_IMediaObject, (void **)&media_object );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IUnknown_QueryInterface( unknown, &IID_IPropertyBag, (void **)&property_bag );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IUnknown_QueryInterface( media_object, &IID_IUnknown, (void **)&tmp_unknown );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    ok( unknown != &outer, "got outer IUnknown\n" );
+    ok( transform != (void *)unknown, "got IUnknown == IMFTransform\n" );
+    ok( media_object != (void *)unknown, "got IUnknown == IMediaObject\n" );
+    ok( property_bag != (void *)unknown, "got IUnknown == IPropertyBag\n" );
+    ok( tmp_unknown != unknown, "got inner IUnknown\n" );
+
+    check_interface( unknown, &IID_IPersistPropertyBag, FALSE );
+    check_interface( unknown, &IID_IAMFilterMiscFlags, FALSE );
+    check_interface( unknown, &IID_IMediaSeeking, FALSE );
+    check_interface( unknown, &IID_IMediaPosition, FALSE );
+    check_interface( unknown, &IID_IReferenceClock, FALSE );
+    check_interface( unknown, &IID_IBasicAudio, FALSE );
+
+    ref = IUnknown_Release( tmp_unknown );
+    ok( ref == 1, "Release returned %lu\n", ref );
+    ref = IPropertyBag_Release( property_bag );
+    ok( ref == 1, "Release returned %lu\n", ref );
+    ref = IMediaObject_Release( media_object );
+    ok( ref == 1, "Release returned %lu\n", ref );
+    ref = IMFTransform_Release( transform );
+    ok( ref == 1, "Release returned %lu\n", ref );
+    ref = IUnknown_Release( unknown );
+    ok( ref == 0, "Release returned %lu\n", ref );
 
 failed:
     CoUninitialize();
@@ -8183,6 +8231,7 @@ START_TEST(mf)
         return;
     }
 
+    test_video_processor();
     test_topology();
     test_topology_tee_node();
     test_topology_loader();
@@ -8195,7 +8244,6 @@ START_TEST(mf)
     test_presentation_clock();
     test_sample_grabber();
     test_sample_grabber_is_mediatype_supported();
-    test_video_processor();
     test_quality_manager();
     test_sar();
     test_evr();

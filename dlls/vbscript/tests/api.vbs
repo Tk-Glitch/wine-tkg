@@ -1183,6 +1183,39 @@ MyObject.myval = 0
 Call ok(CCur(MyObject) = 0, "CCur(MyObject) = " & CCur(MyObject))
 Call ok(getVT(CCur(MyObject)) = "VT_CY", "getVT(CCur(MyObject)) = " & getVT(CCur(MyObject)))
 
+Sub testCDateError(strings, error_num1, error_num2)
+    on error resume next
+    Dim x
+
+    Call Err.clear()
+    x = CDate(strings)
+    Call ok(Err.number = error_num1, "Err.number = " & Err.number)
+
+    Call Err.clear()
+    Call CDate(strings)
+    Call ok(Err.number = error_num2, "Err.number = " & Err.number)
+End Sub
+
+Call ok(CDate(Empty) = 0, "CDate(Empty) = " & CDate(Empty))
+Call ok(getVT(CDate(Empty)) = "VT_DATE", "getVT(CDate(Empty)) = " & getVT(CDate(Empty)))
+Call ok(CDate(0) = 0, "CDate(0) = " & CDate(0))
+Call ok(getVT(CDate(0)) = "VT_DATE", "getVT(CDate(0)) = " & getVT(CDate(0)))
+Call ok(CDate(1) = #1899-12-31#, "CDate(1) = " & CDate(1))
+Call ok(getVT(CDate(1)) = "VT_DATE", "getVT(CDate(1)) = " & getVT(CDate(1)))
+Call ok(CDate("1") = #1899-12-31#, "CDate(""1"") = " & CDate("1"))
+Call ok(getVT(CDate("1")) = "VT_DATE", "getVT(CDate(""1"")) = " & getVT(CDate("1")))
+If isEnglishLang Then
+    Call ok(CDate("1/1/2000") = #2000-1-1#, "CDate(""1/1/2000"") = " & CDate("1/1/2000"))
+    Call ok(getVT(CDate("1/1/2000")) = "VT_DATE", "getVT(CDate(""1/1/2000"")) = " & getVT(CDate("1/1/2000")))
+End If
+Call ok(CDate(-1) = #1899-12-29#, "CDate(-1) = " & CDate(-1))
+Call ok(getVT(CDate(-1)) = "VT_DATE", "getVT(CDate(-1)) = " & getVT(CDate(-1)))
+Call ok(CDate(100000) = #2173-10-14#, "CDate(100000) = " & CDate(100000))
+Call ok(getVT(CDate(100000)) = "VT_DATE", "getVT(CDate(100000)) = " & getVT(CDate(100000)))
+Call testCDateError("", 13, 13)
+Call testCDateError(null, 94, 94)
+Call testCDateError(1, 0, 458)
+
 Sub testCDblError(strings, error_num1, error_num2)
     on error resume next
     Dim x
@@ -1957,5 +1990,147 @@ sub testErrRaise()
     call ok(e = 0, "e = " & e)
 end sub
 call testErrRaise()
+
+sub testDateSerial(yy, mm, dd, yyexp, mmexp, ddexp)
+    dim x
+    x = DateSerial(yy, mm, dd)
+    call ok(Year(x) = yyexp, "year = " & Year(x) & " expected " & yyexp)
+    call ok(Month(x) = mmexp, "month = " & Month(x) & " expected " & mmexp)
+    call ok(Day(x) = ddexp, "day = " & Day(x) & " expected " & ddexp)
+    call ok(Hour(x) = 0, "hour = " & Hour(x))
+    call ok(Minute(x) = 0, "minute = " & Minute(x))
+    call ok(Second(x) = 0, "second = " & Second(x))
+    call ok(getVT(x) = "VT_DATE*", "getVT = " & getVT(x))
+end sub
+
+sub testDateSerialError()
+    on error resume next
+    dim x
+    call Err.clear()
+    call DateSerial(10000, 1, 1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call DateSerial(-10000, 1, 1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    x = DateSerial(null, 1, 1)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    call DateSerial(2000, null, 1)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call DateSerial(2000, 1, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+end sub
+
+call testDateSerial(100, 2, 1, 100, 2, 1)
+call testDateSerial(0, 2, 1, 2000, 2, 1)
+call testDateSerial(50, 2, 1, 1950, 2, 1)
+call testDateSerial(99, 2, 1, 1999, 2, 1)
+call testDateSerial(2000, 14, 2, 2001, 2, 2)
+call testDateSerial(9999, 12, 1, 9999, 12, 1)
+call testDateSerialError()
+
+sub testDateAdd(d, interval, number, expected_date)
+    dim x
+    x = DateAdd(interval, number, d)
+    call ok(Year(x) = Year(expected_date), "year = " & Year(x) & " expected " & Year(expected_date))
+    call ok(Month(x) = Month(expected_date), "month = " & Month(x) & " expected " & Month(expected_date))
+    call ok(Day(x) = Day(expected_date), "day = " & Day(x) & " expected " & Day(expected_date))
+    call ok(getVT(x) = "VT_DATE*", "getVT = " & getVT(x))
+end sub
+
+sub testDateAddError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = DateAdd("k", 1, DateSerial(2000, 2, 1))
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    call DateAdd(null, 1, DateSerial(2000, 2, 1))
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call DateAdd("q", null, DateSerial(2000, 2, 1))
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    x = DateAdd("q", 1, null)
+    call ok(getVT(x) = "VT_NULL*", "getVT = " & getVT(x))
+    call ok(Err.number = 0, "Err.number = " & Err.number)
+end sub
+
+call testDateAdd(DateSerial(2000, 1, 1), "yyyy", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 1, 1), "yYyy", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 1, 1), "q", 1, DateSerial(2000, 4, 1))
+call testDateAdd(DateSerial(2000, 1, 1), "Q", 1, DateSerial(2000, 4, 1))
+call testDateAdd(DateSerial(2000, 1, 1), "m", -1, DateSerial(1999, 12, 1))
+call testDateAdd(DateSerial(2000, 1, 1), "M", -1, DateSerial(1999, 12, 1))
+call testDateAdd(DateSerial(2000, 12, 31), "y", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 12, 31), "Y", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 12, 31), "d", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 12, 31), "D", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 12, 31), "w", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 12, 31), "W", 1, DateSerial(2001, 1, 1))
+call testDateAdd(DateSerial(2000, 1, 1), "y", -1, DateSerial(1999, 12, 31))
+call testDateAdd(DateSerial(2000, 1, 1), "d", -1, DateSerial(1999, 12, 31))
+call testDateAdd(DateSerial(2000, 1, 1), "w", -1, DateSerial(1999, 12, 31))
+call testDateAdd(DateSerial(2000, 1, 1), "ww", 1, DateSerial(2000, 1, 8))
+call testDateAdd(DateSerial(2000, 1, 1), "ww", -1, DateSerial(1999, 12, 25))
+call testDateAdd(DateSerial(2000, 1, 1), "Ww", -1, DateSerial(1999, 12, 25))
+call testDateAddError()
+
+sub testWeekday(d, firstday, wd)
+    dim x, x2
+    x = Weekday(d, firstday)
+    call ok(x = wd, "weekday = " & x & " expected " & wd)
+    call ok(getVT(x) = "VT_I2*", "getVT = " & getVT(x))
+    if firstday = vbSunday then
+        x = Weekday(d)
+        call ok(x = wd, "weekday = " & x & " expected " & wd)
+    end if
+    x = Weekday(d, vbUseSystemDayOfWeek)
+    x2 = Weekday(d, firstDayOfWeek)
+    call ok(x = x2, "weekday = " & x & " expected " & x2)
+end sub
+
+sub testWeekdayError()
+    on error resume next
+    dim x
+    call Err.clear()
+    call Weekday(DateSerial(1000, 1, 1), 10)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Weekday(DateSerial(1000, 1, 1), -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Weekday(null, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Weekday(DateSerial(1000, 1, 1), null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    x = Weekday(null, vbSunday)
+    call ok(Err.number = 0, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_NULL*", "getVT = " & getVT(x))
+    call Err.clear()
+    call Weekday(null, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Weekday(null, "a")
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
+    call Weekday(DateSerial(1000, 1, 1), "a")
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+end sub
+
+call testWeekday(DateSerial(2000, 1, 1), vbSunday, 7)
+call testWeekday(DateSerial(2000, 1, 1), vbMonday, 6)
+call testWeekday(DateSerial(2000, 1, 1), vbTuesday, 5)
+call testWeekday(DateSerial(2000, 1, 1), vbWednesday, 4)
+call testWeekday(DateSerial(2000, 1, 1), vbThursday, 3)
+call testWeekday(DateSerial(2000, 1, 1), vbFriday, 2)
+call testWeekday(DateSerial(2000, 1, 1), vbSaturday, 1)
+call testWeekdayError()
 
 Call reportSuccess()

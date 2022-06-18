@@ -46,169 +46,171 @@ struct display_mode_descriptor
 
 BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, LPDEVMODEW devmode, DWORD flags);
 
-static const char initial_mode_key[] = "Initial Display Mode";
+static const WCHAR initial_mode_keyW[] = {'I','n','i','t','i','a','l',' ','D','i','s','p','l','a','y',
+    ' ','M','o','d','e'};
 static const WCHAR pixelencodingW[] = {'P','i','x','e','l','E','n','c','o','d','i','n','g',0};
-static const WCHAR adapter_prefixW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-static const WCHAR video_keyW[] = {
-    'H','A','R','D','W','A','R','E','\\',
-    'D','E','V','I','C','E','M','A','P','\\',
-    'V','I','D','E','O',0};
-static const WCHAR device_video_fmtW[] = {
-    '\\','D','e','v','i','c','e','\\',
-    'V','i','d','e','o','%','d',0};
-
 
 static CFArrayRef modes;
 static BOOL modes_has_8bpp, modes_has_16bpp;
 static int default_mode_bpp;
-static CRITICAL_SECTION modes_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &modes_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": modes_section") }
-};
-static CRITICAL_SECTION modes_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+static pthread_mutex_t modes_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static BOOL inited_original_display_mode;
 
 static HANDLE get_display_device_init_mutex(void)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
-    HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
+    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
+    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
+    OBJECT_ATTRIBUTES attr;
+    HANDLE mutex = 0;
 
-    WaitForSingleObject(mutex, INFINITE);
+    InitializeObjectAttributes(&attr, &name, OBJ_OPENIF, NULL, NULL);
+    NtCreateMutant(&mutex, MUTEX_ALL_ACCESS, &attr, FALSE);
+    if (mutex) NtWaitForSingleObject(mutex, FALSE, NULL);
     return mutex;
 }
 
 static void release_display_device_init_mutex(HANDLE mutex)
 {
-    ReleaseMutex(mutex);
-    CloseHandle(mutex);
+    NtReleaseMutant(mutex, NULL);
+    NtClose(mutex);
 }
 
-static BOOL get_display_device_reg_key(const WCHAR *device_name, WCHAR *key, unsigned len)
+static HKEY get_display_device_reg_key(const WCHAR *device_name)
 {
-    WCHAR value_name[MAX_PATH], buffer[MAX_PATH], *end_ptr;
+    static const WCHAR display[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
+    static const WCHAR video_key[] = {
+        '\\','R','e','g','i','s','t','r','y',
+        '\\','M','a','c','h','i','n','e',
+        '\\','H','A','R','D','W','A','R','E',
+        '\\','D','E','V','I','C','E','M','A','P',
+        '\\','V','I','D','E','O'};
+    static const WCHAR current_config_key[] = {
+        '\\','R','e','g','i','s','t','r','y',
+        '\\','M','a','c','h','i','n','e',
+        '\\','S','y','s','t','e','m',
+        '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
+        '\\','H','a','r','d','w','a','r','e',' ','P','r','o','f','i','l','e','s',
+        '\\','C','u','r','r','e','n','t'};
+    WCHAR value_name[MAX_PATH], buffer[4096], *end_ptr;
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
     DWORD adapter_index, size;
+    char adapter_name[100];
+    HKEY hkey;
 
     /* Device name has to be \\.\DISPLAY%d */
-    if (strncmpiW(device_name, adapter_prefixW, ARRAY_SIZE(adapter_prefixW)))
+    if (wcsnicmp(device_name, display, ARRAY_SIZE(display)))
         return FALSE;
 
     /* Parse \\.\DISPLAY* */
-    adapter_index = strtolW(device_name + ARRAY_SIZE(adapter_prefixW), &end_ptr, 10) - 1;
+    adapter_index = wcstol(device_name + ARRAY_SIZE(display), &end_ptr, 10) - 1;
     if (*end_ptr)
         return FALSE;
 
     /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
-    sprintfW(value_name, device_video_fmtW, adapter_index);
-    size = sizeof(buffer);
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, video_keyW, value_name, RRF_RT_REG_SZ, NULL, buffer, &size))
+    if (!(hkey = reg_open_key(NULL, video_key, sizeof(video_key)))) return FALSE;
+    sprintf(adapter_name, "\\Device\\Video%d", adapter_index);
+    asciiz_to_unicode(value_name, adapter_name);
+    size = query_reg_value(hkey, value_name, value, sizeof(buffer));
+    NtClose(hkey);
+    if (!size || value->Type != REG_SZ) return FALSE;
+
+    /* Replace \Registry\Machine\ prefix with HKEY_CURRENT_CONFIG */
+    memmove(buffer + ARRAYSIZE(current_config_key), (const WCHAR *)value->Data + 17,
+             size - 17 * sizeof(WCHAR));
+    memcpy(buffer, current_config_key, sizeof(current_config_key));
+    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name),
+           wine_dbgstr_w(buffer));
+    return reg_open_key(NULL, buffer, lstrlenW(buffer) * sizeof(WCHAR));
+}
+
+
+static BOOL query_display_setting(HKEY hkey, const char *name, DWORD *ret)
+{
+    char buffer[1024];
+    WCHAR nameW[128];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
+
+    asciiz_to_unicode(nameW, name);
+    if (query_reg_value(hkey, nameW, value, sizeof(buffer)) != sizeof(DWORD) ||
+        value->Type != REG_DWORD)
         return FALSE;
 
-    if (len < lstrlenW(buffer + 18) + 1)
-        return FALSE;
-
-    /* Skip \Registry\Machine\ prefix */
-    lstrcpyW(key, buffer + 18);
-    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name), wine_dbgstr_w(key));
+    *ret = *(DWORD *)value->Data;
     return TRUE;
 }
 
 
 static BOOL read_registry_settings(const WCHAR *device_name, DEVMODEW *dm)
 {
-    WCHAR wine_mac_reg_key[MAX_PATH];
     HANDLE mutex;
     HKEY hkey;
-    DWORD type, size;
     BOOL ret = TRUE;
 
     dm->dmFields = 0;
 
     mutex = get_display_device_init_mutex();
-    if (!get_display_device_reg_key(device_name, wine_mac_reg_key, ARRAY_SIZE(wine_mac_reg_key)))
+    if (!(hkey = get_display_device_reg_key(device_name)))
     {
         release_display_device_init_mutex(mutex);
         return FALSE;
     }
 
-    if (RegOpenKeyExW(HKEY_CURRENT_CONFIG, wine_mac_reg_key, 0, KEY_READ, &hkey))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
-
-#define query_value(name, data) \
-    size = sizeof(DWORD); \
-    if (RegQueryValueExA(hkey, name, 0, &type, (LPBYTE)(data), &size) || \
-        type != REG_DWORD || size != sizeof(DWORD)) \
-        ret = FALSE
-
-    query_value("DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
+    ret &= query_display_setting(hkey, "DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
     dm->dmFields |= DM_BITSPERPEL;
-    query_value("DefaultSettings.XResolution", &dm->dmPelsWidth);
+    ret &= query_display_setting(hkey, "DefaultSettings.XResolution", &dm->dmPelsWidth);
     dm->dmFields |= DM_PELSWIDTH;
-    query_value("DefaultSettings.YResolution", &dm->dmPelsHeight);
+    ret &= query_display_setting(hkey, "DefaultSettings.YResolution", &dm->dmPelsHeight);
     dm->dmFields |= DM_PELSHEIGHT;
-    query_value("DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
+    ret &= query_display_setting(hkey, "DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
     dm->dmFields |= DM_DISPLAYFREQUENCY;
-    query_value("DefaultSettings.Flags", &dm->dmDisplayFlags);
+    ret &= query_display_setting(hkey, "DefaultSettings.Flags", &dm->dmDisplayFlags);
     dm->dmFields |= DM_DISPLAYFLAGS;
-    query_value("DefaultSettings.XPanning", &dm->dmPosition.x);
-    query_value("DefaultSettings.YPanning", &dm->dmPosition.y);
+    ret &= query_display_setting(hkey, "DefaultSettings.XPanning", (DWORD *)&dm->dmPosition.x);
+    ret &= query_display_setting(hkey, "DefaultSettings.YPanning", (DWORD *)&dm->dmPosition.y);
     dm->dmFields |= DM_POSITION;
-    query_value("DefaultSettings.Orientation", &dm->dmDisplayOrientation);
+    ret &= query_display_setting(hkey, "DefaultSettings.Orientation", &dm->dmDisplayOrientation);
     dm->dmFields |= DM_DISPLAYORIENTATION;
-    query_value("DefaultSettings.FixedOutput", &dm->dmDisplayFixedOutput);
+    ret &= query_display_setting(hkey, "DefaultSettings.FixedOutput", &dm->dmDisplayFixedOutput);
 
-#undef query_value
-
-    RegCloseKey(hkey);
+    NtClose(hkey);
     release_display_device_init_mutex(mutex);
     return ret;
 }
 
 
+static BOOL set_setting_value(HKEY hkey, const char *name, DWORD val)
+{
+    WCHAR nameW[128];
+    UNICODE_STRING str = { asciiz_to_unicode(nameW, name) - sizeof(WCHAR), sizeof(nameW), nameW };
+    return !NtSetValueKey(hkey, &str, 0, REG_DWORD, &val, sizeof(val));
+}
+
+
 static BOOL write_registry_settings(const WCHAR *device_name, const DEVMODEW *dm)
 {
-    WCHAR wine_mac_reg_key[MAX_PATH];
     HANDLE mutex;
     HKEY hkey;
     BOOL ret = TRUE;
 
     mutex = get_display_device_init_mutex();
-    if (!get_display_device_reg_key(device_name, wine_mac_reg_key, ARRAY_SIZE(wine_mac_reg_key)))
+    if (!(hkey = get_display_device_reg_key(device_name)))
     {
         release_display_device_init_mutex(mutex);
         return FALSE;
     }
 
-    if (RegCreateKeyExW(HKEY_CURRENT_CONFIG, wine_mac_reg_key, 0, NULL,
-                        REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hkey, NULL))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
+    ret &= set_setting_value(hkey, "DefaultSettings.BitsPerPel", dm->dmBitsPerPel);
+    ret &= set_setting_value(hkey, "DefaultSettings.XResolution", dm->dmPelsWidth);
+    ret &= set_setting_value(hkey, "DefaultSettings.YResolution", dm->dmPelsHeight);
+    ret &= set_setting_value(hkey, "DefaultSettings.VRefresh", dm->dmDisplayFrequency);
+    ret &= set_setting_value(hkey, "DefaultSettings.Flags", dm->dmDisplayFlags);
+    ret &= set_setting_value(hkey, "DefaultSettings.XPanning", dm->dmPosition.x);
+    ret &= set_setting_value(hkey, "DefaultSettings.YPanning", dm->dmPosition.y);
+    ret &= set_setting_value(hkey, "DefaultSettings.Orientation", dm->dmDisplayOrientation);
+    ret &= set_setting_value(hkey, "DefaultSettings.FixedOutput", dm->dmDisplayFixedOutput);
 
-#define set_value(name, data) \
-    if (RegSetValueExA(hkey, name, 0, REG_DWORD, (const BYTE*)(data), sizeof(DWORD))) \
-        ret = FALSE
-
-    set_value("DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
-    set_value("DefaultSettings.XResolution", &dm->dmPelsWidth);
-    set_value("DefaultSettings.YResolution", &dm->dmPelsHeight);
-    set_value("DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
-    set_value("DefaultSettings.Flags", &dm->dmDisplayFlags);
-    set_value("DefaultSettings.XPanning", &dm->dmPosition.x);
-    set_value("DefaultSettings.YPanning", &dm->dmPosition.y);
-    set_value("DefaultSettings.Orientation", &dm->dmDisplayOrientation);
-    set_value("DefaultSettings.FixedOutput", &dm->dmDisplayFixedOutput);
-
-#undef set_value
-
-    RegCloseKey(hkey);
+    NtClose(hkey);
     release_display_device_init_mutex(mutex);
     return ret;
 }
@@ -220,6 +222,7 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
     char display_key_name[19];
     HKEY display_hkey;
     CGDisplayModeRef display_mode;
+    UNICODE_STRING str;
     DWORD val;
     CFStringRef pixel_encoding;
     size_t len;
@@ -227,8 +230,7 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
 
     snprintf(display_key_name, sizeof(display_key_name), "Display 0x%08x", CGDisplayUnitNumber(displayID));
     /* @@ Wine registry key: HKLM\Software\Wine\Mac Driver\Initial Display Mode\Display 0xnnnnnnnn */
-    if (RegCreateKeyExA(parent_hkey, display_key_name, 0, NULL,
-                        REG_OPTION_VOLATILE, KEY_WRITE, NULL, &display_hkey, NULL))
+    if (!(display_hkey = reg_create_ascii_key(parent_hkey, display_key_name, REG_OPTION_VOLATILE, NULL)))
         return FALSE;
 
     display_mode = CGDisplayCopyDisplayMode(displayID);
@@ -236,26 +238,26 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
         goto fail;
 
     val = CGDisplayModeGetWidth(display_mode);
-    if (RegSetValueExA(display_hkey, "Width", 0, REG_DWORD, (const BYTE*)&val, sizeof(val)))
+    if (!set_setting_value(display_hkey, "Width", val))
         goto fail;
     val = CGDisplayModeGetHeight(display_mode);
-    if (RegSetValueExA(display_hkey, "Height", 0, REG_DWORD, (const BYTE*)&val, sizeof(val)))
+    if (!set_setting_value(display_hkey, "Height", val))
         goto fail;
     val = CGDisplayModeGetRefreshRate(display_mode) * 100;
-    if (RegSetValueExA(display_hkey, "RefreshRateTimes100", 0, REG_DWORD, (const BYTE*)&val, sizeof(val)))
+    if (!set_setting_value(display_hkey, "RefreshRateTimes100", val))
         goto fail;
     val = CGDisplayModeGetIOFlags(display_mode);
-    if (RegSetValueExA(display_hkey, "IOFlags", 0, REG_DWORD, (const BYTE*)&val, sizeof(val)))
+    if (!set_setting_value(display_hkey, "IOFlags", val))
         goto fail;
 
 #if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
     if (&CGDisplayModeGetPixelWidth != NULL && &CGDisplayModeGetPixelHeight != NULL)
     {
         val = CGDisplayModeGetPixelWidth(display_mode);
-        if (RegSetValueExA(display_hkey, "PixelWidth", 0, REG_DWORD, (const BYTE*)&val, sizeof(val)))
+        if (!set_setting_value(display_hkey, "PixelWidth", val))
             goto fail;
         val = CGDisplayModeGetPixelHeight(display_mode);
-        if (RegSetValueExA(display_hkey, "PixelHeight", 0, REG_DWORD, (const BYTE*)&val, sizeof(val)))
+        if (!set_setting_value(display_hkey, "PixelHeight", val))
             goto fail;
     }
 #endif
@@ -266,7 +268,8 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
     CFStringGetCharacters(pixel_encoding, CFRangeMake(0, len), (UniChar*)buf);
     buf[len] = 0;
     CFRelease(pixel_encoding);
-    if (RegSetValueExW(display_hkey, pixelencodingW, 0, REG_SZ, (const BYTE*)buf, (len + 1) * sizeof(WCHAR)))
+    RtlInitUnicodeString(&str, pixelencodingW);
+    if (NtSetValueKey(display_hkey, &str, 0, REG_SZ, (const BYTE*)buf, (len + 1) * sizeof(WCHAR)))
         goto fail;
 
     ret = TRUE;
@@ -274,9 +277,12 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
 fail:
     HeapFree(GetProcessHeap(), 0, buf);
     if (display_mode) CGDisplayModeRelease(display_mode);
-    RegCloseKey(display_hkey);
+    NtClose(display_hkey);
     if (!ret)
-        RegDeleteKeyA(parent_hkey, display_key_name);
+    {
+        WCHAR nameW[64];
+        reg_delete_tree(parent_hkey, nameW, asciiz_to_unicode(nameW, display_key_name) - sizeof(WCHAR));
+    }
     return ret;
 }
 
@@ -293,13 +299,14 @@ static void init_original_display_mode(void)
         return;
 
     /* @@ Wine registry key: HKLM\Software\Wine\Mac Driver */
-    if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\Mac Driver", 0, NULL,
-                        0, KEY_ALL_ACCESS, NULL, &mac_driver_hkey, NULL))
+    mac_driver_hkey = reg_create_ascii_key(NULL, "\\Registry\\Machine\\Software\\Wine\\Mac Driver",
+                                           0, NULL);
+    if (!mac_driver_hkey)
         return;
 
     /* @@ Wine registry key: HKLM\Software\Wine\Mac Driver\Initial Display Mode */
-    if (RegCreateKeyExA(mac_driver_hkey, initial_mode_key, 0, NULL,
-                        REG_OPTION_VOLATILE, KEY_WRITE, NULL, &parent_hkey, &disposition))
+    if (!(parent_hkey = reg_create_key(mac_driver_hkey, initial_mode_keyW, sizeof(initial_mode_keyW),
+                                       REG_OPTION_VOLATILE, &disposition)))
     {
         parent_hkey = NULL;
         goto fail;
@@ -324,10 +331,10 @@ done:
 
 fail:
     macdrv_free_displays(displays);
-    RegCloseKey(parent_hkey);
+    NtClose(parent_hkey);
     if (!success && parent_hkey)
-        RegDeleteTreeA(mac_driver_hkey, initial_mode_key);
-    RegCloseKey(mac_driver_hkey);
+        reg_delete_tree(mac_driver_hkey, initial_mode_keyW, sizeof(initial_mode_keyW));
+    NtClose(mac_driver_hkey);
     if (success)
         inited_original_display_mode = TRUE;
 }
@@ -335,9 +342,13 @@ fail:
 
 static BOOL read_dword(HKEY hkey, const char* name, DWORD* val)
 {
-    DWORD type, size = sizeof(*val);
-    if (RegQueryValueExA(hkey, name, 0, &type, (BYTE*)val, &size) || type != REG_DWORD || size != sizeof(*val))
+    char buffer[offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(*val)])];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
+    WCHAR nameW[64];
+    asciiz_to_unicode(nameW, name);
+    if (query_reg_value(hkey, nameW, value, sizeof(buffer)) != sizeof(*val) || value->Type != REG_DWORD)
         return FALSE;
+    *val = *(DWORD *)value->Data;
     return TRUE;
 }
 
@@ -355,20 +366,22 @@ static void free_display_mode_descriptor(struct display_mode_descriptor* desc)
 
 static struct display_mode_descriptor* create_original_display_mode_descriptor(CGDirectDisplayID displayID)
 {
-    static const char display_key_format[] = "Software\\Wine\\Mac Driver\\Initial Display Mode\\Display 0x%08x";
+    static const char display_key_format[] =
+        "\\Registry\\Machine\\Software\\Wine\\Mac Driver\\Initial Display Mode\\Display 0x%08x";
     struct display_mode_descriptor* ret = NULL;
     struct display_mode_descriptor* desc;
     char display_key[sizeof(display_key_format) + 10];
+    WCHAR nameW[ARRAYSIZE(display_key)];
+    char buffer[4096];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
     HKEY hkey;
-    DWORD type, size;
     DWORD refresh100;
-    WCHAR* pixel_encoding = NULL;
 
     init_original_display_mode();
 
     snprintf(display_key, sizeof(display_key), display_key_format, CGDisplayUnitNumber(displayID));
     /* @@ Wine registry key: HKLM\Software\Wine\Mac Driver\Initial Display Mode\Display 0xnnnnnnnn */
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, display_key, 0, KEY_READ, &hkey))
+    if (!(hkey = reg_open_key(NULL, nameW, asciiz_to_unicode(nameW, display_key))))
         return NULL;
 
     desc = HeapAlloc(GetProcessHeap(), 0, sizeof(*desc));
@@ -391,22 +404,17 @@ static struct display_mode_descriptor* create_original_display_mode_descriptor(C
         desc->pixel_height = desc->height;
     }
 
-    size = 0;
-    if (RegQueryValueExW(hkey, pixelencodingW, 0, &type, NULL, &size) || type != REG_SZ)
+    if (!query_reg_value(hkey, pixelencodingW, value, sizeof(buffer)) || value->Type != REG_SZ)
         goto done;
-    size += sizeof(WCHAR);
-    pixel_encoding = HeapAlloc(GetProcessHeap(), 0, size);
-    if (RegQueryValueExW(hkey, pixelencodingW, 0, &type, (BYTE*)pixel_encoding, &size) || type != REG_SZ)
-        goto done;
-    desc->pixel_encoding = CFStringCreateWithCharacters(NULL, (const UniChar*)pixel_encoding, strlenW(pixel_encoding));
+    desc->pixel_encoding = CFStringCreateWithCharacters(NULL, (const UniChar*)value->Data,
+                                                        lstrlenW((const WCHAR *)value->Data));
 
     ret = desc;
 
 done:
     if (!ret)
         free_display_mode_descriptor(desc);
-    HeapFree(GetProcessHeap(), 0, pixel_encoding);
-    RegCloseKey(hkey);
+    NtClose(hkey);
     return ret;
 }
 
@@ -500,8 +508,6 @@ static int get_default_bpp(void)
 {
     int ret;
 
-    EnterCriticalSection(&modes_section);
-
     if (!default_mode_bpp)
     {
         CGDisplayModeRef mode = CGDisplayCopyDisplayMode(kCGDirectMainDisplay);
@@ -516,8 +522,6 @@ static int get_default_bpp(void)
     }
 
     ret = default_mode_bpp;
-
-    LeaveCriticalSection(&modes_section);
 
     TRACE(" -> %d\n", ret);
     return ret;
@@ -880,7 +884,9 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
         return DISP_CHANGE_FAILED;
     }
 
+    pthread_mutex_lock(&modes_mutex);
     bpp = get_default_bpp();
+    pthread_mutex_unlock(&modes_mutex);
     if ((devmode->dmFields & DM_BITSPERPEL) && devmode->dmBitsPerPel != bpp)
         TRACE("using default %d bpp instead of caller's request %d bpp\n", bpp, devmode->dmBitsPerPel);
 
@@ -1074,7 +1080,7 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
     {
         DWORD count, i;
 
-        EnterCriticalSection(&modes_section);
+        pthread_mutex_lock(&modes_mutex);
 
         if (mode == 0 || !modes)
         {
@@ -1154,7 +1160,7 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
             }
         }
 
-        LeaveCriticalSection(&modes_section);
+        pthread_mutex_unlock(&modes_mutex);
     }
 
     if (!display_mode)

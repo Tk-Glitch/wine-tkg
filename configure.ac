@@ -543,6 +543,7 @@ AC_CHECK_HEADERS(\
 	netinet/ip_icmp.h \
 	netinet/ip_var.h \
 	netinet/udp.h \
+	netinet6/ip6_var.h \
 	netipx/ipx.h \
 	sys/un.h \
 ,,,[#include <sys/types.h>
@@ -566,7 +567,7 @@ AC_CHECK_HEADERS(\
      # include <netinet/ip.h>
      #endif])
 
-AC_CHECK_HEADERS([netinet/udp_var.h netinet/icmp_var.h netinet/tcp_var.h ],,,
+AC_CHECK_HEADERS([netinet/udp_var.h netinet/icmp_var.h netinet/icmp6.h netinet/tcp_var.h ],,,
     [#include <sys/types.h>
      #include <sys/socket.h>
      #ifdef HAVE_SYS_SOCKETVAR_H
@@ -1167,7 +1168,7 @@ WINE_EXTLIB_FLAGS(PNG, png, "png \$(ZLIB_PE_LIBS)", "-I\$(top_srcdir)/libs/png")
 WINE_EXTLIB_FLAGS(TIFF, tiff, "tiff \$(ZLIB_PE_LIBS)", "-I\$(top_srcdir)/libs/tiff/libtiff")
 WINE_EXTLIB_FLAGS(VKD3D, vkd3d, vkd3d, "-I\$(top_srcdir)/libs/vkd3d/include")
 WINE_EXTLIB_FLAGS(XML2, xml2, xml2, "-I\$(top_srcdir)/libs/xml2/include -DLIBXML_STATIC")
-WINE_EXTLIB_FLAGS(XSLT, xslt, xslt, "-I\$(top_srcdir)/libs/xslt -DLIBXSLT_STATIC")
+WINE_EXTLIB_FLAGS(XSLT, xslt, xslt, "-I\$(top_srcdir)/libs/xslt/libxslt -I\$(top_srcdir)/libs/xslt -DLIBXSLT_STATIC")
 WINE_EXTLIB_FLAGS(ZLIB, zlib, z, "-I\$(top_srcdir)/libs/zlib -DFAR= -DZ_SOLO")
 
 dnl **** Check for pthread ****
@@ -2274,6 +2275,51 @@ AC_CHECK_MEMBERS([struct ip_stats.ips_total],,,
 #include <netinet/ip_var.h>
 #endif])
 
+dnl Check for struct ip6stat
+AC_CHECK_MEMBERS([struct ip6stat.ip6s_total],,,
+[#include <sys/types.h>
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET6_IP6_VAR_H
+#include <netinet6/ip6_var.h>
+#endif])
+
+dnl Check for struct icmpstat
+AC_CHECK_MEMBERS([struct icmpstat.icps_error],,,
+[#include <sys/types.h>
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+#ifdef HAVE_NETINET_IP_ICMP_H
+#include <netinet/ip_icmp.h>
+#endif
+#ifdef HAVE_NETINET_ICMP_VAR_H
+#include <netinet/icmp_var.h>
+#endif])
+
+dnl Check for struct icmp6stat
+AC_CHECK_MEMBERS([struct icmp6stat.icp6s_error],,,
+[#include <sys/types.h>
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_ICMP6_H
+#include <netinet/icmp6.h>
+#endif])
+
 dnl Check for struct tcpstat
 AC_CHECK_MEMBERS([struct tcpstat.tcps_connattempt],,,
 [#include <sys/types.h>
@@ -3219,8 +3265,6 @@ WINE_CONFIG_MAKEFILE(dlls/wlanapi/tests)
 WINE_CONFIG_MAKEFILE(dlls/wlanui)
 WINE_CONFIG_MAKEFILE(dlls/wldap32)
 WINE_CONFIG_MAKEFILE(dlls/wldap32/tests)
-WINE_CONFIG_MAKEFILE(dlls/wmadmod)
-WINE_CONFIG_MAKEFILE(dlls/wmadmod/tests)
 WINE_CONFIG_MAKEFILE(dlls/wmasf)
 WINE_CONFIG_MAKEFILE(dlls/wmi)
 WINE_CONFIG_MAKEFILE(dlls/wmiutils)
@@ -3610,7 +3654,7 @@ dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.8.r0.g83824733\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.9.r0.g2a411514\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:

@@ -742,8 +742,31 @@ static HRESULT Global_CByte(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, 
 
 static HRESULT Global_CDate(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("%s\n", debugstr_variant(arg));
+
+    assert(args_cnt == 1);
+
+    if(V_VT(arg) == VT_NULL)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = VariantChangeType(&v, arg, 0, VT_DATE);
+    if(FAILED(hres)) {
+        hres = VariantChangeType(&v, arg, 0, VT_R8);
+        if(FAILED(hres))
+            return hres;
+        hres = VariantChangeType(&v, &v, 0, VT_DATE);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    if(!res)
+        return DISP_E_BADVARTYPE;
+    *res = v;
+    return S_OK;
 }
 
 static HRESULT Global_CDbl(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -1982,10 +2005,50 @@ static HRESULT Global_Month(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, 
     return FAILED(hres) ? hres : return_short(res, st.wMonth);
 }
 
-static HRESULT Global_Weekday(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
+static HRESULT Global_Weekday(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres = S_OK;
+    int first_day = 0;
+    SYSTEMTIME st;
+
+    TRACE("(%s)\n", debugstr_variant(args));
+
+    assert(args_cnt == 1 || args_cnt == 2);
+
+    /* [vbSunday = 1, vbSaturday = 7] -> wDayOfWeek [0, 6] */
+    if (args_cnt == 2)
+    {
+        if (V_VT(args + 1) == VT_NULL)
+            return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+        hres = to_int(args + 1, &first_day);
+        if (SUCCEEDED(hres))
+        {
+            if (!first_day)
+            {
+                /* vbUseSystemDayOfWeek */
+                GetLocaleInfoW(This->ctx->lcid, LOCALE_RETURN_NUMBER | LOCALE_IFIRSTDAYOFWEEK, (LPWSTR)&first_day,
+                        sizeof(&first_day) / sizeof(WCHAR));
+                first_day = (first_day + 1) % 7;
+            }
+            else if (first_day >= 1 && first_day <= 7)
+            {
+                first_day--;
+            }
+            else
+                return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+        }
+    }
+
+    if (FAILED(hres))
+        return hres;
+
+    if (V_VT(args) == VT_NULL)
+        return return_null(res);
+
+    if (FAILED(hres = to_system_time(args, &st))) return hres;
+
+    return return_short(res, 1 + (7 - first_day + st.wDayOfWeek) % 7);
 }
 
 static HRESULT Global_Year(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -2044,10 +2107,38 @@ static HRESULT Global_TimeValue(BuiltinDisp *This, VARIANT *arg, unsigned args_c
     return E_NOTIMPL;
 }
 
-static HRESULT Global_DateSerial(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
+static HRESULT Global_DateSerial(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    int year, month, day;
+    UDATE ud = {{ 0 }};
+    HRESULT hres;
+    double date;
+
+    TRACE("\n");
+
+    assert(args_cnt == 3);
+
+    if (V_VT(args) == VT_NULL || V_VT(args + 1) == VT_NULL || V_VT(args + 2) == VT_NULL)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+    hres = to_int(args, &year);
+    if (SUCCEEDED(hres))
+        hres = to_int(args + 1, &month);
+    if (SUCCEEDED(hres))
+        hres = to_int(args + 2, &day);
+
+    if (SUCCEEDED(hres))
+    {
+        ud.st.wYear = year;
+        ud.st.wMonth = month;
+        ud.st.wDay = day;
+        hres = VarDateFromUdateEx(&ud, 0, 0, &date);
+    }
+
+    if (SUCCEEDED(hres))
+        hres = return_date(res, date);
+
+    return hres;
 }
 
 static HRESULT Global_TimeSerial(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -2180,10 +2271,67 @@ static HRESULT Global_GetObject(BuiltinDisp *This, VARIANT *args, unsigned args_
     return hres;
 }
 
-static HRESULT Global_DateAdd(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
+static HRESULT Global_DateAdd(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    BSTR interval = NULL;
+    UDATE ud = {{ 0 }};
+    HRESULT hres;
+    double date;
+    int count;
+
+    TRACE("\n");
+
+    assert(args_cnt == 3);
+
+    if (V_VT(args) == VT_NULL || V_VT(args + 1) == VT_NULL)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+    if (V_VT(args + 2) == VT_NULL)
+        return return_null(res);
+
+    hres = to_string(args, &interval);
+    if (SUCCEEDED(hres))
+        hres = to_int(args + 1, &count);
+    if (SUCCEEDED(hres))
+        hres = to_system_time(args + 2, &ud.st);
+    if (SUCCEEDED(hres))
+    {
+        if (!wcsicmp(interval, L"yyyy"))
+            ud.st.wYear += count;
+        else if (!wcsicmp(interval, L"q"))
+            ud.st.wMonth += 3 * count;
+        else if (!wcsicmp(interval, L"m"))
+            ud.st.wMonth += count;
+        else if (!wcsicmp(interval, L"y")
+                || !wcsicmp(interval, L"d")
+                || !wcsicmp(interval, L"w"))
+        {
+            ud.st.wDay += count;
+        }
+        else if (!wcsicmp(interval, L"ww"))
+            ud.st.wDay += 7 * count;
+        else if (!wcsicmp(interval, L"h"))
+            ud.st.wHour += count;
+        else if (!wcsicmp(interval, L"n"))
+            ud.st.wMinute += count;
+        else if (!wcsicmp(interval, L"s"))
+            ud.st.wSecond += count;
+        else
+        {
+            WARN("Unrecognized interval %s.\n", debugstr_w(interval));
+            hres = MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+        }
+    }
+
+    SysFreeString(interval);
+
+    if (SUCCEEDED(hres))
+        hres = VarDateFromUdateEx(&ud, 0, 0, &date);
+
+    if (SUCCEEDED(hres))
+        hres = return_date(res, date);
+
+    return hres;
 }
 
 static HRESULT Global_DateDiff(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)

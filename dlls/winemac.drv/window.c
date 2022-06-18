@@ -38,15 +38,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(macdrv);
 
 
-static CRITICAL_SECTION win_data_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &win_data_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": win_data_section") }
-};
-static CRITICAL_SECTION win_data_section = { &critsect_debug, -1, 0, 0, 0, 0 };
-
+static pthread_mutex_t win_data_mutex;
 static CFMutableDictionaryRef win_datas;
 
 static DWORD activate_on_focus_time;
@@ -251,7 +243,7 @@ static struct macdrv_win_data *alloc_win_data(HWND hwnd)
         data->hwnd = hwnd;
         data->color_key = CLR_INVALID;
         data->swap_interval = 1;
-        EnterCriticalSection(&win_data_section);
+        pthread_mutex_lock(&win_data_mutex);
         if (!win_datas)
             win_datas = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
         CFDictionarySetValue(win_datas, hwnd, data);
@@ -270,10 +262,10 @@ struct macdrv_win_data *get_win_data(HWND hwnd)
     struct macdrv_win_data *data;
 
     if (!hwnd) return NULL;
-    EnterCriticalSection(&win_data_section);
+    pthread_mutex_lock(&win_data_mutex);
     if (win_datas && (data = (struct macdrv_win_data*)CFDictionaryGetValue(win_datas, hwnd)))
         return data;
-    LeaveCriticalSection(&win_data_section);
+    pthread_mutex_unlock(&win_data_mutex);
     return NULL;
 }
 
@@ -285,7 +277,7 @@ struct macdrv_win_data *get_win_data(HWND hwnd)
  */
 void release_win_data(struct macdrv_win_data *data)
 {
-    if (data) LeaveCriticalSection(&win_data_section);
+    if (data) pthread_mutex_unlock(&win_data_mutex);
 }
 
 
@@ -392,16 +384,16 @@ static void sync_window_region(struct macdrv_win_data *data, HRGN win_region)
 
     if (hrgn == (HRGN)1)  /* hack: win_region == 1 means retrieve region from server */
     {
-        if (!(hrgn = CreateRectRgn(0, 0, 0, 0))) return;
+        if (!(hrgn = NtGdiCreateRectRgn(0, 0, 0, 0))) return;
         if (GetWindowRgn(data->hwnd, hrgn) == ERROR)
         {
-            DeleteObject(hrgn);
+            NtGdiDeleteObjectApp(hrgn);
             hrgn = 0;
         }
     }
 
     if (hrgn && GetWindowLongW(data->hwnd, GWL_EXSTYLE) & WS_EX_LAYOUTRTL)
-        MirrorRgn(data->hwnd, hrgn);
+        NtUserMirrorRgn(data->hwnd, hrgn);
     if (hrgn)
     {
         OffsetRgn(hrgn, data->window_rect.left - data->whole_rect.left,
@@ -436,7 +428,7 @@ static void sync_window_region(struct macdrv_win_data *data, HRGN win_region)
     HeapFree(GetProcessHeap(), 0, region_data);
     data->shaped = (region_data != NULL);
 
-    if (hrgn && hrgn != win_region) DeleteObject(hrgn);
+    if (hrgn && hrgn != win_region) NtGdiDeleteObjectApp(hrgn);
 }
 
 
@@ -686,10 +678,10 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     BYTE alpha;
     DWORD layered_flags;
 
-    if ((win_rgn = CreateRectRgn(0, 0, 0, 0)) &&
+    if ((win_rgn = NtGdiCreateRectRgn(0, 0, 0, 0)) &&
         GetWindowRgn(data->hwnd, win_rgn) == ERROR)
     {
-        DeleteObject(win_rgn);
+        NtGdiDeleteObjectApp(win_rgn);
         win_rgn = 0;
     }
     data->shaped = (win_rgn != 0);
@@ -728,7 +720,7 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     sync_window_opacity(data, key, alpha, FALSE, layered_flags);
 
 done:
-    if (win_rgn) DeleteObject(win_rgn);
+    if (win_rgn) NtGdiDeleteObjectApp(win_rgn);
 }
 
 
@@ -1061,7 +1053,7 @@ RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp)
     RECT *rect;
     CGRect *cgrect;
 
-    if (!hrgn || !(size = GetRegionData(hrgn, 0, NULL))) return NULL;
+    if (!hrgn || !(size = NtGdiGetRegionData(hrgn, 0, NULL))) return NULL;
     if (sizeof(CGRect) > sizeof(RECT))
     {
         /* add extra size for CGRect array */
@@ -1069,7 +1061,7 @@ RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp)
         size += count * (sizeof(CGRect) - sizeof(RECT));
     }
     if (!(data = HeapAlloc(GetProcessHeap(), 0, size))) return NULL;
-    if (!GetRegionData(hrgn, size, data))
+    if (!NtGdiGetRegionData(hrgn, size, data))
     {
         HeapFree(GetProcessHeap(), 0, data);
         return NULL;
@@ -1079,7 +1071,8 @@ RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp)
     cgrect = (CGRect *)data->Buffer;
     if (hdc_lptodp)  /* map to device coordinates */
     {
-        LPtoDP(hdc_lptodp, (POINT *)rect, data->rdh.nCount * 2);
+        NtGdiTransformPoints(hdc_lptodp, (POINT *)rect, (POINT *)rect,
+                             data->rdh.nCount * 2, NtGdiLPtoDP);
         for (i = 0; i < data->rdh.nCount; i++)
         {
             if (rect[i].right < rect[i].left)
@@ -1221,16 +1214,16 @@ static void move_window_bits(HWND hwnd, macdrv_window window, const RECT *old_re
         hdc_src = hdc_dst = GetDCEx(hwnd, 0, DCX_CACHE);
     }
 
-    rgn = CreateRectRgnIndirect(&dst_rect);
-    SelectClipRgn(hdc_dst, rgn);
-    DeleteObject(rgn);
+    rgn = NtGdiCreateRectRgn(dst_rect.left, dst_rect.top, dst_rect.right, dst_rect.bottom);
+    NtGdiExtSelectClipRgn(hdc_dst, rgn, RGN_COPY);
+    NtGdiDeleteObjectApp(rgn);
     ExcludeUpdateRgn(hdc_dst, hwnd);
 
     TRACE("copying bits for win %p/%p %s -> %s\n", hwnd, window,
           wine_dbgstr_rect(&src_rect), wine_dbgstr_rect(&dst_rect));
-    BitBlt(hdc_dst, dst_rect.left, dst_rect.top,
-           dst_rect.right - dst_rect.left, dst_rect.bottom - dst_rect.top,
-           hdc_src, src_rect.left, src_rect.top, SRCCOPY);
+    NtGdiBitBlt(hdc_dst, dst_rect.left, dst_rect.top,
+                dst_rect.right - dst_rect.left, dst_rect.bottom - dst_rect.top,
+                hdc_src, src_rect.left, src_rect.top, SRCCOPY, 0, 0);
 
     ReleaseDC(hwnd, hdc_dst);
     if (hdc_src != hdc_dst) ReleaseDC(parent, hdc_src);
@@ -1932,26 +1925,27 @@ BOOL CDECL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *
 
     dst_bits = surface->funcs->get_info(surface, bmi);
 
-    if (!(dib = CreateDIBSection(info->hdcDst, bmi, DIB_RGB_COLORS, &src_bits, NULL, 0))) goto done;
-    if (!(hdc = CreateCompatibleDC(0))) goto done;
+    if (!(dib = NtGdiCreateDIBSection(info->hdcDst, NULL, 0, bmi, DIB_RGB_COLORS,
+                                      0, 0, 0, &src_bits))) goto done;
+    if (!(hdc = NtGdiCreateCompatibleDC(0))) goto done;
 
-    SelectObject(hdc, dib);
+    NtGdiSelectBitmap(hdc, dib);
     if (info->prcDirty)
     {
         IntersectRect(&rect, &rect, info->prcDirty);
         surface->funcs->lock(surface);
         memcpy(src_bits, dst_bits, bmi->bmiHeader.biSizeImage);
         surface->funcs->unlock(surface);
-        PatBlt(hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, BLACKNESS);
+        NtGdiPatBlt(hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, BLACKNESS);
     }
     src_rect = rect;
     if (info->pptSrc) OffsetRect( &src_rect, info->pptSrc->x, info->pptSrc->y );
-    DPtoLP( info->hdcSrc, (POINT *)&src_rect, 2 );
+    NtGdiTransformPoints(info->hdcSrc, (POINT *)&src_rect, (POINT *)&src_rect, 2, NtGdiDPtoLP);
 
-    if (!(ret = GdiAlphaBlend(hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
-                              info->hdcSrc, src_rect.left, src_rect.top,
-                              src_rect.right - src_rect.left, src_rect.bottom - src_rect.top,
-                              blend)))
+    if (!(ret = NtGdiAlphaBlend(hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+                                info->hdcSrc, src_rect.left, src_rect.top,
+                                src_rect.right - src_rect.left, src_rect.bottom - src_rect.top,
+                                blend, 0)))
         goto done;
 
     if ((data = get_win_data(hwnd)))
@@ -1973,8 +1967,8 @@ BOOL CDECL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *
 
 done:
     window_surface_release(surface);
-    if (hdc) DeleteDC(hdc);
-    if (dib) DeleteObject(dib);
+    if (hdc) NtGdiDeleteObjectApp(hdc);
+    if (dib) NtGdiDeleteObjectApp(dib);
     return ret;
 }
 
@@ -2909,4 +2903,18 @@ BOOL query_min_max_info(HWND hwnd)
     TRACE("hwnd %p\n", hwnd);
     sync_window_min_max_info(hwnd);
     return TRUE;
+}
+
+
+/***********************************************************************
+ *              init_win_context
+ */
+void init_win_context(void)
+{
+    pthread_mutexattr_t attr;
+
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&win_data_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
 }

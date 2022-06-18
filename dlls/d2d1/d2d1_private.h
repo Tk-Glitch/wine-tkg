@@ -29,6 +29,7 @@
 #include <math.h>
 #define COBJMACROS
 #include "d2d1_3.h"
+#include "d2d1effectauthor.h"
 #include "d3d11_1.h"
 #ifdef D2D1_INIT_GUID
 #include "initguid.h"
@@ -41,6 +42,7 @@ enum d2d_brush_type
     D2D_BRUSH_TYPE_LINEAR,
     D2D_BRUSH_TYPE_RADIAL,
     D2D_BRUSH_TYPE_BITMAP,
+    D2D_BRUSH_TYPE_IMAGE,
     D2D_BRUSH_TYPE_COUNT,
 };
 
@@ -318,6 +320,14 @@ struct d2d_brush
             D2D1_EXTEND_MODE extend_mode_y;
             D2D1_INTERPOLATION_MODE interpolation_mode;
         } bitmap;
+        struct
+        {
+            ID2D1Image *image;
+            D2D1_EXTEND_MODE extend_mode_x;
+            D2D1_EXTEND_MODE extend_mode_y;
+            D2D1_INTERPOLATION_MODE interpolation_mode;
+            D2D1_RECT_F source_rect;
+        } image;
     } u;
 };
 
@@ -331,6 +341,9 @@ HRESULT d2d_radial_gradient_brush_create(ID2D1Factory *factory,
         ID2D1GradientStopCollection *gradient, struct d2d_brush **brush) DECLSPEC_HIDDEN;
 HRESULT d2d_bitmap_brush_create(ID2D1Factory *factory, ID2D1Bitmap *bitmap,
         const D2D1_BITMAP_BRUSH_PROPERTIES1 *bitmap_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
+        struct d2d_brush **brush) DECLSPEC_HIDDEN;
+HRESULT d2d_image_brush_create(ID2D1Factory *factory, ID2D1Image *image,
+        const D2D1_IMAGE_BRUSH_PROPERTIES *image_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
         struct d2d_brush **brush) DECLSPEC_HIDDEN;
 void d2d_brush_bind_resources(struct d2d_brush *brush, struct d2d_device_context *context,
         unsigned int brush_idx) DECLSPEC_HIDDEN;
@@ -567,6 +580,27 @@ struct d2d_device
 
 void d2d_device_init(struct d2d_device *device, ID2D1Factory1 *factory, IDXGIDevice *dxgi_device) DECLSPEC_HIDDEN;
 
+struct d2d_shader
+{
+    const GUID *id;
+    IUnknown *shader;
+};
+
+struct d2d_effect_context
+{
+    ID2D1EffectContext ID2D1EffectContext_iface;
+    LONG refcount;
+
+    struct d2d_device_context *device_context;
+
+    struct d2d_shader *shaders;
+    size_t shaders_size;
+    size_t shader_count;
+};
+
+void d2d_effect_context_init(struct d2d_effect_context *effect_context,
+        struct d2d_device_context *device_context) DECLSPEC_HIDDEN;
+
 struct d2d_effect_info
 {
     const CLSID *clsid;
@@ -583,13 +617,14 @@ struct d2d_effect
 
     const struct d2d_effect_info *info;
 
-    ID2D1Factory *factory;
+    struct d2d_effect_context *effect_context;
     ID2D1Image **inputs;
     size_t inputs_size;
     size_t input_count;
 };
 
-HRESULT d2d_effect_init(struct d2d_effect *effect, ID2D1Factory *factory, const CLSID *effect_id) DECLSPEC_HIDDEN;
+HRESULT d2d_effect_init(struct d2d_effect *effect,
+        struct d2d_effect_context *effect_context, const CLSID *effect_id) DECLSPEC_HIDDEN;
 
 static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
 {
@@ -694,11 +729,25 @@ static inline const char *debug_d2d_point_2f(const D2D1_POINT_2F *point)
     return wine_dbg_sprintf("{%.8e, %.8e}", point->x, point->y);
 }
 
+static inline const char *debug_d2d_point_2l(const D2D1_POINT_2L *point)
+{
+    if (!point)
+        return "(null)";
+    return wine_dbg_sprintf("{%ld, %ld}", point->x, point->y);
+}
+
 static inline const char *debug_d2d_rect_f(const D2D1_RECT_F *rect)
 {
     if (!rect)
         return "(null)";
     return wine_dbg_sprintf("(%.8e, %.8e)-(%.8e, %.8e)", rect->left, rect->top, rect->right, rect->bottom);
+}
+
+static inline const char *debug_d2d_rect_l(const D2D1_RECT_L *rect)
+{
+    if (!rect)
+        return "(null)";
+    return wine_dbg_sprintf("(%ld, %ld)-(%ld, %ld)", rect->left, rect->top, rect->right, rect->bottom);
 }
 
 static inline const char *debug_d2d_rounded_rect(const D2D1_ROUNDED_RECT *rounded_rect)

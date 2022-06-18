@@ -429,6 +429,7 @@ SOURCES = \
 	midles.h \
 	mimeinfo.idl \
 	mimeole.idl \
+	minidumpapiset.h \
 	minmax.h \
 	mlang.idl \
 	mmc.idl \
@@ -437,6 +438,7 @@ SOURCES = \
 	mmreg.h \
 	mmstream.idl \
 	mmsystem.h \
+	mpegtype.idl \
 	mprapi.h \
 	mprerror.h \
 	msacm.h \

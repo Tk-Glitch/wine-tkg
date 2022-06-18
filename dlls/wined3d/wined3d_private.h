@@ -358,13 +358,12 @@ static inline GLenum wined3d_gl_min_mip_filter(enum wined3d_texture_filter_type 
     return minMipLookup[min_filter].mip[mip_filter];
 }
 
-/* float_16_to_32() and float_32_to_16() (see implementation in
- * surface_base.c) convert 16 bit floats in the FLOAT16 data type
- * to standard C floats and vice versa. They do not depend on the encoding
- * of the C float, so they are platform independent, but slow. On x86 and
- * other IEEE 754 compliant platforms the conversion can be accelerated by
- * bit shifting the exponent and mantissa. There are also some SSE-based
- * assembly routines out there.
+/* float_16_to_32() and float_32_to_16() convert 16 bit floats in the
+ * FLOAT16 data type to standard C floats and vice versa. They do not
+ * depend on the encoding of the C float, so they are platform independent,
+ * but slow. On x86 and other IEEE 754 compliant platforms the conversion
+ * can be accelerated by bit shifting the exponent and mantissa. There are
+ * also some SSE-based assembly routines out there.
  *
  * See GL_NV_half_float for a reference of the FLOAT16 / GL_HALF format
  */
@@ -406,6 +405,68 @@ static inline float float_24_to_32(DWORD in)
         if (m == 0) return sgn * INFINITY;
         else return NAN;
     }
+}
+
+static inline unsigned short float_32_to_16(const float *in)
+{
+    int exp = 0;
+    float tmp = fabsf(*in);
+    unsigned int mantissa;
+    unsigned short ret;
+
+    /* Deal with special numbers */
+    if (*in == 0.0f)
+        return 0x0000;
+    if (isnan(*in))
+        return 0x7c01;
+    if (isinf(*in))
+        return (*in < 0.0f ? 0xfc00 : 0x7c00);
+
+    if (tmp < (float)(1u << 10))
+    {
+        do
+        {
+            tmp = tmp * 2.0f;
+            exp--;
+        } while (tmp < (float)(1u << 10));
+    }
+    else if (tmp >= (float)(1u << 11))
+    {
+        do
+        {
+            tmp /= 2.0f;
+            exp++;
+        } while (tmp >= (float)(1u << 11));
+    }
+
+    mantissa = (unsigned int)tmp;
+    if (tmp - mantissa >= 0.5f)
+        ++mantissa; /* Round to nearest, away from zero. */
+
+    exp += 10;  /* Normalize the mantissa. */
+    exp += 15;  /* Exponent is encoded with excess 15. */
+
+    if (exp > 30) /* too big */
+    {
+        ret = 0x7c00; /* INF */
+    }
+    else if (exp <= 0)
+    {
+        /* exp == 0: Non-normalized mantissa. Returns 0x0000 (=0.0) for too small numbers. */
+        while (exp <= 0)
+        {
+            mantissa = mantissa >> 1;
+            ++exp;
+        }
+        ret = mantissa & 0x3ff;
+    }
+    else
+    {
+        ret = (exp << 10) | (mantissa & 0x3ff);
+    }
+
+    ret |= ((*in < 0.0f ? 1 : 0) << 15); /* Add the sign */
+    return ret;
 }
 
 static inline unsigned int wined3d_popcount(unsigned int x)
@@ -2696,7 +2757,6 @@ void wined3d_context_vk_image_barrier(struct wined3d_context_vk *context_vk,
         VkImageLayout new_layout, VkImage image, const VkImageSubresourceRange *range) DECLSPEC_HIDDEN;
 HRESULT wined3d_context_vk_init(struct wined3d_context_vk *context_vk,
         struct wined3d_swapchain *swapchain) DECLSPEC_HIDDEN;
-void wined3d_context_vk_poll_command_buffers(struct wined3d_context_vk *context_vk) DECLSPEC_HIDDEN;
 void wined3d_context_vk_submit_command_buffer(struct wined3d_context_vk *context_vk,
         unsigned int wait_semaphore_count, const VkSemaphore *wait_semaphores, const VkPipelineStageFlags *wait_stages,
         unsigned int signal_semaphore_count, const VkSemaphore *signal_semaphores) DECLSPEC_HIDDEN;
@@ -4423,6 +4483,9 @@ GLbitfield wined3d_resource_gl_storage_flags(const struct wined3d_resource *reso
 BOOL wined3d_resource_is_offscreen(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 BOOL wined3d_resource_prepare_sysmem(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 void wined3d_resource_update_draw_binding(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
+void wined3d_resource_memory_colour_fill(struct wined3d_resource *resource,
+        const struct wined3d_map_desc *map, const struct wined3d_color *colour,
+        const struct wined3d_box *box) DECLSPEC_HIDDEN;
 
 /* Tests show that the start address of resources is 32 byte aligned */
 #define RESOURCE_ALIGNMENT 16
@@ -5348,6 +5411,8 @@ struct wined3d_rendertarget_view
 void wined3d_rendertarget_view_cleanup(struct wined3d_rendertarget_view *view) DECLSPEC_HIDDEN;
 void wined3d_rendertarget_view_get_drawable_size(const struct wined3d_rendertarget_view *view,
         const struct wined3d_context *context, unsigned int *width, unsigned int *height) DECLSPEC_HIDDEN;
+void wined3d_rendertarget_view_get_box(struct wined3d_rendertarget_view *view,
+        struct wined3d_box *box) DECLSPEC_HIDDEN;
 void wined3d_rendertarget_view_invalidate_location(struct wined3d_rendertarget_view *view,
         DWORD location) DECLSPEC_HIDDEN;
 void wined3d_rendertarget_view_load_location(struct wined3d_rendertarget_view *view,
@@ -6209,8 +6274,8 @@ void wined3d_format_calculate_pitch(const struct wined3d_format *format, unsigne
         unsigned int width, unsigned int height, unsigned int *row_pitch, unsigned int *slice_pitch) DECLSPEC_HIDDEN;
 UINT wined3d_format_calculate_size(const struct wined3d_format *format,
         UINT alignment, UINT width, UINT height, UINT depth) DECLSPEC_HIDDEN;
-DWORD wined3d_format_convert_from_float(const struct wined3d_format *format,
-        const struct wined3d_color *color) DECLSPEC_HIDDEN;
+void wined3d_format_convert_from_float(const struct wined3d_format *format,
+        const struct wined3d_color *color, void *ret) DECLSPEC_HIDDEN;
 void wined3d_format_copy_data(const struct wined3d_format *format, const uint8_t *src,
         unsigned int src_row_pitch, unsigned int src_slice_pitch, uint8_t *dst, unsigned int dst_row_pitch,
         unsigned int dst_slice_pitch, unsigned int w, unsigned int h, unsigned int d) DECLSPEC_HIDDEN;

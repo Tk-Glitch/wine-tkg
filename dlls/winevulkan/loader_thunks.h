@@ -193,6 +193,7 @@ enum unix_call
     unix_vkCmdSetViewportWithCount,
     unix_vkCmdSetViewportWithCountEXT,
     unix_vkCmdSubpassShadingHUAWEI,
+    unix_vkCmdTraceRaysIndirect2KHR,
     unix_vkCmdTraceRaysIndirectKHR,
     unix_vkCmdTraceRaysKHR,
     unix_vkCmdTraceRaysNV,
@@ -354,6 +355,7 @@ enum unix_call
     unix_vkGetImageSparseMemoryRequirements2,
     unix_vkGetImageSparseMemoryRequirements2KHR,
     unix_vkGetImageSubresourceLayout,
+    unix_vkGetImageSubresourceLayout2EXT,
     unix_vkGetImageViewAddressNVX,
     unix_vkGetImageViewHandleNVX,
     unix_vkGetMemoryHostPointerPropertiesEXT,
@@ -405,6 +407,7 @@ enum unix_call
     unix_vkGetPipelineExecutableInternalRepresentationsKHR,
     unix_vkGetPipelineExecutablePropertiesKHR,
     unix_vkGetPipelineExecutableStatisticsKHR,
+    unix_vkGetPipelinePropertiesEXT,
     unix_vkGetPrivateData,
     unix_vkGetPrivateDataEXT,
     unix_vkGetQueryPoolResults,
@@ -1811,6 +1814,12 @@ struct vkCmdSubpassShadingHUAWEI_params
     VkCommandBuffer commandBuffer;
 };
 
+struct vkCmdTraceRaysIndirect2KHR_params
+{
+    VkCommandBuffer commandBuffer;
+    VkDeviceAddress indirectDeviceAddress;
+};
+
 struct vkCmdTraceRaysIndirectKHR_params
 {
     VkCommandBuffer commandBuffer;
@@ -3042,6 +3051,14 @@ struct vkGetImageSubresourceLayout_params
     VkSubresourceLayout *pLayout;
 };
 
+struct vkGetImageSubresourceLayout2EXT_params
+{
+    VkDevice device;
+    VkImage image;
+    const VkImageSubresource2EXT *pSubresource;
+    VkSubresourceLayout2EXT *pLayout;
+};
+
 struct vkGetImageViewAddressNVX_params
 {
     VkDevice device;
@@ -3407,6 +3424,13 @@ struct vkGetPipelineExecutableStatisticsKHR_params
     const VkPipelineExecutableInfoKHR *pExecutableInfo;
     uint32_t *pStatisticCount;
     VkPipelineExecutableStatisticKHR *pStatistics;
+};
+
+struct vkGetPipelinePropertiesEXT_params
+{
+    VkDevice device;
+    const VkPipelineInfoEXT *pPipelineInfo;
+    VkBaseOutStructure *pPipelineProperties;
 };
 
 struct vkGetPrivateData_params

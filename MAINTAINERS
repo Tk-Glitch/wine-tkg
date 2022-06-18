@@ -50,6 +50,7 @@ F:	dlls/xaudio*/
 
 Common Controls Library
 P:	Nikolay Sivov <nsivov@codeweavers.com>
+P:	Zhiyi Zhang <zzhang@codeweavers.com>
 F:	dlls/comctl32/
 
 Common Item Dialog
@@ -58,11 +59,14 @@ F:	dlls/comdlg32/itemdlg.c
 F:	dlls/comdlg32/tests/itemdlg.c
 
 Direct2D
-M:	Henri Verbeet <hverbeet@codeweavers.com>
+M:	Nikolay Sivov <nsivov@codeweavers.com>
+P:	Henri Verbeet <hverbeet@codeweavers.com>
 F:	dlls/d2d*/
 
 Direct3D
-M:	Henri Verbeet <hverbeet@codeweavers.com>
+M:	Zebediah Figura <z.figura12@gmail.com>
+M:	Jan Sikorski <jsikorski@codeweavers.com>
+P:	Henri Verbeet <hverbeet@codeweavers.com>
 P:	Stefan Dösinger <stefan@codeweavers.com>
 P:	Matteo Bruni <mbruni@codeweavers.com>
 F:	dlls/d3d10core/
@@ -109,7 +113,6 @@ F:	dlls/qcap/
 F:	dlls/qdvd/
 F:	dlls/qedit/
 F:	dlls/quartz/
-F:	dlls/winegstreamer/quartz_parser.c
 F:	libs/strmbase/
 
 DirectWrite
@@ -151,6 +154,10 @@ F:	dlls/gdiplus/
 GPhoto Driver
 M:	Marcus Meissner <marcus@jet.franken.de>
 F:	dlls/gphoto2.ds/
+
+GStreamer multimedia backend
+M:	Zebediah Figura <z.figura12@gmail.com>
+F:	dlls/winegstreamer/
 
 HID support
 M:	Aric Stewart <aric@codeweavers.com>
@@ -275,6 +282,11 @@ P:	Huw Davies <huw@codeweavers.com>
 P:	Zebediah Figura <z.figura12@gmail.com>
 F:	dlls/rpcrt4
 
+Theming
+M:	Zhiyi Zhang <zzhang@codeweavers.com>
+F:	dlls/light.msstyles/
+F:	dlls/uxtheme/
+
 TWAIN
 P:	Esme Povirk <esme@codeweavers.com>
 F:	dlls/twain_32/
@@ -321,6 +333,11 @@ F:	dlls/wbemdisp/
 F:	dlls/wbemprox/
 F:	dlls/wmiutils/
 
+Windows Media Format
+M:	Zebediah Figura <z.figura12@gmail.com>
+F:	dlls/wmp/
+F:	dlls/wmvcore/
+
 Windows Media Foundation
 M:	Nikolay Sivov <nsivov@codeweavers.com>
 F:	dlls/mf/
@@ -360,6 +377,7 @@ F:	dlls/wpcap/
 X11 Driver
 M:	Alexandre Julliard <julliard@winehq.org>
 P:	Rémi Bernon <rbernon@codeweavers.com>
+P:	Zhiyi Zhang <zzhang@codeweavers.com>
 F:	dlls/winex11.drv/
 
 XML parsing

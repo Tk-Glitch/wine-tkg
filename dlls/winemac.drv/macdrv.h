@@ -205,6 +205,7 @@ struct macdrv_win_data
 
 extern struct macdrv_win_data *get_win_data(HWND hwnd) DECLSPEC_HIDDEN;
 extern void release_win_data(struct macdrv_win_data *data) DECLSPEC_HIDDEN;
+extern void init_win_context(void) DECLSPEC_HIDDEN;
 extern macdrv_window macdrv_get_cocoa_window(HWND hwnd, BOOL require_on_screen) DECLSPEC_HIDDEN;
 extern RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp) DECLSPEC_HIDDEN;
 extern void activate_on_following_focus(void) DECLSPEC_HIDDEN;
@@ -292,5 +293,36 @@ extern void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const B
 extern void macdrv_im_set_text(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_sent_text_input(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern BOOL query_ime_char_rect(macdrv_query* query) DECLSPEC_HIDDEN;
+
+/* registry helpers */
+
+extern HKEY open_hkcu_key( const char *name ) DECLSPEC_HIDDEN;
+extern ULONG query_reg_value(HKEY hkey, const WCHAR *name, KEY_VALUE_PARTIAL_INFORMATION *info,
+                             ULONG size) DECLSPEC_HIDDEN;
+extern HKEY reg_create_ascii_key(HKEY root, const char *name, DWORD options,
+                                 DWORD *disposition) DECLSPEC_HIDDEN;
+extern HKEY reg_create_key(HKEY root, const WCHAR *name, ULONG name_len,
+                           DWORD options, DWORD *disposition) DECLSPEC_HIDDEN;
+extern BOOL reg_delete_tree(HKEY parent, const WCHAR *name, ULONG name_len) DECLSPEC_HIDDEN;
+extern HKEY reg_open_key(HKEY root, const WCHAR *name, ULONG name_len) DECLSPEC_HIDDEN;
+
+/* string helpers */
+
+static inline void ascii_to_unicode(WCHAR *dst, const char *src, size_t len)
+{
+    while (len--) *dst++ = (unsigned char)*src++;
+}
+
+static inline UINT asciiz_to_unicode(WCHAR *dst, const char *src)
+{
+    WCHAR *p = dst;
+    while ((*p++ = *src++));
+    return (p - dst) * sizeof(WCHAR);
+}
+
+/* FIXME: remove once we use unixlib */
+#define wcsnicmp strncmpiW
+#define wcsrchr strrchrW
+#define wcstol strtolW
 
 #endif  /* __WINE_MACDRV_H */

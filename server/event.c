@@ -24,7 +24,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <unistd.h>
 #include <sys/types.h>
 
 #include "ntstatus.h"

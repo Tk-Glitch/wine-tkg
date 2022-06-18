@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 
+#include "winternl.h"
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
@@ -37,18 +38,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(dwmapi);
  */
 HRESULT WINAPI DwmIsCompositionEnabled(BOOL *enabled)
 {
-    OSVERSIONINFOW version;
+    RTL_OSVERSIONINFOEXW version;
 
     TRACE("%p\n", enabled);
 
     if (!enabled)
         return E_INVALIDARG;
 
-    version.dwOSVersionInfoSize = sizeof(OSVERSIONINFOW);
-
-    if (!GetVersionExW(&version))
-        *enabled = FALSE;
-    else
+    *enabled = FALSE;
+    version.dwOSVersionInfoSize = sizeof(version);
+    if (!RtlGetVersion(&version))
         *enabled = (version.dwMajorVersion > 6 || (version.dwMajorVersion == 6 && version.dwMinorVersion >= 3));
 
     return S_OK;
@@ -93,7 +92,7 @@ HRESULT WINAPI DwmFlush(void)
 
     if (!once++) FIXME("() stub\n");
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 /**********************************************************************
@@ -248,9 +247,23 @@ HRESULT WINAPI DwmGetCompositionTimingInfo(HWND hwnd, DWM_TIMING_INFO *info)
 {
     static int i;
 
+    if (!info)
+        return E_INVALIDARG;
+
+    if (info->cbSize != sizeof(DWM_TIMING_INFO))
+        return MILERR_MISMATCHED_SIZE;
+
     if(!i++) FIXME("(%p %p)\n", hwnd, info);
 
-    return E_NOTIMPL;
+    memset(info, 0, info->cbSize);
+    info->cbSize = sizeof(DWM_TIMING_INFO);
+    info->rateRefresh.uiDenominator = 1;
+    info->rateRefresh.uiNumerator = 64;
+    info->rateCompose.uiDenominator = 1;
+    info->rateCompose.uiNumerator = 64;
+    info->qpcRefreshPeriod = 156250;
+
+    return S_OK;
 }
 
 /**********************************************************************

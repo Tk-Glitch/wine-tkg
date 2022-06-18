@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - mer. 11 mai 2022 16:21:08 CEST :
+# Last wine-tkg-staging-fsync-git configuration - sam. 18 juin 2022 20:30:56 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.8.r0.g3ded60bd165
-Using wine-staging patchset (version 7.8.r0.g83824733)
+Wine (plain) version: 7.9.r0.g230e953e31f
+Using wine-staging patchset (version 7.9.r0.g2a411514)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -55,6 +55,7 @@ msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then buil
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
+Applied reverting hotfix proton-fshack-removeminimizestuff.myrevert
 Applied hotfix remove_hooks_that_time_out-legacy.mypatch
 Applied hotfix user32.implement_rudimentary_EnableMouseInPointer_support.mypatch
 Applied hotfix winex11.drv_Add_a_GPU_for_each_Vulkan_device_that_was_not_tied_to_an_XRandR_provider-legacy.mypatch
@@ -64,6 +65,7 @@ Applied hotfix ef6e33f.mypatch
 Applied hotfix 0001-proton-bcrypt_rdr2_fixes4.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix a608ef1.mypatch
+Applied hotfix dwmapi_EGS_fixup.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch

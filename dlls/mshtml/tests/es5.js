@@ -150,10 +150,14 @@ sync_test("Number toLocaleString", function() {
     ];
 
     if(external.isEnglish) {
-        for(var i = 0; i < tests.length; i++) {
-            r = Number.prototype.toLocaleString.call(tests[i][0]);
-            ok(r === tests[i][1], "[" + i + "] got " + r);
-        }
+        /* Some recent Win8.1 updates have old jscript behavior */
+        if(Number.prototype.toLocaleString.call(0.0) === "0.00")
+            win_skip("skipping tests due to old behavior");
+        else
+            for(var i = 0; i < tests.length; i++) {
+                r = Number.prototype.toLocaleString.call(tests[i][0]);
+                ok(r === tests[i][1], "[" + i + "] got " + r);
+            }
     }
 
     try {
@@ -161,21 +165,24 @@ sync_test("Number toLocaleString", function() {
         ok(false, "expected exception calling it on string");
     }catch(ex) {
         var n = ex.number >>> 0;
-        ok(n === JS_E_WRONG_THIS, "called on string threw " + n);
+        ok(n === JS_E_WRONG_THIS || broken(n === JS_E_NUMBER_EXPECTED) /* newer Win8.1 */,
+           "called on string threw " + n);
     }
     try {
         Number.prototype.toLocaleString.call(undefined);
         ok(false, "expected exception calling it on undefined");
     }catch(ex) {
         var n = ex.number >>> 0;
-        ok(n === JS_E_WRONG_THIS, "called on undefined threw " + n);
+        ok(n === JS_E_WRONG_THIS || broken(n === JS_E_NUMBER_EXPECTED) /* newer Win8.1 */,
+           "called on undefined threw " + n);
     }
     try {
         Number.prototype.toLocaleString.call(external.nullDisp);
         ok(false, "expected exception calling it on nullDisp");
     }catch(ex) {
         var n = ex.number >>> 0;
-        ok(n === JS_E_WRONG_THIS, "called on nullDisp threw " + n);
+        ok(n === JS_E_WRONG_THIS || broken(n === JS_E_NUMBER_EXPECTED) /* newer Win8.1 */,
+           "called on nullDisp threw " + n);
     }
 });
 
@@ -1782,6 +1789,28 @@ sync_test("let scope instances", function() {
         ok(a[i]() == i, "a[" + i + "]() = " + a[i]());
 
     ok(f() == 2, "f() = " + f());
+});
+
+sync_test("substituted this", function() {
+    try {
+        ((function() { var f = Number.prototype.toString; return (function() { return f(); }); })())();
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_NUMBER_EXPECTED, "Number.toString threw " + n);
+    }
+
+    var r = ((function() { var f = Object.prototype.toString; return (function() { return f(); }); })())();
+    ok(r === "[object Undefined]", "detached scope Object.toString returned " + r);
+
+    var r = (function() { this.f = Object.prototype.toString; return this.f(); })();
+    todo_wine.
+    ok(r === "[object Window]", "Object.toString returned " + r);
+
+    var r = (function() { var f = Object.prototype.toString; return f(); })();
+    ok(r === "[object Undefined]", "Object.toString returned " + r);
+
+    var r = ((function() { return (function() { return this; }); })())();
+    ok(r === window, "detached scope this = " + r);
 });
 
 sync_test("functions scope", function() {

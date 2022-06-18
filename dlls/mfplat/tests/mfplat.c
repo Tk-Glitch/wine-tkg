@@ -1638,6 +1638,11 @@ static void test_attributes(void)
     ok(hr == S_OK, "Failed to get string length, hr %#lx.\n", hr);
     ok(string_length == lstrlenW(stringW), "Unexpected length %u.\n", string_length);
 
+    hr = IMFAttributes_GetAllocatedString(attributes, &DUMMY_GUID1, &string, NULL);
+    ok(hr == S_OK, "Failed to get allocated string, hr %#lx.\n", hr);
+    ok(!lstrcmpW(string, stringW), "Unexpected string %s.\n", wine_dbgstr_w(string));
+    CoTaskMemFree(string);
+
     string_length = 0xdeadbeef;
     hr = IMFAttributes_GetAllocatedString(attributes, &DUMMY_GUID1, &string, &string_length);
     ok(hr == S_OK, "Failed to get allocated string, hr %#lx.\n", hr);
@@ -1741,6 +1746,11 @@ static void test_attributes(void)
     hr = IMFAttributes_GetAllocatedBlob(attributes, &DUMMY_GUID1, &blob_buf, &size);
     ok(hr == S_OK, "Failed to get allocated blob, hr %#lx.\n", hr);
     ok(size == sizeof(blob), "Unexpected blob size %u.\n", size);
+    ok(!memcmp(blob_buf, blob, size), "Unexpected blob.\n");
+    CoTaskMemFree(blob_buf);
+
+    hr = IMFAttributes_GetAllocatedBlob(attributes, &DUMMY_GUID1, &blob_buf, NULL);
+    ok(hr == S_OK, "Failed to get allocated blob, hr %#lx.\n", hr);
     ok(!memcmp(blob_buf, blob, size), "Unexpected blob.\n");
     CoTaskMemFree(blob_buf);
 
@@ -1962,6 +1972,7 @@ static void test_MFCreateMFByteStreamOnStream(void)
     ULONG ref, size;
     HRESULT hr;
     UINT count;
+    QWORD to;
 
     if(!pMFCreateMFByteStreamOnStream)
     {
@@ -2045,10 +2056,44 @@ static void test_MFCreateMFByteStreamOnStream(void)
     ok(hr == S_OK, "Failed to get stream capabilities, hr %#lx.\n", hr);
     ok(caps == (MFBYTESTREAM_IS_READABLE | MFBYTESTREAM_IS_SEEKABLE), "Unexpected caps %#lx.\n", caps);
 
+    /* IMFByteStream maintains position separately from IStream */
+    caps = 0;
+    hr = IStream_Read(stream, &caps, sizeof(caps), &size);
+    ok(hr == S_OK, "Failed to read from raw stream, hr %#lx.\n", hr);
+    ok(size == 4, "Unexpected size.\n");
+    ok(caps == 0xffff0000, "Unexpected content.\n");
+
     caps = 0;
     hr = IMFByteStream_Read(bytestream, (BYTE *)&caps, sizeof(caps), &size);
     ok(hr == S_OK, "Failed to read from stream, hr %#lx.\n", hr);
+    ok(size == 4, "Unexpected size.\n");
     ok(caps == 0xffff0000, "Unexpected content.\n");
+
+    caps = 0;
+    hr = IStream_Read(stream, &caps, sizeof(caps), &size);
+    ok(hr == S_OK, "Failed to read from raw stream, hr %#lx.\n", hr);
+    ok(size == 0, "Unexpected size.\n");
+    ok(caps == 0, "Unexpected content.\n");
+
+    hr = IMFByteStream_Seek(bytestream, msoBegin, 0, 0, &to);
+    ok(hr == S_OK, "Failed to read from stream, hr %#lx.\n", hr);
+
+    hr = IStream_Read(stream, &caps, sizeof(caps), &size);
+    ok(hr == S_OK, "Failed to read from raw stream, hr %#lx.\n", hr);
+    ok(size == 0, "Unexpected size.\n");
+    ok(caps == 0, "Unexpected content.\n");
+
+    caps = 0;
+    hr = IMFByteStream_Read(bytestream, (BYTE *)&caps, sizeof(caps), &size);
+    ok(hr == S_OK, "Failed to read from stream, hr %#lx.\n", hr);
+    ok(size == 4, "Unexpected size.\n");
+    ok(caps == 0xffff0000, "Unexpected content.\n");
+
+    caps = 0;
+    hr = IMFByteStream_Read(bytestream, (BYTE *)&caps, sizeof(caps), &size);
+    ok(hr == S_OK, "Failed to read from stream, hr %#lx.\n", hr);
+    ok(size == 0, "Unexpected size.\n");
+    ok(caps == 0, "Unexpected content.\n");
 
     IMFAttributes_Release(attributes);
     IMFByteStream_Release(bytestream);

@@ -1890,25 +1890,19 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateEffect(ID2D1DeviceCont
         REFCLSID effect_id, ID2D1Effect **effect)
 {
     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
-    struct d2d_effect *object;
+    struct d2d_effect_context *effect_context;
     HRESULT hr;
 
     FIXME("iface %p, effect_id %s, effect %p stub!\n", iface, debugstr_guid(effect_id), effect);
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(effect_context = heap_alloc_zero(sizeof(*effect_context))))
         return E_OUTOFMEMORY;
+    d2d_effect_context_init(effect_context, context);
 
-    if (FAILED(hr = d2d_effect_init(object, context->factory, effect_id)))
-    {
-        WARN("Failed to initialise effect, hr %#lx.\n", hr);
-        heap_free(object);
-        return hr;
-    }
+    hr = ID2D1EffectContext_CreateEffect(&effect_context->ID2D1EffectContext_iface, effect_id, effect);
 
-    TRACE("Created effect %p.\n", object);
-    *effect = &object->ID2D1Effect_iface;
-
-    return S_OK;
+    ID2D1EffectContext_Release(&effect_context->ID2D1EffectContext_iface);
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGradientStopCollection(
@@ -1929,10 +1923,18 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1Device
         ID2D1Image *image, const D2D1_IMAGE_BRUSH_PROPERTIES *image_brush_desc,
         const D2D1_BRUSH_PROPERTIES *brush_desc, ID2D1ImageBrush **brush)
 {
-    FIXME("iface %p, image %p, image_brush_desc %p, brush_desc %p, brush %p stub!\n",
-            iface, image, image_brush_desc, brush_desc, brush);
+    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+    struct d2d_brush *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, image %p, image_brush_desc %p, brush_desc %p, brush %p.\n", iface, image, image_brush_desc,
+            brush_desc, brush);
+
+    if (SUCCEEDED(hr = d2d_image_brush_create(context->factory, image, image_brush_desc,
+            brush_desc, &object)))
+        *brush = (ID2D1ImageBrush *)&object->ID2D1Brush_iface;
+
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBitmapBrush(ID2D1DeviceContext *iface,
