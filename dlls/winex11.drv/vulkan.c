@@ -363,7 +363,7 @@ static VkResult X11DRV_vkAcquireNextImageKHR(VkDevice device,
         escape.code = X11DRV_PRESENT_DRAWABLE;
         escape.drawable = surface->window;
         escape.flush = TRUE;
-        ExtEscape(hdc, X11DRV_ESCAPE, sizeof(escape), (char *)&escape, 0, NULL);
+        //ExtEscape(hdc, X11DRV_ESCAPE, sizeof(escape), (char *)&escape, 0, NULL);
         if (surface->present_mode == VK_PRESENT_MODE_MAILBOX_KHR)
             if (once++) FIXME("Application requires child window rendering with mailbox present mode, expect possible tearing!\n");
     }
@@ -797,6 +797,22 @@ static VkResult X11DRV_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
 {
     VkResult res;
 
+    VkSwapchainKHR swapchain = *present_info->pSwapchains;
+
+    struct x11drv_escape_present_drawable escape;
+    struct wine_vk_surface *surface = NULL;
+    VkFence orig_fence;
+    BOOL wait_fence = FALSE;
+    HDC hdc = 0;
+
+    EnterCriticalSection(&context_section);
+    if (!XFindContext(gdi_display, (XID)swapchain, vulkan_swapchain_context, (char **)&surface))
+    {
+        wine_vk_surface_grab(surface);
+        hdc = surface->hdc;
+    }
+    LeaveCriticalSection(&context_section);
+
     TRACE("%p, %p\n", queue, present_info);
 
     res = pvkQueuePresentKHR(queue, present_info);
@@ -822,6 +838,13 @@ static VkResult X11DRV_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
         }
     }
 
+    if (res == VK_SUCCESS && hdc && surface && surface->offscreen)
+    {
+        escape.code = X11DRV_PRESENT_DRAWABLE;
+        escape.drawable = surface->window;
+        escape.flush = TRUE;
+        ExtEscape(hdc, X11DRV_ESCAPE, sizeof(escape), (char *)&escape, 0, NULL);
+    }
     return res;
 }
 
