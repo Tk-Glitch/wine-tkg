@@ -324,8 +324,6 @@ static VkResult X11DRV_vkAcquireNextImageKHR(VkDevice device,
         VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore,
         VkFence fence, uint32_t *image_index)
 {
-    static int once;
-    struct x11drv_escape_present_drawable escape;
     struct wine_vk_surface *surface = NULL;
     VkResult result;
     VkFence orig_fence;
@@ -360,12 +358,6 @@ static VkResult X11DRV_vkAcquireNextImageKHR(VkDevice device,
     if (result == VK_SUCCESS && hdc && surface && surface->offscreen)
     {
         if (wait_fence) pvkWaitForFences(device, 1, &fence, 0, timeout);
-        escape.code = X11DRV_PRESENT_DRAWABLE;
-        escape.drawable = surface->window;
-        escape.flush = TRUE;
-        //ExtEscape(hdc, X11DRV_ESCAPE, sizeof(escape), (char *)&escape, 0, NULL);
-        if (surface->present_mode == VK_PRESENT_MODE_MAILBOX_KHR)
-            if (once++) FIXME("Application requires child window rendering with mailbox present mode, expect possible tearing!\n");
     }
 
     if (fence != orig_fence) pvkDestroyFence(device, fence, NULL);
@@ -799,6 +791,7 @@ static VkResult X11DRV_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
 
     VkSwapchainKHR swapchain = *present_info->pSwapchains;
 
+    static int once;
     struct x11drv_escape_present_drawable escape;
     struct wine_vk_surface *surface = NULL;
     VkFence orig_fence;
@@ -844,6 +837,8 @@ static VkResult X11DRV_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
         escape.drawable = surface->window;
         escape.flush = TRUE;
         ExtEscape(hdc, X11DRV_ESCAPE, sizeof(escape), (char *)&escape, 0, NULL);
+        if (surface->present_mode == VK_PRESENT_MODE_MAILBOX_KHR)
+            if (once++) FIXME("Application requires child window rendering with mailbox present mode, expect possible tearing!\n");
     }
     return res;
 }
