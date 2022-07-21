@@ -29,16 +29,6 @@ enum phys_device_bus_type {
     phys_device_bus_usb
 };
 
-struct pulse_config
-{
-    struct
-    {
-        WAVEFORMATEXTENSIBLE format;
-        REFERENCE_TIME def_period;
-        REFERENCE_TIME min_period;
-    } modes[2];
-};
-
 struct endpoint
 {
     unsigned int name;
@@ -138,6 +128,23 @@ struct release_capture_buffer_params
     HRESULT result;
 };
 
+struct get_mix_format_params
+{
+    const char *pulse_name;
+    EDataFlow flow;
+    WAVEFORMATEXTENSIBLE *fmt;
+    HRESULT result;
+};
+
+struct get_device_period_params
+{
+    const char *pulse_name;
+    EDataFlow flow;
+    HRESULT result;
+    REFERENCE_TIME *def_period;
+    REFERENCE_TIME *min_period;
+};
+
 struct get_buffer_size_params
 {
     stream_handle stream;
@@ -201,7 +208,6 @@ struct test_connect_params
 {
     const char *name;
     HRESULT result;
-    struct pulse_config *config;
 };
 
 struct is_started_params
@@ -241,6 +247,8 @@ enum unix_funcs
     release_render_buffer,
     get_capture_buffer,
     release_capture_buffer,
+    get_mix_format,
+    get_device_period,
     get_buffer_size,
     get_latency,
     get_current_padding,

@@ -1820,15 +1820,55 @@ HRESULT WINAPI MFCreateTopologyNode(MF_TOPOLOGY_TYPE node_type, IMFTopologyNode 
     return hr;
 }
 
+static HRESULT topology_node_get_type_handler(IMFTopologyNode *node, DWORD stream,
+        BOOL output, IMFMediaTypeHandler **handler)
+{
+    MF_TOPOLOGY_TYPE node_type;
+    IMFStreamSink *stream_sink;
+    IMFStreamDescriptor *sd;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFTopologyNode_GetNodeType(node, &node_type)))
+        return hr;
+
+    switch (node_type)
+    {
+        case MF_TOPOLOGY_OUTPUT_NODE:
+            if (output || stream)
+                return MF_E_INVALIDSTREAMNUMBER;
+
+            if (SUCCEEDED(hr = topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
+            {
+                hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, handler);
+                IMFStreamSink_Release(stream_sink);
+            }
+            break;
+        case MF_TOPOLOGY_SOURCESTREAM_NODE:
+            if (!output || stream)
+                return MF_E_INVALIDSTREAMNUMBER;
+
+            if (SUCCEEDED(hr = IMFTopologyNode_GetUnknown(node, &MF_TOPONODE_STREAM_DESCRIPTOR,
+                    &IID_IMFStreamDescriptor, (void **)&sd)))
+            {
+                hr = IMFStreamDescriptor_GetMediaTypeHandler(sd, handler);
+                IMFStreamDescriptor_Release(sd);
+            }
+            break;
+        default:
+            WARN("Unexpected node type %u.\n", node_type);
+            return MF_E_UNEXPECTED;
+    }
+
+    return hr;
+}
+
 /***********************************************************************
  *      MFGetTopoNodeCurrentType (mf.@)
  */
 HRESULT WINAPI MFGetTopoNodeCurrentType(IMFTopologyNode *node, DWORD stream, BOOL output, IMFMediaType **type)
 {
-    IMFMediaTypeHandler *type_handler;
+    IMFMediaTypeHandler *handler;
     MF_TOPOLOGY_TYPE node_type;
-    IMFStreamSink *stream_sink;
-    IMFStreamDescriptor *sd;
     IMFTransform *transform;
     UINT32 primary_output;
     HRESULT hr;
@@ -1838,36 +1878,15 @@ HRESULT WINAPI MFGetTopoNodeCurrentType(IMFTopologyNode *node, DWORD stream, BOO
     if (FAILED(hr = IMFTopologyNode_GetNodeType(node, &node_type)))
         return hr;
 
+    if (SUCCEEDED(hr = topology_node_get_type_handler(node, stream, output, &handler)))
+    {
+        hr = IMFMediaTypeHandler_GetCurrentMediaType(handler, type);
+        IMFMediaTypeHandler_Release(handler);
+        return hr;
+    }
+
     switch (node_type)
     {
-        case MF_TOPOLOGY_OUTPUT_NODE:
-            if (SUCCEEDED(topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
-            {
-                hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, &type_handler);
-                IMFStreamSink_Release(stream_sink);
-
-                if (SUCCEEDED(hr))
-                {
-                    hr = IMFMediaTypeHandler_GetCurrentMediaType(type_handler, type);
-                    IMFMediaTypeHandler_Release(type_handler);
-                }
-            }
-            break;
-        case MF_TOPOLOGY_SOURCESTREAM_NODE:
-            if (FAILED(hr = IMFTopologyNode_GetUnknown(node, &MF_TOPONODE_STREAM_DESCRIPTOR, &IID_IMFStreamDescriptor,
-                    (void **)&sd)))
-            {
-                return hr;
-            }
-
-            hr = IMFStreamDescriptor_GetMediaTypeHandler(sd, &type_handler);
-            IMFStreamDescriptor_Release(sd);
-            if (SUCCEEDED(hr))
-            {
-                hr = IMFMediaTypeHandler_GetCurrentMediaType(type_handler, type);
-                IMFMediaTypeHandler_Release(type_handler);
-            }
-            break;
         case MF_TOPOLOGY_TRANSFORM_NODE:
             if (SUCCEEDED(hr = topology_node_get_object(node, &IID_IMFTransform, (void **)&transform)))
             {
@@ -2162,41 +2181,6 @@ static HRESULT connect_to_converter(struct transform_output_type *output_type, s
 typedef HRESULT (*p_topology_loader_connect_func)(struct topoloader_context *context, IMFTopologyNode *upstream_node,
         unsigned int output_index, IMFTopologyNode *downstream_node, unsigned int input_index);
 
-static HRESULT topology_loader_get_node_type_handler(IMFTopologyNode *node, IMFMediaTypeHandler **handler)
-{
-    MF_TOPOLOGY_TYPE node_type;
-    IMFStreamSink *stream_sink;
-    IMFStreamDescriptor *sd;
-    HRESULT hr;
-
-    if (FAILED(hr = IMFTopologyNode_GetNodeType(node, &node_type)))
-         return hr;
-
-    switch (node_type)
-    {
-        case MF_TOPOLOGY_OUTPUT_NODE:
-            if (SUCCEEDED(hr = topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
-            {
-                hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, handler);
-                IMFStreamSink_Release(stream_sink);
-            }
-            break;
-        case MF_TOPOLOGY_SOURCESTREAM_NODE:
-            if (SUCCEEDED(hr = IMFTopologyNode_GetUnknown(node, &MF_TOPONODE_STREAM_DESCRIPTOR,
-                    &IID_IMFStreamDescriptor, (void **)&sd)))
-            {
-                hr = IMFStreamDescriptor_GetMediaTypeHandler(sd, handler);
-                IMFStreamDescriptor_Release(sd);
-            }
-            break;
-        default:
-            WARN("Unexpected node type %u.\n", node_type);
-            return MF_E_UNEXPECTED;
-    }
-
-    return hr;
-}
-
 static HRESULT topology_loader_get_mft_categories(IMFMediaTypeHandler *handler, GUID *decode_cat, GUID *convert_cat)
 {
     GUID major;
@@ -2285,10 +2269,9 @@ static HRESULT topology_loader_connect_source_to_sink(struct topoloader_context 
 
     TRACE("attempting to connect %p:%u to %p:%u\n", source, output_index, sink, input_index);
 
-    if (FAILED(hr = topology_loader_get_node_type_handler(source, &source_handler)))
+    if (FAILED(hr = topology_node_get_type_handler(source, output_index, TRUE, &source_handler)))
         goto done;
-
-    if (FAILED(hr = topology_loader_get_node_type_handler(sink, &sink_handler)))
+    if (FAILED(hr = topology_node_get_type_handler(sink, input_index, FALSE, &sink_handler)))
         goto done;
 
     if (FAILED(IMFTopologyNode_GetUINT32(source, &MF_TOPONODE_CONNECT_METHOD, &source_method)))

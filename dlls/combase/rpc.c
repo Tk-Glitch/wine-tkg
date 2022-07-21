@@ -477,6 +477,9 @@ static HRESULT create_server(REFCLSID rclsid, HANDLE *process)
 {
     static const WCHAR  embeddingW[] = L" -Embedding";
     HKEY                key;
+    int                 arch = (sizeof(void *) > sizeof(int)) ? 64 : 32;
+    REGSAM              opposite = (arch == 64) ? KEY_WOW64_32KEY : KEY_WOW64_64KEY;
+    BOOL                is_wow64 = FALSE, is_opposite = FALSE;
     HRESULT             hr;
     WCHAR               command[MAX_PATH + ARRAY_SIZE(embeddingW)];
     DWORD               size = (MAX_PATH+1) * sizeof(WCHAR);
@@ -484,7 +487,14 @@ static HRESULT create_server(REFCLSID rclsid, HANDLE *process)
     PROCESS_INFORMATION pinfo;
     LONG ret;
 
+    TRACE("Attempting to start server for %s\n", debugstr_guid(rclsid));
+
     hr = open_key_for_clsid(rclsid, L"LocalServer32", KEY_READ, &key);
+    if (FAILED(hr) && (arch == 64 || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
+    {
+        hr = open_key_for_clsid(rclsid, L"LocalServer32", opposite | KEY_READ, &key);
+        is_opposite = TRUE;
+    }
     if (FAILED(hr))
     {
         ERR("class %s not registered\n", debugstr_guid(rclsid));
@@ -510,7 +520,19 @@ static HRESULT create_server(REFCLSID rclsid, HANDLE *process)
 
     /* FIXME: Win2003 supports a ServerExecutable value that is passed into
      * CreateProcess */
-    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &sinfo, &pinfo))
+    if (is_opposite)
+    {
+        void *cookie;
+        Wow64DisableWow64FsRedirection(&cookie);
+        if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &sinfo, &pinfo))
+        {
+            WARN("failed to run local server %s\n", debugstr_w(command));
+            hr = HRESULT_FROM_WIN32(GetLastError());
+        }
+        Wow64RevertWow64FsRedirection(cookie);
+        if (FAILED(hr)) return hr;
+    }
+    else if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &sinfo, &pinfo))
     {
         WARN("failed to run local server %s\n", debugstr_w(command));
         return HRESULT_FROM_WIN32(GetLastError());
@@ -527,7 +549,7 @@ static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
     HKEY key;
     int arch = (sizeof(void *) > sizeof(int)) ? 64 : 32;
     REGSAM opposite = (arch == 64) ? KEY_WOW64_32KEY : KEY_WOW64_64KEY;
-    BOOL is_wow64 = FALSE;
+    BOOL is_wow64 = FALSE, is_opposite = FALSE;
     HRESULT hr;
     WCHAR command[MAX_PATH + ARRAY_SIZE(processidW) + CHARS_IN_GUID];
     DWORD size;
@@ -548,6 +570,7 @@ static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
     {
         hr = open_appidkey_from_clsid(rclsid, opposite | KEY_READ, &key);
         if (FAILED(hr)) return hr;
+        is_opposite = TRUE;
     }
 
     size = (MAX_PATH + 1) * sizeof(WCHAR);
@@ -574,7 +597,7 @@ static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
 
     TRACE("Activating surrogate local server %s\n", debugstr_w(command));
 
-    if (is_wow64 && arch == 64)
+    if (is_opposite)
     {
         void *cookie;
         Wow64DisableWow64FsRedirection(&cookie);

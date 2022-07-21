@@ -2944,16 +2944,6 @@ static void wined3d_bo_gl_unmap(struct wined3d_bo_gl *bo, struct wined3d_context
         return;
     }
 
-    if (bo->memory)
-    {
-        struct wined3d_allocator_chunk_gl *chunk_gl = wined3d_allocator_chunk_gl(bo->memory->chunk);
-
-        wined3d_allocator_chunk_gl_unmap(chunk_gl, context_gl);
-        if (!chunk_gl->c.map_ptr)
-            bo->b.map_ptr = NULL;
-        return;
-    }
-
     wined3d_device_bo_map_lock(context_gl->c.device);
     /* The mapping is still in use by the client (viz. for an accelerated
      * NOOVERWRITE map). The client will trigger another unmap request when the
@@ -2967,6 +2957,14 @@ static void wined3d_bo_gl_unmap(struct wined3d_bo_gl *bo, struct wined3d_context
     }
     bo->b.map_ptr = NULL;
     wined3d_device_bo_map_unlock(context_gl->c.device);
+
+    if (bo->memory)
+    {
+        struct wined3d_allocator_chunk_gl *chunk_gl = wined3d_allocator_chunk_gl(bo->memory->chunk);
+
+        wined3d_allocator_chunk_gl_unmap(chunk_gl, context_gl);
+        return;
+    }
 
     wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
     GL_EXTCALL(glUnmapBuffer(bo->binding));
@@ -5327,8 +5325,6 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
         checkGLcall("glMemoryBarrier");
     }
 
-    wined3d_context_gl_pause_transform_feedback(context_gl, FALSE);
-
     if (rasterizer_discard)
     {
         glDisable(GL_RASTERIZER_DISCARD);
@@ -5952,6 +5948,8 @@ void wined3d_context_gl_draw_shaded_quad(struct wined3d_context_gl *context_gl, 
     apply_texture_blit_state(gl_info, &texture_gl->texture_rgb, info.bind_target, level, filter);
     gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_MAX_LEVEL, level);
 
+    wined3d_context_gl_pause_transform_feedback(context_gl, FALSE);
+
     wined3d_context_gl_get_rt_size(context_gl, &dst_size);
     w = dst_size.cx;
     h = dst_size.cy;
@@ -6034,6 +6032,8 @@ void wined3d_context_gl_draw_textured_quad(struct wined3d_context_gl *context_gl
     gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_MAX_LEVEL, level);
     gl_info->gl_ops.gl.p_glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
     checkGLcall("glTexEnvi");
+
+    wined3d_context_gl_pause_transform_feedback(context_gl, FALSE);
 
     /* Draw a quad. */
     gl_info->gl_ops.gl.p_glBegin(GL_TRIANGLE_STRIP);

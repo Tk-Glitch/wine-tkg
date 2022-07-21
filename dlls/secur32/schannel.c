@@ -759,6 +759,17 @@ static void fill_missing_sec_buffer(SecBufferDesc *input, DWORD size)
     }
 }
 
+static BOOL validate_input_buffers(SecBufferDesc *desc)
+{
+    int i;
+    for (i = 0; i < desc->cBuffers; i++)
+    {
+        SecBuffer *buffer = &desc->pBuffers[i];
+        if (buffer->BufferType == SECBUFFER_EMPTY && buffer->cbBuffer) return FALSE;
+    }
+    return TRUE;
+}
+
 /***********************************************************************
  *              InitializeSecurityContextW
  */
@@ -894,6 +905,7 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
 
         if (pInput)
         {
+            if (!validate_input_buffers(pInput)) return SEC_E_INVALID_TOKEN;
             if ((idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) == -1) return SEC_E_INCOMPLETE_MESSAGE;
 
             buffer = &pInput->pBuffers[idx];
@@ -1152,7 +1164,7 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
                 stream_sizes->cbHeader = ctx->header_size;
                 stream_sizes->cbTrailer = mac_size + 256; /* Max 255 bytes padding + 1 for padding size */
                 stream_sizes->cbMaximumMessage = message_size;
-                stream_sizes->cbBuffers = 4;
+                stream_sizes->cBuffers = 4;
                 stream_sizes->cbBlockSize = block_size;
             }
 

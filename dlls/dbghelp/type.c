@@ -321,7 +321,7 @@ BOOL symt_add_udt_element(struct module* module, struct symt_udt* udt_type,
     m->hash_elt.next = NULL;
 
     m->kind            = DataIsMember;
-    m->container       = &udt_type->symt;
+    m->container       = &module->top->symt; /* native defines lexical parent as module, not udt... */
     m->type            = elt_type;
     m->u.member.offset = offset;
     m->u.member.bit_offset = bit_offset;
@@ -939,13 +939,19 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             {
             case DataIsParam:
             case DataIsLocal:
-                X(ULONG) = ((const struct symt_data*)type)->u.var.offset; 
+                {
+                    struct location loc = ((const struct symt_data*)type)->u.var;
+                    if (loc.kind == loc_register || loc.kind == loc_regrel)
+                        X(ULONG) = ((const struct symt_data*)type)->u.var.offset;
+                    else
+                        return FALSE; /* FIXME perhaps do better with local context? */
+                }
                 break;
             case DataIsMember:
                 X(ULONG) = ((const struct symt_data*)type)->u.member.offset;
                 break;
             default:
-                FIXME("Unknown kind (%u) for get-offset\n",     
+                WARN("Unsupported kind (%u) for get-offset\n",
                       ((const struct symt_data*)type)->kind);
                 return FALSE;
             }
@@ -957,6 +963,7 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagExe:
         case SymTagCompiland:
         case SymTagUDT:
+        case SymTagEnum:
         case SymTagFunctionType:
         case SymTagFunctionArgType:
         case SymTagPointerType:

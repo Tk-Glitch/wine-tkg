@@ -60,8 +60,6 @@ enum DriverPriority {
     Priority_Preferred
 };
 
-static struct pulse_config pulse_config;
-
 static HANDLE pulse_thread;
 static struct list g_sessions = LIST_INIT(g_sessions);
 static struct list g_devices_cache = LIST_INIT(g_devices_cache);
@@ -492,7 +490,6 @@ int WINAPI AUDDRV_GetPriority(void)
     char *name;
 
     params.name   = name = get_application_name(FALSE);
-    params.config = &pulse_config;
     pulse_call(test_connect, &params);
     free(name);
     return SUCCEEDED(params.result) ? Priority_Preferred : Priority_Unavailable;
@@ -1136,22 +1133,36 @@ static HRESULT WINAPI AudioClient_GetMixFormat(IAudioClient3 *iface,
         WAVEFORMATEX **pwfx)
 {
     ACImpl *This = impl_from_IAudioClient3(iface);
+    struct get_mix_format_params params;
 
     TRACE("(%p)->(%p)\n", This, pwfx);
 
     if (!pwfx)
         return E_POINTER;
+    *pwfx = NULL;
 
-    *pwfx = clone_format(&pulse_config.modes[This->dataflow == eCapture].format.Format);
-    if (!*pwfx)
+    params.pulse_name = This->pulse_name;
+    params.flow = This->dataflow;
+    params.fmt = CoTaskMemAlloc(sizeof(WAVEFORMATEXTENSIBLE));
+    if (!params.fmt)
         return E_OUTOFMEMORY;
-    dump_fmt(*pwfx);
-    return S_OK;
+
+    pulse_call(get_mix_format, &params);
+
+    if (SUCCEEDED(params.result)) {
+        *pwfx = &params.fmt->Format;
+        dump_fmt(*pwfx);
+    } else {
+        CoTaskMemFree(params.fmt);
+    }
+
+    return params.result;
 }
 
 static HRESULT WINAPI AudioClient_GetDevicePeriod(IAudioClient3 *iface,
         REFERENCE_TIME *defperiod, REFERENCE_TIME *minperiod)
 {
+    struct get_device_period_params params;
     ACImpl *This = impl_from_IAudioClient3(iface);
 
     TRACE("(%p)->(%p, %p)\n", This, defperiod, minperiod);
@@ -1159,12 +1170,14 @@ static HRESULT WINAPI AudioClient_GetDevicePeriod(IAudioClient3 *iface,
     if (!defperiod && !minperiod)
         return E_POINTER;
 
-    if (defperiod)
-        *defperiod = pulse_config.modes[This->dataflow == eCapture].def_period;
-    if (minperiod)
-        *minperiod = pulse_config.modes[This->dataflow == eCapture].min_period;
+    params.flow = This->dataflow;
+    params.pulse_name = This->pulse_name;
+    params.def_period = defperiod;
+    params.min_period = minperiod;
 
-    return S_OK;
+    pulse_call(get_device_period, &params);
+
+    return params.result;
 }
 
 static HRESULT WINAPI AudioClient_Start(IAudioClient3 *iface)

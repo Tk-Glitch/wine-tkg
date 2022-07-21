@@ -2948,22 +2948,12 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     rec.ExceptionAddress = (void *)RIP_sig(ucontext);
     save_context( &context, sigcontext );
 
-    switch (siginfo->si_code)
+    switch (TRAP_sig(ucontext))
     {
-    case TRAP_TRACE:  /* Single-step exception */
-    case 4 /* TRAP_HWBKPT */: /* Hardware breakpoint exception */
+    case TRAP_x86_TRCTRAP:
         rec.ExceptionCode = EXCEPTION_SINGLE_STEP;
         break;
-    case TRAP_BRKPT:   /* Breakpoint exception */
-#ifdef SI_KERNEL
-    case SI_KERNEL:
-#endif
-        /* Check if this is actually icebp instruction */
-        if (((unsigned char *)RIP_sig(ucontext))[-1] == 0xF1)
-        {
-            rec.ExceptionCode = EXCEPTION_SINGLE_STEP;
-            break;
-        }
+    case TRAP_x86_BPTFLT:
         rec.ExceptionAddress = (char *)rec.ExceptionAddress - 1;  /* back up over the int3 instruction */
         /* fall through */
     default:
@@ -3584,6 +3574,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "pushfq\n\t"
                    "popq 0x80(%rcx)\n\t"
                    "movl $0,0x94(%rcx)\n\t"        /* frame->restore_flags */
+                   ".globl " __ASM_NAME("__wine_syscall_dispatcher_prolog_end") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_prolog_end") ":\n\t"
                    "movq %rax,0x00(%rcx)\n\t"
                    "movq %rbx,0x08(%rcx)\n\t"
@@ -3697,12 +3688,16 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "movq 0x08(%rcx),%rbx\n\t"
                    "testl $0x3,%edx\n\t"           /* CONTEXT_CONTROL | CONTEXT_INTEGER */
                    "jnz 1f\n\t"
+                   "movq 0x80(%rcx),%r11\n\t"      /* frame->eflags */
+                   "pushq %r11\n\t"
+                   "popfq\n\t"
                    "movq 0x88(%rcx),%rsp\n\t"
                    "movq 0x70(%rcx),%rcx\n\t"      /* frame->rip */
                    "jmpq *%rcx\n\t"
                    "1:\tleaq 0x70(%rcx),%rsp\n\t"
                    "testl $0x2,%edx\n\t"           /* CONTEXT_INTEGER */
                    "jnz 1f\n\t"
+                   "movq 0x10(%rsp),%r11\n\t"      /* frame->eflags */
                    "movq (%rsp),%rcx\n\t"          /* frame->rip */
                    "iretq\n"
                    "1:\tmovq 0x00(%rcx),%rax\n\t"
@@ -3714,7 +3709,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "movq 0x10(%rcx),%rcx\n"
                    "iretq\n"
                    "5:\tmovl $0xc000000d,%edx\n\t" /* STATUS_INVALID_PARAMETER */
-                   "movq %rsp,%rcx\n"
+                   "movq %rsp,%rcx\n\t"
+                   ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
                    "movl 0xb0(%rcx),%r14d\n\t"     /* frame->syscall_flags */
                    "movq %rdx,%rax\n\t"

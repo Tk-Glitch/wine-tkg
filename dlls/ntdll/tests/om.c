@@ -929,7 +929,6 @@ static void test_name_limits(void)
     for (i = 0; i < 65536 / sizeof(WCHAR); i++) str.Buffer[i + wcslen(registryW)] = 'a';
     str.Length = 0;
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr, 0, NULL, 0, NULL );
-    todo_wine
     ok( status == STATUS_OBJECT_PATH_SYNTAX_BAD, "%u: NtCreateKey failed %lx\n", str.Length, status );
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr2, 0, NULL, 0, NULL );
     ok( status == STATUS_INVALID_HANDLE, "%u: NtCreateKey failed %lx\n", str.Length, status );
@@ -1010,13 +1009,11 @@ static void test_name_limits(void)
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr, 0, NULL, 0, NULL );
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtCreateKey failed %lx\n", str.Length, status );
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtOpenKey failed %lx\n", str.Length, status );
     str.Length = 2000;
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr, 0, NULL, 0, NULL );
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtCreateKey failed %lx\n", str.Length, status );
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_INVALID_PARAMETER, "%u: NtOpenKey failed %lx\n", str.Length, status );
     /* some Windows versions change the error past 2050 chars, others past 4066 chars, some don't */
     str.Length = 5000;
@@ -1027,7 +1024,6 @@ static void test_name_limits(void)
         "%u: NtCreateKey failed %lx\n", str.Length, status );
     ret = (HANDLE)0xdeadbeef;
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_BUFFER_OVERFLOW ||
         status == STATUS_BUFFER_TOO_SMALL ||
         status == STATUS_INVALID_PARAMETER,
@@ -1043,7 +1039,6 @@ static void test_name_limits(void)
     ok( !ret, "handle set %p\n", ret );
     ret = (HANDLE)0xdeadbeef;
     status = pNtOpenKey( &ret, GENERIC_ALL, &attr );
-    todo_wine
     ok( status == STATUS_OBJECT_NAME_INVALID ||
         status == STATUS_BUFFER_OVERFLOW ||
         status == STATUS_BUFFER_TOO_SMALL,
@@ -1052,11 +1047,9 @@ static void test_name_limits(void)
     attr3.RootDirectory = 0;
     attr2.ObjectName = attr3.ObjectName = NULL;
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr2, 0, NULL, 0, NULL );
-    todo_wine
     ok( status == STATUS_ACCESS_VIOLATION || status == STATUS_INVALID_HANDLE /* vista wow64 */,
         "NULL: NtCreateKey failed %lx\n", status );
     status = pNtCreateKey( &ret, GENERIC_ALL, &attr3, 0, NULL, 0, NULL );
-    todo_wine
     ok( status == STATUS_ACCESS_VIOLATION, "NULL: NtCreateKey failed %lx\n", status );
     status = pNtCreateKey( &ret, GENERIC_ALL, NULL, 0, NULL, 0, NULL );
     ok( status == STATUS_ACCESS_VIOLATION, "NULL: NtCreateKey failed %lx\n", status );

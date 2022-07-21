@@ -312,6 +312,7 @@ static void * const syscalls[] =
     NtSetInformationProcess,
     NtSetInformationThread,
     NtSetInformationToken,
+    NtSetInformationVirtualMemory,
     NtSetIntervalProfile,
     NtSetIoCompletion,
     NtSetLdtEntries,

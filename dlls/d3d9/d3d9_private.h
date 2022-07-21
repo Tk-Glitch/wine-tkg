@@ -101,12 +101,7 @@ struct d3d9_device
     struct fvf_declaration *fvf_decls;
     UINT fvf_decl_count, fvf_decl_size;
 
-    struct wined3d_buffer *vertex_buffer;
-    UINT vertex_buffer_size;
-    UINT vertex_buffer_pos;
-    struct wined3d_buffer *index_buffer;
-    UINT index_buffer_size;
-    UINT index_buffer_pos;
+    struct wined3d_streaming_buffer vertex_buffer, index_buffer;
 
     struct d3d9_surface *render_targets[D3D_MAX_SIMULTANEOUS_RENDERTARGETS];
 
@@ -212,9 +207,9 @@ struct d3d9_indexbuffer
     struct d3d9_resource resource;
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice9Ex *parent_device;
-    struct wined3d_buffer *draw_buffer;
     enum wined3d_format_id format;
     DWORD usage;
+    bool sysmem;
 };
 
 HRESULT indexbuffer_init(struct d3d9_indexbuffer *buffer, struct d3d9_device *device,

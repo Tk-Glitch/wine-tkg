@@ -48,6 +48,7 @@ struct d2d_factory
     float dpi_y;
 
     struct list effects;
+    INIT_ONCE init_builtins;
 
     CRITICAL_SECTION cs;
 };
@@ -67,11 +68,30 @@ static inline struct d2d_factory *impl_from_ID2D1Multithread(ID2D1Multithread *i
     return CONTAINING_RECORD(iface, struct d2d_factory, ID2D1Multithread_iface);
 }
 
+static BOOL WINAPI d2d_factory_builtins_initonce(INIT_ONCE *once, void *param, void **context)
+{
+    d2d_effects_init_builtins(param);
+
+    return TRUE;
+}
+
+static void d2d_factory_init_builtin_effects(struct d2d_factory *factory)
+{
+    InitOnceExecuteOnce(&factory->init_builtins, d2d_factory_builtins_initonce, factory, NULL);
+}
+
+void d2d_factory_register_effect(struct d2d_factory *factory, struct d2d_effect_registration *effect)
+{
+    list_add_tail(&factory->effects, &effect->entry);
+}
+
 struct d2d_effect_registration * d2d_factory_get_registered_effect(ID2D1Factory *iface,
         const GUID *id)
 {
-    const struct d2d_factory *factory = unsafe_impl_from_ID2D1Factory(iface);
+    struct d2d_factory *factory = unsafe_impl_from_ID2D1Factory(iface);
     struct d2d_effect_registration *reg;
+
+    d2d_effects_init_builtins(factory);
 
     LIST_FOR_EACH_ENTRY(reg, &factory->effects, struct d2d_effect_registration, entry)
     {
@@ -884,10 +904,13 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_RegisterEffectFromStream(ID2D1Facto
     TRACE("iface %p, effect_id %s, property_xml %p, bindings %p, binding_count %u, effect_factory %p.\n",
             iface, debugstr_guid(effect_id), property_xml, bindings, binding_count, effect_factory);
 
-    LIST_FOR_EACH_ENTRY(effect, &factory->effects, struct d2d_effect_registration, entry)
+    d2d_factory_init_builtin_effects(factory);
+
+    LIST_FOR_EACH_ENTRY_REV(effect, &factory->effects, struct d2d_effect_registration, entry)
     {
         if (IsEqualGUID(effect_id, &effect->id))
         {
+            if (effect->builtin) return E_INVALIDARG;
             ++effect->registration_count;
             return S_OK;
         }
@@ -921,7 +944,8 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_RegisterEffectFromStream(ID2D1Facto
     if (!parse_effect_get_property(effect, L"DisplayName")
             || !parse_effect_get_property(effect, L"Author")
             || !parse_effect_get_property(effect, L"Category")
-            || !parse_effect_get_property(effect, L"Description"))
+            || !parse_effect_get_property(effect, L"Description")
+            || !parse_effect_get_property(effect, L"Inputs"))
     {
         WARN("Missing required properties.\n");
         d2d_effect_registration_cleanup(effect);
@@ -947,7 +971,12 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_RegisterEffectFromStream(ID2D1Facto
     effect->registration_count = 1;
     effect->id = *effect_id;
     effect->factory = effect_factory;
-    list_add_tail(&factory->effects, &effect->entry);
+    d2d_effect_properties_add(&effect->properties, L"MinInputs", D2D1_PROPERTY_MIN_INPUTS,
+            D2D1_PROPERTY_TYPE_UINT32, L"1");
+    d2d_effect_properties_add(&effect->properties, L"MaxInputs", D2D1_PROPERTY_MAX_INPUTS,
+            D2D1_PROPERTY_TYPE_UINT32, L"1" /* FIXME */);
+    effect->default_input_count = 1;
+    d2d_factory_register_effect(factory, effect);
 
     return S_OK;
 }
@@ -986,10 +1015,13 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_UnregisterEffect(ID2D1Factory3 *ifa
 
     TRACE("iface %p, effect_id %s.\n", iface, debugstr_guid(effect_id));
 
-    LIST_FOR_EACH_ENTRY(effect, &factory->effects, struct d2d_effect_registration, entry)
+    d2d_factory_init_builtin_effects(factory);
+
+    LIST_FOR_EACH_ENTRY_REV(effect, &factory->effects, struct d2d_effect_registration, entry)
     {
         if (IsEqualGUID(effect_id, &effect->id))
         {
+            if (effect->builtin) break;
             if (!--effect->registration_count)
             {
                 list_remove(&effect->entry);
@@ -1005,10 +1037,36 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_UnregisterEffect(ID2D1Factory3 *ifa
 static HRESULT STDMETHODCALLTYPE d2d_factory_GetRegisteredEffects(ID2D1Factory3 *iface,
         CLSID *effects, UINT32 effect_count, UINT32 *returned, UINT32 *registered)
 {
-    FIXME("iface %p, effects %p, effect_count %u, returned %p, registered %p stub!\n",
+    struct d2d_factory *factory = impl_from_ID2D1Factory3(iface);
+    struct d2d_effect_registration *effect;
+    UINT32 ret, reg;
+
+    TRACE("iface %p, effects %p, effect_count %u, returned %p, registered %p.\n",
             iface, effects, effect_count, returned, registered);
 
-    return E_NOTIMPL;
+    if (!returned) returned = &ret;
+    if (!registered) registered = &reg;
+
+    *registered = 0;
+    *returned = 0;
+
+    d2d_factory_init_builtin_effects(factory);
+
+    LIST_FOR_EACH_ENTRY(effect, &factory->effects, struct d2d_effect_registration, entry)
+    {
+        if (effects && effect_count)
+        {
+            *effects = effect->id;
+            effects++;
+            effect_count--;
+            *returned += 1;
+        }
+
+        *registered += 1;
+    }
+
+    if (!effects) return S_OK;
+    return *returned == *registered ? S_OK : D2DERR_INSUFFICIENT_BUFFER;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_GetEffectProperties(ID2D1Factory3 *iface,
@@ -1155,6 +1213,7 @@ static void d2d_factory_init(struct d2d_factory *factory, D2D1_FACTORY_TYPE fact
     d2d_factory_reload_sysmetrics(factory);
     list_init(&factory->effects);
     InitializeCriticalSection(&factory->cs);
+    InitOnceInitialize(&factory->init_builtins);
 }
 
 HRESULT WINAPI D2D1CreateFactory(D2D1_FACTORY_TYPE factory_type, REFIID iid,

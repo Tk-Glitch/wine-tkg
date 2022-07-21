@@ -187,7 +187,6 @@ struct sock
      * both pending_events and reported_events (as we should only ever report
      * any event once until it is reset.) */
     unsigned int        reported_events;
-    unsigned int        flags;       /* socket flags */
     unsigned short      proto;       /* socket protocol */
     unsigned short      type;        /* socket type */
     unsigned short      family;      /* socket family */
@@ -237,7 +236,6 @@ static void sock_poll_event( struct fd *fd, int event );
 static enum server_fd_type sock_get_fd_type( struct fd *fd );
 static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
 static void sock_cancel_async( struct fd *fd, struct async *async );
-static void sock_queue_async( struct fd *fd, struct async *async, int type, int count );
 static void sock_reselect_async( struct fd *fd, struct async_queue *queue );
 
 static int accept_into_socket( struct sock *sock, struct sock *acceptsock );
@@ -285,7 +283,7 @@ static const struct fd_ops sock_fd_ops =
     no_fd_get_volume_info,        /* get_volume_info */
     sock_ioctl,                   /* ioctl */
     sock_cancel_async,            /* cancel_async */
-    sock_queue_async,             /* queue_async */
+    no_fd_queue_async,            /* queue_async */
     sock_reselect_async           /* reselect_async */
 };
 
@@ -809,8 +807,6 @@ static void complete_async_connect( struct sock *sock )
     int ret;
 
     if (debug_level) fprintf( stderr, "completing connect request for socket %p\n", sock );
-
-    sock->state = SOCK_CONNECTED;
 
     if (!req->send_len)
     {
@@ -1378,50 +1374,6 @@ static void sock_cancel_async( struct fd *fd, struct async *async )
     async_terminate( async, STATUS_CANCELLED );
 }
 
-static void sock_queue_async( struct fd *fd, struct async *async, int type, int count )
-{
-    struct sock *sock = get_fd_user( fd );
-    struct async_queue *queue;
-
-    assert( sock->obj.ops == &sock_ops );
-
-    switch (type)
-    {
-    case ASYNC_TYPE_READ:
-        if (sock->rd_shutdown)
-        {
-            set_error( STATUS_PIPE_DISCONNECTED );
-            return;
-        }
-        queue = &sock->read_q;
-        break;
-
-    case ASYNC_TYPE_WRITE:
-        if (sock->wr_shutdown)
-        {
-            set_error( STATUS_PIPE_DISCONNECTED );
-            return;
-        }
-        queue = &sock->write_q;
-        break;
-
-    default:
-        set_error( STATUS_INVALID_PARAMETER );
-        return;
-    }
-
-    if (sock->state != SOCK_CONNECTED)
-    {
-        set_error( STATUS_PIPE_DISCONNECTED );
-        return;
-    }
-
-    queue_async( queue, async );
-    sock_reselect( sock );
-
-    set_error( STATUS_PENDING );
-}
-
 static void sock_reselect_async( struct fd *fd, struct async_queue *queue )
 {
     struct sock *sock = get_fd_user( fd );
@@ -1526,7 +1478,6 @@ static struct sock *create_socket(void)
     sock->mask    = 0;
     sock->pending_events = 0;
     sock->reported_events = 0;
-    sock->flags   = 0;
     sock->proto   = 0;
     sock->type    = 0;
     sock->family  = 0;
@@ -1641,7 +1592,7 @@ static void set_dont_fragment( int fd, int level, int value )
     setsockopt( fd, level, optname, &value, sizeof(value) );
 }
 
-static int init_socket( struct sock *sock, int family, int type, int protocol, unsigned int flags )
+static int init_socket( struct sock *sock, int family, int type, int protocol )
 {
     unsigned int options = 0;
     int sockfd, unix_type, unix_family, unix_protocol, value;
@@ -1720,7 +1671,6 @@ static int init_socket( struct sock *sock, int family, int type, int protocol, u
         sock->sndbuf = value;
 
     sock->state  = (type == WS_SOCK_STREAM ? SOCK_UNCONNECTED : SOCK_CONNECTIONLESS);
-    sock->flags  = flags;
     sock->proto  = protocol;
     sock->type   = type;
     sock->family = family;
@@ -1798,7 +1748,6 @@ static struct sock *accept_socket( struct sock *sock )
         acceptsock->message = sock->message;
         acceptsock->connect_time = current_time;
         if (sock->event) acceptsock->event = (struct event *)grab_object( sock->event );
-        acceptsock->flags = sock->flags;
         if (!(acceptsock->fd = create_anonymous_fd( &sock_fd_ops, acceptfd, &acceptsock->obj,
                                                     get_fd_options( sock->fd ) )))
         {
@@ -2188,11 +2137,12 @@ static struct accept_req *alloc_accept_req( struct sock *sock, struct sock *acce
 static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     struct sock *sock = get_fd_user( fd );
-    int unix_fd;
+    int unix_fd = -1;
 
     assert( sock->obj.ops == &sock_ops );
 
-    if (code != IOCTL_AFD_WINE_CREATE && (unix_fd = get_unix_fd( fd )) < 0) return;
+    if (code != IOCTL_AFD_WINE_CREATE && code != IOCTL_AFD_POLL && (unix_fd = get_unix_fd( fd )) < 0)
+        return;
 
     switch(code)
     {
@@ -2205,7 +2155,7 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
             set_error( STATUS_INVALID_PARAMETER );
             return;
         }
-        init_socket( sock, params->family, params->type, params->protocol, params->flags );
+        init_socket( sock, params->family, params->type, params->protocol );
         return;
     }
 
@@ -2411,6 +2361,7 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         if (!ret)
         {
             sock->state = SOCK_CONNECTED;
+            sock->connect_time = current_time;
 
             if (!send_len) return;
         }

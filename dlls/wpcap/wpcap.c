@@ -68,15 +68,6 @@ int CDECL pcap_compile( struct pcap *pcap, void *program, const char *buf, int o
     return PCAP_CALL( compile, &params );
 }
 
-struct pcap * CDECL pcap_create( const char *src, char *errbuf )
-{
-    struct pcap *ret;
-    struct create_params params = { src, errbuf, &ret };
-    TRACE( "%s, %p\n", src, errbuf );
-    PCAP_CALL( create, &params );
-    return ret;
-}
-
 int CDECL pcap_datalink( struct pcap *pcap )
 {
     TRACE( "%p\n", pcap );
@@ -106,15 +97,6 @@ const char * CDECL pcap_datalink_val_to_name( int link )
     TRACE( "%d\n", link );
     PCAP_CALL( datalink_val_to_name, &params );
     return ret;
-}
-
-int CDECL pcap_dispatch( struct pcap *pcap, int count,
-                         void (CALLBACK *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
-                         unsigned char *user )
-{
-    /* FIXME: reimplement on top of pcap_next_ex */
-    FIXME( "%p, %d, %p, %p: not implemented\n", pcap, count, callback, user );
-    return -1;
 }
 
 void CDECL pcap_dump( unsigned char *user, const struct pcap_pkthdr_win32 *hdr, const unsigned char *packet )
@@ -552,6 +534,38 @@ const unsigned char * CDECL pcap_next( struct pcap *pcap, struct pcap_pkthdr_win
     return data;
 }
 
+int CDECL pcap_dispatch( struct pcap *pcap, int count,
+                         void (CALLBACK *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
+                         unsigned char *user )
+{
+    int processed = 0;
+    TRACE( "%p, %d, %p, %p\n", pcap, count, callback, user );
+
+    while (processed < count)
+    {
+        struct pcap_pkthdr_win32 *hdr = NULL;
+        const unsigned char *data = NULL;
+
+        int ret = pcap_next_ex( pcap, &hdr, &data );
+
+        if (ret == 1)
+            processed++;
+        else if (ret == 0)
+            break;
+        else if (ret == -2)
+        {
+            if (processed == 0) return -2;
+            break;
+        }
+        else
+            return ret;
+
+        callback( user, hdr, data );
+    }
+
+    return processed;
+}
+
 static char *strdupWA( const WCHAR *src )
 {
     char *dst;
@@ -576,6 +590,26 @@ static char *map_win32_device_name( const char *dev )
         }
     }
     free( adapters );
+    return ret;
+}
+
+struct pcap * CDECL pcap_create( const char *source, char *errbuf )
+{
+    char *unix_dev;
+    struct pcap *ret;
+    TRACE( "%s, %p\n", source, errbuf );
+
+    if (!(unix_dev = map_win32_device_name( source )))
+    {
+        if (errbuf) sprintf( errbuf, "Unable to open the adapter." );
+        return NULL;
+    }
+    else
+    {
+        struct create_params params = { unix_dev, errbuf, &ret };
+        PCAP_CALL( create, &params );
+    }
+    free( unix_dev );
     return ret;
 }
 

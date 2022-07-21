@@ -788,12 +788,6 @@ typedef struct DECLSPEC_ALIGN(8) MEM_EXTENDED_PARAMETER {
     } DUMMYUNIONNAME;
 } MEM_EXTENDED_PARAMETER, *PMEM_EXTENDED_PARAMETER;
 
-typedef struct _WIN32_MEMORY_RANGE_ENTRY
-{
-    PVOID  VirtualAddress;
-    SIZE_T NumberOfBytes;
-} WIN32_MEMORY_RANGE_ENTRY, *PWIN32_MEMORY_RANGE_ENTRY;
-
 #define	PAGE_NOACCESS		0x01
 #define	PAGE_READONLY		0x02
 #define	PAGE_READWRITE		0x04
@@ -6428,7 +6422,7 @@ DECLSPEC_NORETURN void __fastfail(unsigned int);
 #pragma intrinsic(_InterlockedExchangePointer)
 #pragma intrinsic(_InterlockedIncrement64)
 #pragma intrinsic(_InterlockedOr64)
-#pragma intrinsic(_InterlockedXord64)
+#pragma intrinsic(_InterlockedXor64)
 
 __int64   _InterlockedAnd64(__int64 volatile *, __int64);
 void *    _InterlockedCompareExchangePointer(void *volatile*,void*,void*);

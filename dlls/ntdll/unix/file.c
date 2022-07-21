@@ -5033,7 +5033,7 @@ static BOOL async_write_proc( void *user, ULONG_PTR *info, NTSTATUS *status )
                                           &needs_close, &type, NULL )))
             break;
 
-        if (!fileio->count && (type == FD_TYPE_MAILSLOT || type == FD_TYPE_SOCKET))
+        if (!fileio->count && type == FD_TYPE_MAILSLOT)
             result = send( fd, fileio->buffer, 0, 0 );
         else
             result = write( fd, &fileio->buffer[fileio->already], fileio->count - fileio->already );
@@ -5673,6 +5673,12 @@ NTSTATUS WINAPI NtReadFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, vo
             goto done;
         }
     }
+    else if (type == FD_TYPE_SOCKET)
+    {
+        status = sock_read( handle, unix_handle, event, apc, apc_user, io, buffer, length );
+        if (needs_close) close( unix_handle );
+        return status;
+    }
     else if (type == FD_TYPE_SYMLINK)
     {
         status = STATUS_SUCCESS;
@@ -5993,11 +5999,17 @@ NTSTATUS WINAPI NtWriteFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, v
             goto done;
         }
     }
+    else if (type == FD_TYPE_SOCKET)
+    {
+        status = sock_write( handle, unix_handle, event, apc, apc_user, io, buffer, length );
+        if (needs_close) close( unix_handle );
+        return status;
+    }
 
     for (;;)
     {
         /* zero-length writes on sockets may not work with plain write(2) */
-        if (!length && (type == FD_TYPE_MAILSLOT || type == FD_TYPE_SOCKET))
+        if (!length && type == FD_TYPE_MAILSLOT)
             result = send( unix_handle, buffer, 0, 0 );
         else
             result = write( unix_handle, (const char *)buffer + total, length - total );

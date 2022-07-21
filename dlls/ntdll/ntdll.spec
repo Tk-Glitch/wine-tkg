@@ -388,6 +388,7 @@
 @ stdcall -syscall NtSetInformationProcess(long long ptr long)
 @ stdcall -syscall NtSetInformationThread(long long ptr long)
 @ stdcall -syscall NtSetInformationToken(long long ptr long)
+@ stdcall -syscall NtSetInformationVirtualMemory(long long ptr ptr ptr long)
 @ stdcall -syscall NtSetIntervalProfile(long long)
 @ stdcall -syscall NtSetIoCompletion(ptr long long long long)
 @ stdcall -syscall NtSetLdtEntries(long int64 long int64)
@@ -1416,6 +1417,7 @@
 @ stdcall -private -syscall ZwSetInformationProcess(long long ptr long) NtSetInformationProcess
 @ stdcall -private -syscall ZwSetInformationThread(long long ptr long) NtSetInformationThread
 @ stdcall -private -syscall ZwSetInformationToken(long long ptr long) NtSetInformationToken
+@ stdcall -private -syscall ZwSetInformationVirtualMemory(long long ptr ptr ptr long) NtSetInformationVirtualMemory
 @ stdcall -private -syscall ZwSetIntervalProfile(long long) NtSetIntervalProfile
 @ stdcall -private -syscall ZwSetIoCompletion(ptr long long long long) NtSetIoCompletion
 @ stdcall -private -syscall ZwSetLdtEntries(long int64 long int64) NtSetLdtEntries
@@ -1492,13 +1494,13 @@
 @ cdecl -norelay -arch=i386 -ret64 _allmul(int64 int64)
 @ cdecl -arch=i386 -norelay _alloca_probe()
 @ cdecl -norelay -arch=i386 -ret64 _allrem(int64 int64)
-@ stdcall -arch=i386 -ret64 _allshl(int64 long)
-@ stdcall -arch=i386 -ret64 _allshr(int64 long)
+@ cdecl -norelay -arch=i386 -ret64 _allshl(int64 long)
+@ cdecl -norelay -arch=i386 -ret64 _allshr(int64 long)
 @ cdecl -ret64 _atoi64(str)
 @ cdecl -norelay -arch=i386 -ret64 _aulldiv(int64 int64)
 @ cdecl -arch=i386 -norelay _aulldvrm(int64 int64)
 @ cdecl -norelay -arch=i386 -ret64 _aullrem(int64 int64)
-@ stdcall -arch=i386 -ret64 _aullshr(int64 long)
+@ cdecl -norelay -arch=i386 -ret64 _aullshr(int64 long)
 @ cdecl -arch=i386 -norelay _chkstk()
 @ stub _fltused
 @ cdecl -arch=i386 -ret64 _ftol()

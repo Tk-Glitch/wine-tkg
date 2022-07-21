@@ -27,6 +27,7 @@
 #include "ole2.h"
 #include "shlguid.h"
 #include "wininet.h"
+#include "winternl.h"
 
 #include "mshtml_private.h"
 #include "htmlscript.h"
@@ -51,6 +52,20 @@ static const IID NS_ICONTENTUTILS_CID =
     {0x762C4AE7,0xB923,0x422F,{0xB9,0x7E,0xB9,0xBF,0xC1,0xEF,0x7B,0xF0}};
 
 static nsIContentUtils *content_utils;
+
+static BOOL is_iexplore(void)
+{
+    static volatile char cache = -1;
+    BOOL ret = cache;
+    if(ret == -1) {
+        const WCHAR *p, *name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+        if((p = wcsrchr(name, '/'))) name = p + 1;
+        if((p = wcsrchr(name, '\\'))) name = p + 1;
+        ret = !wcsicmp(name, L"iexplore.exe");
+        cache = ret;
+    }
+    return ret;
+}
 
 static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *comment)
 {
@@ -397,15 +412,20 @@ static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode
         lock_document_mode(doc);
 }
 
-BOOL parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
+static BOOL is_ua_compatible_delimiter(WCHAR c)
+{
+    return !c || c == ';' || c == ',' || iswspace(c);
+}
+
+const WCHAR *parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
 {
     DWORD version = 0;
     const WCHAR *p;
 
     for(p = version_string; '0' <= *p && *p <= '9'; p++)
         version = version * 10 + *p-'0';
-    if((*p && *p != ';') || p == version_string)
-        return FALSE;
+    if(!is_ua_compatible_delimiter(*p) || p == version_string)
+        return NULL;
 
     switch(version){
     case 5:
@@ -427,13 +447,14 @@ BOOL parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
     default:
         *r = version < 5 ? COMPAT_MODE_QUIRKS : COMPAT_MODE_IE11;
     }
-    return TRUE;
+    return p;
 }
 
 static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
 {
     static const WCHAR ie_eqW[] = {'I','E','='};
     static const WCHAR edgeW[] = {'e','d','g','e'};
+    compat_mode_t mode = COMPAT_MODE_INVALID;
 
     TRACE("%s\n", debugstr_w(p));
 
@@ -441,15 +462,22 @@ static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
         return FALSE;
     p += 3;
 
-    if(!wcsnicmp(p, edgeW, ARRAY_SIZE(edgeW))) {
-        p += ARRAY_SIZE(edgeW);
-        if(*p && *p != ';')
-            return FALSE;
-        *r = COMPAT_MODE_IE11;
-        return TRUE;
-    }
+    do {
+        while(iswspace(*p)) p++;
+        if(!wcsnicmp(p, edgeW, ARRAY_SIZE(edgeW))) {
+            p += ARRAY_SIZE(edgeW);
+            if(is_ua_compatible_delimiter(*p))
+                mode = COMPAT_MODE_IE11;
+            break;
+        }else if(!(p = parse_compat_version(p, r)))
+            break;
+        if(mode < *r)
+            mode = *r;
+        while(iswspace(*p)) p++;
+    } while(*p++ == ',');
 
-    return parse_compat_version(p, r);
+    *r = mode;
+    return mode != COMPAT_MODE_INVALID;
 }
 
 void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
@@ -823,7 +851,13 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
 
             TRACE("doctype node\n");
 
-            if(This->window && This->window->base.outer_window) {
+            /* Native mshtml hardcodes special behavior for iexplore.exe here. The feature control registry
+               keys under HKLM or HKCU\Software\Microsoft\Internet Explorer\Main\FeatureControl are not used
+               in this case (neither in Wow6432Node), although FEATURE_BROWSER_EMULATION does override this,
+               but it is not set by default on native, and the behavior is still different. This was tested
+               by removing all iexplore.exe values from any FeatureControl subkeys, and renaming the test
+               executable to iexplore.exe, which changed its default compat mode in such cases. */
+            if(This->window && This->window->base.outer_window && is_iexplore()) {
                 HTMLOuterWindow *window = This->window->base.outer_window;
                 DWORD zone;
                 HRESULT hres;

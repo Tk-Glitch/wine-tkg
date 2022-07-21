@@ -167,6 +167,11 @@ typedef struct
 typedef struct
 {
     char dummy;
+} _UnrealizedChore;
+
+typedef struct
+{
+    char dummy;
 } _StructuredTaskCollection;
 
 /* keep in sync with msvcp90/msvcp90.h */
@@ -1759,6 +1764,76 @@ _StructuredTaskCollection* __thiscall _StructuredTaskCollection_ctor(
 }
 
 #endif /* _MSVCR_VER >= 110 */
+
+#if _MSVCR_VER >= 120
+
+/* ??1_StructuredTaskCollection@details@Concurrency@@QAA@XZ */
+/* ??1_StructuredTaskCollection@details@Concurrency@@QAE@XZ */
+/* ??1_StructuredTaskCollection@details@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection_dtor, 4)
+void __thiscall _StructuredTaskCollection_dtor(_StructuredTaskCollection *this)
+{
+    FIXME("(%p): stub!\n", this);
+}
+
+#endif /* _MSVCR_VER >= 120 */
+
+#if _MSVCR_VER >= 110
+
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAAXPAV_UnrealizedChore@23@PAVlocation@3@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAEXPAV_UnrealizedChore@23@PAVlocation@3@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QEAAXPEAV_UnrealizedChore@23@PEAVlocation@3@@Z */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__Schedule_loc, 12)
+void __thiscall _StructuredTaskCollection__Schedule_loc(
+        _StructuredTaskCollection *this, _UnrealizedChore *chore,
+        /*location*/void *placement)
+{
+    FIXME("(%p %p %p): stub!\n", this, chore, placement);
+}
+
+#endif /* _MSVCR_VER >= 110 */
+
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAAXPAV_UnrealizedChore@23@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAEXPAV_UnrealizedChore@23@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QEAAXPEAV_UnrealizedChore@23@@Z */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__Schedule, 8)
+void __thiscall _StructuredTaskCollection__Schedule(
+        _StructuredTaskCollection *this, _UnrealizedChore *chore)
+{
+    FIXME("(%p %p): stub!\n", this, chore);
+}
+
+/* ?_RunAndWait@_StructuredTaskCollection@details@Concurrency@@QAA?AW4_TaskCollectionStatus@23@PAV_UnrealizedChore@23@@Z */
+/* ?_RunAndWait@_StructuredTaskCollection@details@Concurrency@@QAG?AW4_TaskCollectionStatus@23@PAV_UnrealizedChore@23@@Z */
+/* ?_RunAndWait@_StructuredTaskCollection@details@Concurrency@@QEAA?AW4_TaskCollectionStatus@23@PEAV_UnrealizedChore@23@@Z */
+/*enum Concurrency::details::_TaskCollectionStatus*/int __stdcall
+_StructuredTaskCollection__RunAndWait(
+        _StructuredTaskCollection *this, _UnrealizedChore *chore)
+{
+    FIXME("(%p %p): stub!\n", this, chore);
+    return 1;
+}
+
+/* ?_Cancel@_StructuredTaskCollection@details@Concurrency@@QAAXXZ */
+/* ?_Cancel@_StructuredTaskCollection@details@Concurrency@@QAEXXZ */
+/* ?_Cancel@_StructuredTaskCollection@details@Concurrency@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__Cancel, 4)
+void __thiscall _StructuredTaskCollection__Cancel(
+        _StructuredTaskCollection *this)
+{
+    FIXME("(%p): stub!\n", this);
+}
+
+/* ?_IsCanceling@_StructuredTaskCollection@details@Concurrency@@QAA_NXZ */
+/* ?_IsCanceling@_StructuredTaskCollection@details@Concurrency@@QAE_NXZ */
+/* ?_IsCanceling@_StructuredTaskCollection@details@Concurrency@@QEAA_NXZ */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__IsCanceling, 4)
+bool __thiscall _StructuredTaskCollection__IsCanceling(
+        _StructuredTaskCollection *this)
+{
+    FIXME("(%p): stub!\n", this);
+    return FALSE;
+}
 
 /* ??0critical_section@Concurrency@@QAE@XZ */
 /* ??0critical_section@Concurrency@@QEAA@XZ */

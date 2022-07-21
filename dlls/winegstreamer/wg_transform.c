@@ -51,8 +51,11 @@ struct wg_transform
     GstPad *my_src, *my_sink;
     GstPad *their_sink, *their_src;
     GstSegment segment;
-    GstBufferList *input;
+    GstQuery *drain_query;
+
     guint input_max_length;
+    GstAtomicQueue *input_queue;
+
     guint output_plane_align;
     struct wg_sample *output_wg_sample;
     GstAtomicQueue *output_queue;
@@ -173,6 +176,31 @@ static gboolean transform_sink_query_cb(GstPad *pad, GstObject *parent, GstQuery
             g_object_unref(pool);
             return true;
         }
+
+        case GST_QUERY_CAPS:
+        {
+            GstCaps *caps, *filter, *temp;
+            gchar *str;
+
+            gst_query_parse_caps(query, &filter);
+            caps = gst_caps_ref(transform->output_caps);
+
+            if (filter)
+            {
+                temp = gst_caps_intersect(caps, filter);
+                gst_caps_unref(caps);
+                caps = temp;
+            }
+
+            str = gst_caps_to_string(caps);
+            GST_INFO("Returning caps %s", str);
+            g_free(str);
+
+            gst_query_set_caps_result(query, caps);
+            gst_caps_unref(caps);
+            return true;
+        }
+
         default:
             GST_WARNING("Ignoring \"%s\" query.", gst_query_type_get_name(query->type));
             break;
@@ -215,9 +243,11 @@ NTSTATUS wg_transform_destroy(void *args)
 {
     struct wg_transform *transform = args;
     GstSample *sample;
+    GstBuffer *buffer;
 
-    if (transform->input)
-        gst_buffer_list_unref(transform->input);
+    while ((buffer = gst_atomic_queue_pop(transform->input_queue)))
+        gst_buffer_unref(buffer);
+    gst_atomic_queue_unref(transform->input_queue);
 
     gst_element_set_state(transform->container, GST_STATE_NULL);
 
@@ -232,6 +262,7 @@ NTSTATUS wg_transform_destroy(void *args)
     g_object_unref(transform->container);
     g_object_unref(transform->my_sink);
     g_object_unref(transform->my_src);
+    gst_query_unref(transform->drain_query);
     gst_caps_unref(transform->output_caps);
     gst_atomic_queue_unref(transform->output_queue);
     free(transform);
@@ -310,15 +341,10 @@ static bool transform_append_element(struct wg_transform *transform, GstElement 
 static struct wg_sample *transform_request_sample(gsize size, void *context)
 {
     struct wg_transform *transform = context;
-    struct wg_sample *sample;
 
     GST_LOG("size %#zx, context %p", size, transform);
 
-    sample = InterlockedExchangePointer((void **)&transform->output_wg_sample, NULL);
-    if (!sample || sample->max_size < size)
-        return NULL;
-
-    return sample;
+    return InterlockedExchangePointer((void **)&transform->output_wg_sample, NULL);
 }
 
 NTSTATUS wg_transform_create(void *args)
@@ -341,9 +367,11 @@ NTSTATUS wg_transform_create(void *args)
         return STATUS_NO_MEMORY;
     if (!(transform->container = gst_bin_new("wg_transform")))
         goto out;
-    if (!(transform->input = gst_buffer_list_new()))
+    if (!(transform->input_queue = gst_atomic_queue_new(8)))
         goto out;
     if (!(transform->output_queue = gst_atomic_queue_new(8)))
+        goto out;
+    if (!(transform->drain_query = gst_query_new_drain()))
         goto out;
     if (!(transform->allocator = wg_allocator_create(transform_request_sample, transform)))
         goto out;
@@ -506,10 +534,12 @@ out:
         gst_caps_unref(src_caps);
     if (transform->allocator)
         wg_allocator_destroy(transform->allocator);
+    if (transform->drain_query)
+        gst_query_unref(transform->drain_query);
     if (transform->output_queue)
         gst_atomic_queue_unref(transform->output_queue);
-    if (transform->input)
-        gst_buffer_list_unref(transform->input);
+    if (transform->input_queue)
+        gst_atomic_queue_unref(transform->input_queue);
     if (transform->container)
     {
         gst_element_set_state(transform->container, GST_STATE_NULL);
@@ -518,6 +548,59 @@ out:
     free(transform);
     GST_ERROR("Failed to create winegstreamer transform.");
     return status;
+}
+
+NTSTATUS wg_transform_set_output_format(void *args)
+{
+    struct wg_transform_set_output_format_params *params = args;
+    struct wg_transform *transform = params->transform;
+    const struct wg_format *format = params->format;
+    GstSample *sample;
+    GstCaps *caps;
+    gchar *str;
+
+    if (!(caps = wg_format_to_caps(format)))
+    {
+        GST_ERROR("Failed to convert format %p to caps.", format);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    if (gst_caps_is_always_compatible(transform->output_caps, caps))
+    {
+        gst_caps_unref(caps);
+        return STATUS_SUCCESS;
+    }
+
+    if (!gst_pad_peer_query(transform->my_src, transform->drain_query))
+    {
+        GST_ERROR("Failed to drain transform %p.", transform);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    gst_caps_unref(transform->output_caps);
+    transform->output_caps = caps;
+
+    if (!gst_pad_push_event(transform->my_sink, gst_event_new_reconfigure()))
+    {
+        GST_ERROR("Failed to reconfigure transform %p.", transform);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    str = gst_caps_to_string(caps);
+    GST_INFO("Configured new caps %s.", str);
+    g_free(str);
+
+    /* Ideally and to be fully compatible with native transform, the queued
+     * output buffers will need to be converted to the new output format and
+     * kept queued.
+     */
+    if (transform->output_sample)
+        gst_sample_unref(transform->output_sample);
+    while ((sample = gst_atomic_queue_pop(transform->output_queue)))
+        gst_sample_unref(sample);
+    transform->output_sample = NULL;
+
+    return STATUS_SUCCESS;
 }
 
 static void wg_sample_free_notify(void *arg)
@@ -535,7 +618,7 @@ NTSTATUS wg_transform_push_data(void *args)
     GstBuffer *buffer;
     guint length;
 
-    length = gst_buffer_list_length(transform->input);
+    length = gst_atomic_queue_length(transform->input_queue);
     if (length >= transform->input_max_length)
     {
         GST_INFO("Refusing %u bytes, %u buffers already queued", sample->size, length);
@@ -561,7 +644,7 @@ NTSTATUS wg_transform_push_data(void *args)
         GST_BUFFER_DURATION(buffer) = sample->duration * 100;
     if (!(sample->flags & WG_SAMPLE_FLAG_SYNC_POINT))
         GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
-    gst_buffer_list_insert(transform->input, -1, buffer);
+    gst_atomic_queue_push(transform->input_queue, buffer);
 
     params->result = S_OK;
     return STATUS_SUCCESS;
@@ -710,48 +793,52 @@ static NTSTATUS read_transform_output_data(GstBuffer *buffer, GstCaps *caps, gsi
     return STATUS_SUCCESS;
 }
 
-NTSTATUS wg_transform_read_data(void *args)
+static bool get_transform_output(struct wg_transform *transform, struct wg_sample *sample)
 {
-    struct wg_transform_read_data_params *params = args;
-    struct wg_transform *transform = params->transform;
-    struct wg_sample *sample = params->sample;
-    struct wg_format *format = params->format;
     GstFlowReturn ret = GST_FLOW_OK;
-    GstBuffer *output_buffer;
-    GstBufferList *input;
-    GstCaps *output_caps;
-    bool discard_data;
-    NTSTATUS status;
+    GstBuffer *input_buffer;
 
     /* Provide the sample for transform_request_sample to pick it up */
     InterlockedIncrement(&sample->refcount);
     InterlockedExchangePointer((void **)&transform->output_wg_sample, sample);
 
-    if (!gst_buffer_list_length(transform->input))
-        GST_DEBUG("Not input buffer queued");
-    else if ((input = gst_buffer_list_new()))
+    while (!(transform->output_sample = gst_atomic_queue_pop(transform->output_queue)))
     {
-        ret = gst_pad_push_list(transform->my_src, transform->input);
-        transform->input = input;
-    }
-    else
-    {
-        GST_ERROR("Failed to allocate new input queue");
-        ret = GST_FLOW_ERROR;
+        if (!(input_buffer = gst_atomic_queue_pop(transform->input_queue)))
+            break;
+
+        if ((ret = gst_pad_push(transform->my_src, input_buffer)))
+        {
+            GST_ERROR("Failed to push transform input, error %d", ret);
+            break;
+        }
     }
 
     /* Remove the sample so transform_request_sample cannot use it */
     if (InterlockedExchangePointer((void **)&transform->output_wg_sample, NULL))
         InterlockedDecrement(&sample->refcount);
 
-    if (ret)
+    return ret == GST_FLOW_OK;
+}
+
+NTSTATUS wg_transform_read_data(void *args)
+{
+    struct wg_transform_read_data_params *params = args;
+    struct wg_transform *transform = params->transform;
+    struct wg_sample *sample = params->sample;
+    struct wg_format *format = params->format;
+    GstBuffer *output_buffer;
+    GstCaps *output_caps;
+    bool discard_data;
+    NTSTATUS status;
+
+    if (!transform->output_sample && !get_transform_output(transform, sample))
     {
-        GST_ERROR("Failed to push transform input, error %d", ret);
         wg_allocator_release_sample(transform->allocator, sample, false);
         return STATUS_UNSUCCESSFUL;
     }
 
-    if (!transform->output_sample && !(transform->output_sample = gst_atomic_queue_pop(transform->output_queue)))
+    if (!transform->output_sample)
     {
         sample->size = 0;
         params->result = MF_E_TRANSFORM_NEED_MORE_INPUT;

@@ -401,6 +401,7 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
 {
     struct h264_decoder *decoder = impl_from_IMFTransform(iface);
     GUID major, subtype;
+    UINT64 frame_size;
     HRESULT hr;
     ULONG i;
 
@@ -428,6 +429,12 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
     if (decoder->input_type)
         IMFMediaType_Release(decoder->input_type);
     IMFMediaType_AddRef((decoder->input_type = type));
+
+    if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &frame_size)))
+    {
+        decoder->wg_format.u.video.width = frame_size >> 32;
+        decoder->wg_format.u.video.height = (UINT32)frame_size;
+    }
 
     return S_OK;
 }
@@ -467,7 +474,28 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
         IMFMediaType_Release(decoder->output_type);
     IMFMediaType_AddRef((decoder->output_type = type));
 
-    if (FAILED(hr = try_create_wg_transform(decoder)))
+    if (decoder->wg_transform)
+    {
+        struct wg_format output_format;
+        mf_media_type_to_wg_format(decoder->output_type, &output_format);
+
+        /* Don't force any specific size, H264 streams already have the metadata for it
+         * and will generate a MF_E_TRANSFORM_STREAM_CHANGE result later.
+         */
+        output_format.u.video.width = 0;
+        output_format.u.video.height = 0;
+        output_format.u.video.fps_d = 0;
+        output_format.u.video.fps_n = 0;
+
+        if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN
+                || !wg_transform_set_output_format(decoder->wg_transform, &output_format))
+        {
+            IMFMediaType_Release(decoder->output_type);
+            decoder->output_type = NULL;
+            return MF_E_INVALIDMEDIATYPE;
+        }
+    }
+    else if (FAILED(hr = try_create_wg_transform(decoder)))
     {
         IMFMediaType_Release(decoder->output_type);
         decoder->output_type = NULL;
@@ -553,19 +581,17 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
         MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
 {
     struct h264_decoder *decoder = impl_from_IMFTransform(iface);
-    MFT_OUTPUT_STREAM_INFO info;
     struct wg_sample *wg_sample;
     struct wg_format wg_format;
+    UINT32 sample_size;
     UINT64 frame_rate;
+    GUID subtype;
     HRESULT hr;
 
     TRACE("iface %p, flags %#lx, count %lu, samples %p, status %p.\n", iface, flags, count, samples, status);
 
     if (count != 1)
         return E_INVALIDARG;
-
-    if (FAILED(hr = IMFTransform_GetOutputStreamInfo(iface, 0, &info)))
-        return hr;
 
     if (!decoder->wg_transform)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
@@ -574,10 +600,16 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
     samples[0].dwStatus = 0;
     if (!samples[0].pSample) return E_INVALIDARG;
 
+    if (FAILED(hr = IMFMediaType_GetGUID(decoder->output_type, &MF_MT_SUBTYPE, &subtype)))
+        return hr;
+    if (FAILED(hr = MFCalculateImageSize(&subtype, decoder->wg_format.u.video.width,
+            decoder->wg_format.u.video.height, &sample_size)))
+        return hr;
+
     if (FAILED(hr = wg_sample_create_mf(samples[0].pSample, &wg_sample)))
         return hr;
 
-    if (wg_sample->max_size < info.cbSize)
+    if (wg_sample->max_size < sample_size)
     {
         wg_sample_release(wg_sample);
         return MF_E_BUFFERTOOSMALL;

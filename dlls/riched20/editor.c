@@ -2973,6 +2973,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->nUndoStackSize = 0;
   ed->nUndoLimit = STACK_SIZE_DEFAULT;
   ed->nUndoMode = umAddToUndo;
+  ed->undo_ctl_state = undoActive;
   ed->nParagraphs = 1;
   ed->nLastSelStart = ed->nLastSelEnd = 0;
   ed->last_sel_start_para = ed->last_sel_end_para = ed->pCursors[0].para;
@@ -3298,6 +3299,7 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case EM_SETUNDOLIMIT:
   {
+    editor_enable_undo(editor);
     if ((int)wParam < 0)
       editor->nUndoLimit = STACK_SIZE_DEFAULT;
     else

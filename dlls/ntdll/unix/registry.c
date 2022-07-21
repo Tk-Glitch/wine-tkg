@@ -81,7 +81,9 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
 
     *key = 0;
     if (attr->Length != sizeof(OBJECT_ATTRIBUTES)) return STATUS_INVALID_PARAMETER;
+    if (!attr->ObjectName->Length && !attr->RootDirectory) return STATUS_OBJECT_PATH_SYNTAX_BAD;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+    objattr->attributes |= OBJ_OPENIF | OBJ_CASE_INSENSITIVE;
 
     TRACE( "(%p,%s,%s,%x,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
            debugstr_us(class), options, access, key );
@@ -94,9 +96,18 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
         if (class) wine_server_add_data( req, class->Buffer, class->Length );
         ret = wine_server_call( req );
         *key = wine_server_ptr_handle( reply->hkey );
-        if (dispos && !ret) *dispos = reply->created ? REG_CREATED_NEW_KEY : REG_OPENED_EXISTING_KEY;
     }
     SERVER_END_REQ;
+
+    if (ret == STATUS_OBJECT_NAME_EXISTS)
+    {
+        if (dispos) *dispos = REG_OPENED_EXISTING_KEY;
+        ret = STATUS_SUCCESS;
+    }
+    else if (ret == STATUS_SUCCESS)
+    {
+        if (dispos) *dispos = REG_CREATED_NEW_KEY;
+    }
 
     TRACE( "<- %p\n", *key );
     free( objattr );
@@ -123,6 +134,7 @@ NTSTATUS WINAPI NtCreateKeyTransacted( HANDLE *key, ACCESS_MASK access, const OB
 NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr, ULONG options )
 {
     NTSTATUS ret;
+    ULONG attributes;
 
     *key = 0;
     if (attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
@@ -132,11 +144,13 @@ NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
 
     if (options & ~REG_OPTION_OPEN_LINK) FIXME( "options %x not implemented\n", options );
 
+    attributes = attr->Attributes | OBJ_CASE_INSENSITIVE;
+
     SERVER_START_REQ( open_key )
     {
         req->parent     = wine_server_obj_handle( attr->RootDirectory );
         req->access     = access;
-        req->attributes = attr->Attributes;
+        req->attributes = attributes;
         wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
         ret = wine_server_call( req );
         *key = wine_server_ptr_handle( reply->hkey );
@@ -258,7 +272,6 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
             case KeyBasicInformation:
             {
                 KEY_BASIC_INFORMATION keyinfo;
-                fixed_size = (char *)keyinfo.Name - (char *)&keyinfo;
                 keyinfo.LastWriteTime.QuadPart = reply->modif;
                 keyinfo.TitleIndex = 0;
                 keyinfo.NameLength = reply->namelen;
@@ -269,7 +282,6 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
             case KeyFullInformation:
             {
                 KEY_FULL_INFORMATION keyinfo;
-                fixed_size = (char *)keyinfo.Class - (char *)&keyinfo;
                 keyinfo.LastWriteTime.QuadPart = reply->modif;
                 keyinfo.TitleIndex = 0;
                 keyinfo.ClassLength = wine_server_reply_size(reply);
@@ -287,7 +299,6 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
             case KeyNodeInformation:
             {
                 KEY_NODE_INFORMATION keyinfo;
-                fixed_size = (char *)keyinfo.Name - (char *)&keyinfo;
                 keyinfo.LastWriteTime.QuadPart = reply->modif;
                 keyinfo.TitleIndex = 0;
                 if (reply->namelen < wine_server_reply_size(reply))
@@ -308,7 +319,6 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
             case KeyNameInformation:
             {
                 KEY_NAME_INFORMATION keyinfo;
-                fixed_size = (char *)keyinfo.Name - (char *)&keyinfo;
                 keyinfo.NameLength = reply->namelen;
                 memcpy( info, &keyinfo, min( length, fixed_size ) );
                 break;
@@ -317,7 +327,6 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
             case KeyCachedInformation:
             {
                 KEY_CACHED_INFORMATION keyinfo;
-                fixed_size = sizeof(keyinfo);
                 keyinfo.LastWriteTime.QuadPart = reply->modif;
                 keyinfo.TitleIndex = 0;
                 keyinfo.SubKeys = reply->subkeys;
@@ -334,7 +343,8 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
                 break;
             }
             *result_len = fixed_size + reply->total;
-            if (length < *result_len) ret = STATUS_BUFFER_OVERFLOW;
+            if (length < fixed_size) ret = STATUS_BUFFER_TOO_SMALL;
+            else if (length < *result_len) ret = STATUS_BUFFER_OVERFLOW;
         }
     }
     SERVER_END_REQ;
@@ -693,12 +703,14 @@ NTSTATUS WINAPI NtLoadKey( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *fil
     if (ret) return ret;
 
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+    objattr->attributes |= OBJ_OPENIF | OBJ_CASE_INSENSITIVE;
 
     SERVER_START_REQ( load_registry )
     {
         req->file = wine_server_obj_handle( key );
         wine_server_add_data( req, objattr, len );
         ret = wine_server_call( req );
+        if (ret == STATUS_OBJECT_NAME_EXISTS) ret = STATUS_SUCCESS;
     }
     SERVER_END_REQ;
 

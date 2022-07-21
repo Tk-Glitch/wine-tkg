@@ -25,14 +25,7 @@
 #ifndef __WINE_WINED3D_PRIVATE_H
 #define __WINE_WINED3D_PRIVATE_H
 
-#define USE_WIN32_VULKAN
-#define USE_WIN32_OPENGL
-
-#ifdef USE_WIN32_OPENGL
 #define WINE_GLAPI __stdcall
-#else
-#define WINE_GLAPI
-#endif
 
 #include <assert.h>
 #include <stdarg.h>
@@ -2490,6 +2483,7 @@ enum wined3d_retired_object_type_vk
     WINED3D_RETIRED_SAMPLER_VK,
     WINED3D_RETIRED_QUERY_POOL_VK,
     WINED3D_RETIRED_EVENT_VK,
+    WINED3D_RETIRED_PIPELINE_VK,
 };
 
 struct wined3d_retired_object_vk
@@ -2513,6 +2507,7 @@ struct wined3d_retired_object_vk
         VkImageView vk_image_view;
         VkSampler vk_sampler;
         VkEvent vk_event;
+        VkPipeline vk_pipeline;
         struct
         {
             struct wined3d_query_pool_vk *pool_vk;
@@ -2746,6 +2741,8 @@ void wined3d_context_vk_destroy_vk_sampler(struct wined3d_context_vk *context_vk
         VkSampler vk_sampler, uint64_t command_buffer_id) DECLSPEC_HIDDEN;
 void wined3d_context_vk_destroy_vk_event(struct wined3d_context_vk *context_vk,
         VkEvent vk_event, uint64_t command_buffer_id) DECLSPEC_HIDDEN;
+void wined3d_context_vk_destroy_vk_pipeline(struct wined3d_context_vk *context_vk,
+        VkPipeline vk_pipeline, uint64_t command_buffer_id) DECLSPEC_HIDDEN;
 void wined3d_context_vk_end_current_render_pass(struct wined3d_context_vk *context_vk) DECLSPEC_HIDDEN;
 VkCommandBuffer wined3d_context_vk_get_command_buffer(struct wined3d_context_vk *context_vk) DECLSPEC_HIDDEN;
 struct wined3d_pipeline_layout_vk *wined3d_context_vk_get_pipeline_layout(struct wined3d_context_vk *context_vk,

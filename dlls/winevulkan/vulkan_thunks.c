@@ -4959,6 +4959,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             break;
         }
 
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
+        {
+            const VkPhysicalDevicePipelineRobustnessFeaturesEXT *in = (const VkPhysicalDevicePipelineRobustnessFeaturesEXT *)in_header;
+            VkPhysicalDevicePipelineRobustnessFeaturesEXT *out;
+
+            if (!(out = malloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->pipelineRobustness = in->pipelineRobustness;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
         default:
             FIXME("Application requested a linked structure of type %u.\n", in_header->sType);
         }
@@ -9854,6 +9870,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_pipeline_creation_cache_control",
     "VK_EXT_pipeline_creation_feedback",
     "VK_EXT_pipeline_properties",
+    "VK_EXT_pipeline_robustness",
     "VK_EXT_post_depth_coverage",
     "VK_EXT_primitive_topology_list_restart",
     "VK_EXT_primitives_generated_query",
