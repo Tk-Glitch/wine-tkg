@@ -8774,6 +8774,7 @@ static void test_user_apc(void)
     NTSTATUS status;
     CONTEXT context;
     LONG pass;
+    int ret;
 
     if (!pNtQueueApcThread)
     {
@@ -8783,13 +8784,50 @@ static void test_user_apc(void)
 
     pass = 0;
     InterlockedIncrement(&pass);
-    RtlCaptureContext(&context);
+#ifdef __i386__
+    {
+        /* RtlCaptureContext puts the return address of the caller's stack
+         * frame into %eip, so we need a thunk to get it to return here */
+        static const BYTE code[] =
+        {
+            0x55,               /* pushl %ebp */
+            0x89, 0xe5,         /* movl %esp, %ebp */
+            0xff, 0x75, 0x0c,   /* pushl 0xc(%ebp) */
+            0xff, 0x55, 0x08,   /* call *0x8(%ebp) */
+            0xc9,               /* leave */
+            0xc3,               /* ret */
+        };
+        int (__cdecl *func)(void *capture, CONTEXT *context) = code_mem;
+
+        memcpy(code_mem, code, sizeof(code));
+        ret = func(RtlCaptureContext, &context);
+        /* work around broken RtlCaptureContext on Windows < 7 which doesn't set
+         * ContextFlags */
+        context.ContextFlags = CONTEXT_FULL;
+    }
+#else
+    {
+        int (WINAPI *func)(CONTEXT *context) = (void *)RtlCaptureContext;
+
+        ret = func(&context);
+    }
+#endif
     InterlockedIncrement(&pass);
 
     if (pass == 2)
     {
         /* Try to make sure context data is far enough below context.Esp. */
         CONTEXT c[4];
+
+#ifdef __i386__
+        context.Eax = 0xabacab;
+#elif defined(__x86_64__)
+        context.Rax = 0xabacab;
+#elif defined(__arm__)
+        context.R0 = 0xabacab;
+#elif defined(__aarch64__)
+        context.X0 = 0xabacab;
+#endif
 
         c[0] = context;
 
@@ -8803,10 +8841,10 @@ static void test_user_apc(void)
         ok(!status, "Got unexpected status %#lx.\n", status);
         status = NtContinue(&c[0], TRUE );
 
-        /* Broken before Win7, in that case NtContinue returns here instead of restoring context after calling APC. */
-        ok(broken(TRUE), "Should not get here, status %#lx.\n", status);
+        ok(0, "Should not get here, status %#lx.\n", status);
         return;
     }
+    ok(ret == 0xabacab, "Got return value %#x.\n", ret);
     ok(pass == 3, "Got unexpected pass %ld.\n", pass);
     ok(test_apc_called, "Test user APC was not called.\n");
 }

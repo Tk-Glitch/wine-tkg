@@ -20,7 +20,7 @@
 #define __WINE_D2D1_PRIVATE_H
 
 #include "wine/debug.h"
-#include "wine/heap.h"
+#include "wine/list.h"
 
 #include <assert.h>
 #include <limits.h>
@@ -603,12 +603,59 @@ struct d2d_effect_context
 void d2d_effect_context_init(struct d2d_effect_context *effect_context,
         struct d2d_device_context *device_context) DECLSPEC_HIDDEN;
 
-struct d2d_effect_info
+struct d2d_effect_property
 {
-    const CLSID *clsid;
-    UINT32 default_input_count;
-    UINT32 min_inputs;
-    UINT32 max_inputs;
+    WCHAR *name;
+    D2D1_PROPERTY_TYPE type;
+    UINT32 index;
+    BOOL readonly;
+    union
+    {
+        size_t offset;
+        void *ptr;
+    } data;
+    UINT32 size;
+    PD2D1_PROPERTY_SET_FUNCTION set_function;
+    PD2D1_PROPERTY_GET_FUNCTION get_function;
+    struct d2d_effect_properties *subproperties;
+};
+
+struct d2d_effect_properties
+{
+    ID2D1Properties ID2D1Properties_iface;
+    struct d2d_effect *effect;
+
+    struct d2d_effect_property *properties;
+    size_t offset;
+    size_t size;
+    size_t count;
+    size_t custom_count;
+    struct
+    {
+        BYTE *ptr;
+        size_t size;
+        size_t count;
+    } data;
+};
+
+struct d2d_effect_registration
+{
+    struct list entry;
+    PD2D1_EFFECT_FACTORY factory;
+    UINT32 registration_count;
+    CLSID id;
+
+    UINT32 input_count;
+    struct d2d_effect_properties properties;
+};
+
+struct d2d_effect_registration * d2d_factory_get_registered_effect(ID2D1Factory *factory,
+        const GUID *effect_id) DECLSPEC_HIDDEN;
+
+struct d2d_transform_graph
+{
+    ID2D1TransformGraph ID2D1TransformGraph_iface;
+    LONG refcount;
 };
 
 struct d2d_effect
@@ -617,16 +664,24 @@ struct d2d_effect
     ID2D1Image ID2D1Image_iface;
     LONG refcount;
 
-    const struct d2d_effect_info *info;
-
+    ID2D1EffectImpl *impl;
+    struct d2d_effect_properties properties;
     struct d2d_effect_context *effect_context;
+    struct d2d_transform_graph *graph;
     ID2D1Image **inputs;
     size_t inputs_size;
     size_t input_count;
 };
 
-HRESULT d2d_effect_init(struct d2d_effect *effect,
-        struct d2d_effect_context *effect_context, const CLSID *effect_id) DECLSPEC_HIDDEN;
+HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
+        ID2D1Effect **effect) DECLSPEC_HIDDEN;
+HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
+        UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value) DECLSPEC_HIDDEN;
+HRESULT d2d_effect_subproperties_add(struct d2d_effect_properties *props, const WCHAR *name,
+        UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value) DECLSPEC_HIDDEN;
+struct d2d_effect_property * d2d_effect_properties_get_property_by_name(
+        const struct d2d_effect_properties *properties, const WCHAR *name) DECLSPEC_HIDDEN;
+void d2d_effect_properties_cleanup(struct d2d_effect_properties *props) DECLSPEC_HIDDEN;
 
 static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
 {
@@ -646,7 +701,7 @@ static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t c
     if (new_capacity < count)
         new_capacity = max_capacity;
 
-    if (!(new_elements = heap_realloc(*elements, new_capacity * size)))
+    if (!(new_elements = realloc(*elements, new_capacity * size)))
         return FALSE;
 
     *elements = new_elements;

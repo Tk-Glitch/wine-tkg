@@ -1038,6 +1038,7 @@ static void test_communication(void)
     CRYPT_DATA_BLOB pfx;
     HCERTSTORE store;
     SecPkgContext_NegotiationInfoA info;
+    SecPkgContext_CipherInfo cipher;
     SecBufferDesc buffers[2];
     SecBuffer *buf;
     unsigned buf_size = 8192;
@@ -1131,8 +1132,10 @@ static void test_communication(void)
     ok( context2.dwLower == 0xdeadbeef, "Did not expect dwLower to be set on new context\n");
     ok( context2.dwUpper == 0xdeadbeef, "Did not expect dwUpper to be set on new context\n");
 
-    buffers[1].cBuffers = 1;
+    buffers[1].cBuffers = 2;
     buffers[1].pBuffers[0].cbBuffer = 0;
+    buffers[1].pBuffers[1].cbBuffer = 0;
+    buffers[1].pBuffers[1].BufferType = SECBUFFER_EMPTY;
 
     status = InitializeSecurityContextA(&cred_handle, &context, (SEC_CHAR *)"localhost",
             ISC_REQ_CONFIDENTIALITY|ISC_REQ_STREAM,
@@ -1140,6 +1143,10 @@ static void test_communication(void)
     ok(status == SEC_E_INCOMPLETE_MESSAGE, "Got unexpected status %#lx.\n", status);
     ok(buffers[0].pBuffers[0].cbBuffer == buf_size, "Output buffer size changed.\n");
     ok(buffers[0].pBuffers[0].BufferType == SECBUFFER_TOKEN, "Output buffer type changed.\n");
+    ok(buffers[1].pBuffers[1].cbBuffer == 5 ||
+       broken(buffers[1].pBuffers[1].cbBuffer == 0), /* < win10 */ "Wrong buffer size.\n");
+    ok(buffers[1].pBuffers[1].BufferType == SECBUFFER_MISSING ||
+       broken(buffers[1].pBuffers[1].BufferType == SECBUFFER_EMPTY), /* < win10 */ "Wrong buffer type.\n");
 
     buf = &buffers[1].pBuffers[0];
     buf->cbBuffer = buf_size;
@@ -1148,6 +1155,8 @@ static void test_communication(void)
         return;
 
     buffers[1].pBuffers[0].cbBuffer = 4;
+    buffers[1].pBuffers[1].cbBuffer = 0;
+    buffers[1].pBuffers[1].BufferType = SECBUFFER_EMPTY;
     status = InitializeSecurityContextA(&cred_handle, &context, (SEC_CHAR *)"localhost",
             ISC_REQ_CONFIDENTIALITY|ISC_REQ_STREAM,
             0, 0, &buffers[1], 0, NULL, &buffers[0], &attrs, NULL);
@@ -1155,9 +1164,15 @@ static void test_communication(void)
        "Got unexpected status %#lx.\n", status);
     ok(buffers[0].pBuffers[0].cbBuffer == buf_size, "Output buffer size changed.\n");
     ok(buffers[0].pBuffers[0].BufferType == SECBUFFER_TOKEN, "Output buffer type changed.\n");
+    ok(buffers[1].pBuffers[1].cbBuffer == 1 ||
+       broken(buffers[1].pBuffers[1].cbBuffer == 0), /* < win10 */ "Wrong buffer size.\n");
+    ok(buffers[1].pBuffers[1].BufferType == SECBUFFER_MISSING ||
+       broken(buffers[1].pBuffers[1].BufferType == SECBUFFER_EMPTY), /* < win10 */ "Wrong buffer type.\n");
 
     context2.dwLower = context2.dwUpper = 0xdeadbeef;
     buffers[1].pBuffers[0].cbBuffer = 5;
+    buffers[1].pBuffers[1].cbBuffer = 0;
+    buffers[1].pBuffers[1].BufferType = SECBUFFER_EMPTY;
     status = InitializeSecurityContextA(&cred_handle, &context, (SEC_CHAR *)"localhost",
             ISC_REQ_CONFIDENTIALITY|ISC_REQ_STREAM,
             0, 0, &buffers[1], 0, &context2, &buffers[0], &attrs, NULL);
@@ -1165,9 +1180,14 @@ static void test_communication(void)
        "Got unexpected status %#lx.\n", status);
     ok(buffers[0].pBuffers[0].cbBuffer == buf_size, "Output buffer size changed.\n");
     ok(buffers[0].pBuffers[0].BufferType == SECBUFFER_TOKEN, "Output buffer type changed.\n");
+    ok(buffers[1].pBuffers[1].cbBuffer > 5 ||
+       broken(buffers[1].pBuffers[1].cbBuffer == 0), /* < win10 */ "Wrong buffer size\n" );
+    ok(buffers[1].pBuffers[1].BufferType == SECBUFFER_MISSING ||
+       broken(buffers[1].pBuffers[1].BufferType == SECBUFFER_EMPTY), /* < win10 */ "Wrong buffer type.\n");
     ok( context2.dwLower == 0xdeadbeef, "Did not expect dwLower to be set on new context\n");
     ok( context2.dwUpper == 0xdeadbeef, "Did not expect dwUpper to be set on new context\n");
 
+    buffers[1].cBuffers = 1;
     buffers[1].pBuffers[0].cbBuffer = ret;
     status = InitializeSecurityContextA(&cred_handle, &context, (SEC_CHAR *)"localhost",
             ISC_REQ_CONFIDENTIALITY|ISC_REQ_STREAM|ISC_REQ_USE_SUPPLIED_CREDS,
@@ -1289,6 +1309,34 @@ static void test_communication(void)
     if(status == SEC_E_OK) {
         ok(conn_info.dwCipherStrength >= 128, "conn_info.dwCipherStrength = %ld\n", conn_info.dwCipherStrength);
         ok(conn_info.dwHashStrength >= 128, "conn_info.dwHashStrength = %ld\n", conn_info.dwHashStrength);
+    }
+
+    memset(&cipher, 0, sizeof(cipher));
+    cipher.dwVersion = SECPKGCONTEXT_CIPHERINFO_V1;
+    status = pQueryContextAttributesA(&context, SECPKG_ATTR_CIPHER_INFO, &cipher);
+    ok(status == SEC_E_OK || broken(status == SEC_E_UNSUPPORTED_FUNCTION) /* < vista */, "got %08lx\n", status);
+    if (status == SEC_E_OK)
+    {
+        ok(cipher.dwProtocol == 0x301, "got %lx\n", cipher.dwProtocol);
+        todo_wine ok(cipher.dwCipherSuite == 0xc014, "got %lx\n", cipher.dwCipherSuite);
+        todo_wine ok(cipher.dwBaseCipherSuite == 0xc014, "got %lx\n", cipher.dwBaseCipherSuite);
+        ok(!wcscmp(cipher.szCipherSuite, L"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA") ||
+           !wcscmp(cipher.szCipherSuite, L"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA_P256"), /* < win10 */
+           "got %s\n", wine_dbgstr_w(cipher.szCipherSuite));
+        ok(!wcscmp(cipher.szCipher, L"AES"), "got %s\n", wine_dbgstr_w(cipher.szCipher));
+        ok(cipher.dwCipherLen == 256, "got %lu\n", cipher.dwCipherLen);
+        ok(cipher.dwCipherBlockLen == 16, "got %lu\n", cipher.dwCipherBlockLen);
+        ok(!wcscmp(cipher.szHash, L"SHA1"), "got %s\n", wine_dbgstr_w(cipher.szHash));
+        ok(cipher.dwHashLen == 160, "got %lu\n", cipher.dwHashLen);
+        ok(!wcscmp(cipher.szExchange, L"ECDH") || !wcscmp(cipher.szExchange, L"ECDH_P256"), /* < win10 */
+           "got %s\n", wine_dbgstr_w(cipher.szExchange));
+        ok(cipher.dwMinExchangeLen == 0 || cipher.dwMinExchangeLen == 256,  /* < win10 */
+           "got %lu\n", cipher.dwMinExchangeLen);
+        ok(cipher.dwMaxExchangeLen == 65536 || cipher.dwMaxExchangeLen == 256, /* < win10 */
+           "got %lu\n", cipher.dwMaxExchangeLen);
+        ok(!wcscmp(cipher.szCertificate, L"RSA"), "got %s\n", wine_dbgstr_w(cipher.szCertificate));
+        todo_wine ok(cipher.dwKeyType == 0x1d || cipher.dwKeyType == 0x17, /* < win10 */
+                     "got %#lx\n", cipher.dwKeyType);
     }
 
     status = pQueryContextAttributesA(&context, SECPKG_ATTR_KEY_INFO, &key_info);

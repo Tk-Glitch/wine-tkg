@@ -2376,41 +2376,41 @@ wchar_t* __cdecl wcsncpy( wchar_t* s1, const wchar_t *s2, size_t n )
 /******************************************************************
  *		wcsncpy_s (MSVCRT.@)
  */
-INT CDECL wcsncpy_s( wchar_t* wcDest, size_t numElement, const wchar_t *wcSrc,
-                            size_t count )
+INT CDECL wcsncpy_s( wchar_t *dst, size_t elem, const wchar_t *src, size_t count )
 {
-    WCHAR *p = wcDest;
+    WCHAR *p = dst;
     BOOL truncate = (count == _TRUNCATE);
 
-    if(!wcDest && !numElement && !count)
-        return 0;
-
-    if (!wcDest || !numElement)
-        return EINVAL;
-
-    if (!wcSrc)
+    if (!count)
     {
-        *wcDest = 0;
-        return count ? EINVAL : 0;
+        if (dst && elem) *dst = 0;
+        return 0;
     }
 
-    while (numElement && count && *wcSrc)
+    if (!MSVCRT_CHECK_PMT(dst != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
-        *p++ = *wcSrc++;
-        numElement--;
+        *dst = 0;
+        return EINVAL;
+    }
+
+    while (elem && count && *src)
+    {
+        *p++ = *src++;
+        elem--;
         count--;
     }
-    if (!numElement && truncate)
+    if (!elem && truncate)
     {
         *(p-1) = 0;
         return STRUNCATE;
     }
-    else if (!numElement)
+    else if (!elem)
     {
-        *wcDest = 0;
+        *dst = 0;
         return ERANGE;
     }
-
     *p = 0;
     return 0;
 }
@@ -2451,51 +2451,44 @@ wchar_t* __cdecl wcscat( wchar_t *dst, const wchar_t *src )
 }
 
 /*********************************************************************
- *  wcsncat_s (MSVCRT.@)
- *
+ *           wcsncat_s (MSVCRT.@)
  */
-INT CDECL wcsncat_s(wchar_t *dst, size_t elem,
-        const wchar_t *src, size_t count)
+INT CDECL wcsncat_s(wchar_t *dst, size_t elem, const wchar_t *src, size_t count)
 {
-    size_t srclen;
-    wchar_t dststart;
-    INT ret = 0;
+    size_t i, j;
 
     if (!MSVCRT_CHECK_PMT(dst != NULL)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(elem > 0)) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(src != NULL || count == 0)) return EINVAL;
-
-    if (count == 0)
-        return 0;
-
-    for (dststart = 0; dststart < elem; dststart++)
+    if (count == 0) return 0;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
-        if (dst[dststart] == '\0')
-            break;
-    }
-    if (dststart == elem)
-    {
-        MSVCRT_INVALID_PMT("dst[elem] is not NULL terminated\n", EINVAL);
+        *dst = 0;
         return EINVAL;
     }
 
-    if (count == _TRUNCATE)
+    for (i = 0; i < elem; i++) if (!dst[i]) break;
+
+    if (i == elem)
     {
-        srclen = wcslen(src);
-        if (srclen >= (elem - dststart))
+        MSVCRT_INVALID_PMT("dst[elem] is not NULL terminated\n", EINVAL);
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (j = 0; (j + i) < elem; j++)
+    {
+        if(count == _TRUNCATE && j + i == elem - 1)
         {
-            srclen = elem - dststart - 1;
-            ret = STRUNCATE;
+            dst[j + i] = '\0';
+            return STRUNCATE;
+        }
+        if(j == count || (dst[j + i] = src[j]) == '\0')
+        {
+            dst[j + i] = '\0';
+            return 0;
         }
     }
-    else
-        srclen = min(wcslen(src), count);
-    if (srclen < (elem - dststart))
-    {
-        memcpy(&dst[dststart], src, srclen*sizeof(wchar_t));
-        dst[dststart+srclen] = '\0';
-        return ret;
-    }
+
     MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;

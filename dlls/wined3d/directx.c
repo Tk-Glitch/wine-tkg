@@ -464,6 +464,7 @@ static const struct wined3d_gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_RTX2080,    "NVIDIA GeForce RTX 2080",          DRIVER_NVIDIA_KEPLER,  8192},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_RTX2080TI,  "NVIDIA GeForce RTX 2080 Ti",       DRIVER_NVIDIA_KEPLER,  11264},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_TESLA_T4,           "NVIDIA Tesla T4",                  DRIVER_NVIDIA_KEPLER,  16384},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_AMPERE_A10,         "NVIDIA Ampere A10",                DRIVER_NVIDIA_KEPLER,  24576},
 
     /* AMD cards */
     {HW_VENDOR_AMD,        CARD_AMD_RAGE_128PRO,           "ATI Rage Fury",                    DRIVER_AMD_RAGE_128PRO,  16  },
@@ -525,6 +526,8 @@ static const struct wined3d_gpu_description gpu_description_table[] =
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_RX_NAVI_10,     "Radeon RX 5700 / 5700 XT",         DRIVER_AMD_RX,           8192},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_RX_NAVI_14,     "Radeon RX 5500M",                  DRIVER_AMD_RX,           4096},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_RX_NAVI_21,     "Radeon RX 6800/6800 XT / 6900 XT", DRIVER_AMD_RX,          16384},
+    {HW_VENDOR_AMD,        CARD_AMD_RADEON_PRO_V620,       "Radeon Pro V620",                  DRIVER_AMD_RX,          32768},
+    {HW_VENDOR_AMD,        CARD_AMD_RADEON_PRO_V620_VF,    "Radeon Pro V620 VF",               DRIVER_AMD_RX,          32768},
     {HW_VENDOR_AMD,        CARD_AMD_VANGOGH,               "AMD VANGOGH",                      DRIVER_AMD_RX,           4096},
 
     /* Red Hat */
@@ -1776,6 +1779,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
             allowed_bind_flags = WINED3D_BIND_RENDER_TARGET
                     | WINED3D_BIND_DEPTH_STENCIL
                     | WINED3D_BIND_UNORDERED_ACCESS;
+            gl_type = gl_type_end = WINED3D_GL_RES_TYPE_TEX_2D;
             if (!(bind_flags & WINED3D_BIND_SHADER_RESOURCE))
             {
                 if (!wined3d_check_surface_format(format))
@@ -1783,8 +1787,6 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
                     TRACE("%s is not supported for plain surfaces.\n", debug_d3dformat(format->id));
                     return WINED3DERR_NOTAVAILABLE;
                 }
-
-                gl_type = gl_type_end = WINED3D_GL_RES_TYPE_RB;
                 break;
             }
             allowed_usage |= WINED3DUSAGE_DYNAMIC
@@ -1798,7 +1800,6 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
                     | WINED3DUSAGE_QUERY_VERTEXTEXTURE
                     | WINED3DUSAGE_QUERY_WRAPANDMIP;
             allowed_bind_flags |= WINED3D_BIND_SHADER_RESOURCE;
-            gl_type = gl_type_end = WINED3D_GL_RES_TYPE_TEX_2D;
             if (usage & WINED3DUSAGE_LEGACY_CUBEMAP)
             {
                 allowed_usage &= ~WINED3DUSAGE_QUERY_LEGACYBUMPMAP;
@@ -1897,10 +1898,15 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
 
     for (; gl_type <= gl_type_end; ++gl_type)
     {
-        if ((format->caps[gl_type] & format_caps) != format_caps)
+        unsigned int caps = format->caps[gl_type];
+
+        if (gl_type == WINED3D_GL_RES_TYPE_TEX_2D && !(bind_flags & WINED3D_BIND_SHADER_RESOURCE))
+            caps |= format->caps[WINED3D_GL_RES_TYPE_RB];
+
+        if ((caps & format_caps) != format_caps)
         {
             TRACE("Requested format caps %#x, but format %s only has %#x.\n",
-                    format_caps, debug_d3dformat(check_format_id), format->caps[gl_type]);
+                    format_caps, debug_d3dformat(check_format_id), caps);
             return WINED3DERR_NOTAVAILABLE;
         }
 
@@ -1931,7 +1937,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
             return WINED3DERR_NOTAVAILABLE;
         }
 
-        if (!(format->caps[gl_type] & WINED3D_FORMAT_CAP_GEN_MIPMAP))
+        if (!(caps & WINED3D_FORMAT_CAP_GEN_MIPMAP))
             mipmap_gen_supported = FALSE;
     }
 

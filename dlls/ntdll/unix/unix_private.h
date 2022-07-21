@@ -157,7 +157,7 @@ extern void *create_startup_info( const UNICODE_STRING *nt_image, const RTL_USER
 extern char **build_envp( const WCHAR *envW ) DECLSPEC_HIDDEN;
 extern NTSTATUS exec_wineloader( char **argv, int socketfd, const pe_image_info_t *pe_info ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
-                              void **addr_ptr, SIZE_T *size_ptr ) DECLSPEC_HIDDEN;
+                              void **addr_ptr, SIZE_T *size_ptr, ULONG_PTR zero_bits ) DECLSPEC_HIDDEN;
 extern BOOL is_builtin_path( const UNICODE_STRING *path, WORD *machine ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_main_exe( const WCHAR *name, const char *unix_name, const WCHAR *curdir, WCHAR **image,
                                void **module ) DECLSPEC_HIDDEN;
@@ -202,8 +202,8 @@ extern void *anon_mmap_alloc( size_t size, int prot ) DECLSPEC_HIDDEN;
 extern void virtual_init(void) DECLSPEC_HIDDEN;
 extern ULONG_PTR get_system_affinity_mask(void) DECLSPEC_HIDDEN;
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 ) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_map_builtin_module( HANDLE mapping, void **module, SIZE_T *size,
-                                            SECTION_IMAGE_INFORMATION *info, WORD machine, BOOL prefer_native ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_map_builtin_module( HANDLE mapping, void **module, SIZE_T *size, SECTION_IMAGE_INFORMATION *info,
+                                            ULONG_PTR zero_bits, WORD machine, BOOL prefer_native ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_create_builtin_view( void *module, const UNICODE_STRING *nt_name,
                                              pe_image_info_t *info, void *so_handle ) DECLSPEC_HIDDEN;
 extern TEB *virtual_alloc_first_teb(void) DECLSPEC_HIDDEN;

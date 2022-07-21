@@ -4318,7 +4318,6 @@ image_size_tests[] =
 
 static void test_MFCalculateImageSize(void)
 {
-    DWORD plane_size;
     unsigned int i;
     UINT32 size;
     HRESULT hr;
@@ -4340,15 +4339,6 @@ static void test_MFCalculateImageSize(void)
         ok(hr == S_OK || (is_broken && hr == E_INVALIDARG), "%u: failed to calculate image size, hr %#lx.\n", i, hr);
         ok(size == ptr->size, "%u: unexpected image size %u, expected %u. Size %u x %u, format %s.\n", i, size, ptr->size,
                 ptr->width, ptr->height, wine_dbgstr_an((char *)&ptr->subtype->Data1, 4));
-
-        if (pMFGetPlaneSize)
-        {
-            unsigned int expected = ptr->plane_size ? ptr->plane_size : ptr->size;
-
-            hr = pMFGetPlaneSize(ptr->subtype->Data1, ptr->width, ptr->height, &plane_size);
-            ok(hr == S_OK, "%u: failed to get plane size, hr %#lx.\n", i, hr);
-            ok(plane_size == expected, "%u: unexpected plane size %lu, expected %u.\n", i, plane_size, expected);
-        }
     }
 }
 
@@ -5723,48 +5713,49 @@ static void test_MFCreate2DMediaBuffer(void)
         unsigned int fourcc;
         unsigned int contiguous_length;
         int pitch;
-        unsigned int plane_multiplier;
         unsigned int max_length;
     } _2d_buffer_tests[] =
     {
-        { 2,  2, MAKEFOURCC('N','V','1','2'), 6, 64, 0, 192 },
+        { 2,  2, MAKEFOURCC('N','V','1','2'), 6, 64, 192 },
         { 4,  2, MAKEFOURCC('N','V','1','2'), 12, 64 },
         { 2,  4, MAKEFOURCC('N','V','1','2'), 12, 64 },
         { 1,  3, MAKEFOURCC('N','V','1','2'), 4, 64 },
-        { 4, 16, MAKEFOURCC('N','V','1','2'), 96, 64, 0, 1536 },
+        { 4, 16, MAKEFOURCC('N','V','1','2'), 96, 64, 1536 },
 
-        { 2, 2, MAKEFOURCC('I','M','C','2'), 6, 128, 0, 384 },
+        { 2, 2, MAKEFOURCC('I','M','C','2'), 6, 128, 384 },
         { 4, 2, MAKEFOURCC('I','M','C','2'), 12, 128 },
         { 2, 4, MAKEFOURCC('I','M','C','2'), 12, 128 },
+        { 3, 5, MAKEFOURCC('I','M','C','2'), 20, 128 },
         { 2, 2, MAKEFOURCC('I','M','C','4'), 6, 128 },
         { 4, 2, MAKEFOURCC('I','M','C','4'), 12, 128 },
         { 2, 4, MAKEFOURCC('I','M','C','4'), 12, 128 },
+        { 3, 5, MAKEFOURCC('I','M','C','4'), 20, 128 },
 
-        { 4,  2, MAKEFOURCC('I','M','C','1'),  32, 128, 2 },
-        { 4,  4, MAKEFOURCC('I','M','C','1'),  64, 128, 2 },
-        { 4, 16, MAKEFOURCC('I','M','C','1'), 256, 128, 2, 4096 },
-        { 4, 20, MAKEFOURCC('I','M','C','1'), 320, 128, 2 },
+        { 4,  2, MAKEFOURCC('I','M','C','1'),  32, 128 },
+        { 4,  4, MAKEFOURCC('I','M','C','1'),  64, 128 },
+        { 4, 16, MAKEFOURCC('I','M','C','1'), 256, 128, 4096 },
+        { 4, 20, MAKEFOURCC('I','M','C','1'), 320, 128 },
 
-        { 4,  2, MAKEFOURCC('I','M','C','3'),  32, 128, 2 },
-        { 4,  4, MAKEFOURCC('I','M','C','3'),  64, 128, 2 },
-        { 4, 16, MAKEFOURCC('I','M','C','3'), 256, 128, 2, 4096 },
-        { 4, 20, MAKEFOURCC('I','M','C','3'), 320, 128, 2 },
+        { 4,  2, MAKEFOURCC('I','M','C','3'),  32, 128 },
+        { 4,  4, MAKEFOURCC('I','M','C','3'),  64, 128 },
+        { 4, 16, MAKEFOURCC('I','M','C','3'), 256, 128, 4096 },
+        { 4, 20, MAKEFOURCC('I','M','C','3'), 320, 128 },
 
         { 4,  2, MAKEFOURCC('Y','V','1','2'),  12, 128 },
         { 4,  4, MAKEFOURCC('Y','V','1','2'),  24, 128 },
-        { 4, 16, MAKEFOURCC('Y','V','1','2'),  96, 128, 0, 3072 },
+        { 4, 16, MAKEFOURCC('Y','V','1','2'),  96, 128, 3072 },
 
         { 4,  2, MAKEFOURCC('A','Y','U','V'),  32, 64 },
         { 4,  4, MAKEFOURCC('A','Y','U','V'),  64, 64 },
-        { 4, 16, MAKEFOURCC('A','Y','U','V'), 256, 64, 0, 1024 },
+        { 4, 16, MAKEFOURCC('A','Y','U','V'), 256, 64, 1024 },
 
         { 4,  2, MAKEFOURCC('Y','U','Y','2'),  16, 64 },
         { 4,  4, MAKEFOURCC('Y','U','Y','2'),  32, 64 },
-        { 4, 16, MAKEFOURCC('Y','U','Y','2'), 128, 64, 0, 1024 },
+        { 4, 16, MAKEFOURCC('Y','U','Y','2'), 128, 64, 1024 },
 
         { 4,  2, MAKEFOURCC('U','Y','V','Y'),  16, 64 },
         { 4,  4, MAKEFOURCC('U','Y','V','Y'),  32, 64 },
-        { 4, 16, MAKEFOURCC('U','Y','V','Y'), 128, 64, 0, 1024 },
+        { 4, 16, MAKEFOURCC('U','Y','V','Y'), 128, 64, 1024 },
 
         { 2, 4, D3DFMT_A8R8G8B8, 32, 64 },
         { 1, 4, D3DFMT_A8R8G8B8, 16, 64 },
@@ -5993,17 +5984,51 @@ static void test_MFCreate2DMediaBuffer(void)
         ok(length2 == ptr->contiguous_length, "%d: unexpected linear buffer length %lu for %u x %u, format %s.\n",
                 i, length2, ptr->width, ptr->height, wine_dbgstr_an((char *)&ptr->fourcc, 4));
 
-        memset(data, 0xff, length2);
+        hr = pMFGetStrideForBitmapInfoHeader(ptr->fourcc, ptr->width, &stride);
+        ok(hr == S_OK, "Failed to get stride, hr %#lx.\n", hr);
+        stride = abs(stride);
+
+        /* primary plane */
+        ok(ptr->height * stride <= length2, "Insufficient buffer space: expected at least %lu bytes, got only %lu\n",
+                ptr->height * stride, length2);
+        for (j = 0; j < ptr->height; j++)
+            for (k = 0; k < stride; k++)
+                data[j * stride + k] = ((j % 16) << 4) + (k % 16);
+
+        data += ptr->height * stride;
+
+        /* secondary planes */
+        switch (ptr->fourcc)
+        {
+            case MAKEFOURCC('I','M','C','1'):
+            case MAKEFOURCC('I','M','C','3'):
+                ok(2 * ptr->height * stride <= length2, "Insufficient buffer space: expected at least %lu bytes, got only %lu\n",
+                        2 * ptr->height * stride, length2);
+                for (j = 0; j < ptr->height; j++)
+                    for (k = 0; k < stride / 2; k++)
+                        data[j * stride + k] = (((j + ptr->height) % 16) << 4) + (k % 16);
+                break;
+
+            case MAKEFOURCC('I','M','C','2'):
+            case MAKEFOURCC('I','M','C','4'):
+                ok(stride * 3 / 2 * ptr->height <= length2, "Insufficient buffer space: expected at least %lu bytes, got only %lu\n",
+                        stride * 3 / 2 * ptr->height, length2);
+                for (j = 0; j < ptr->height; j++)
+                    for (k = 0; k < stride / 2; k++)
+                        data[j * (stride / 2) + k] = (((j + ptr->height) % 16) << 4) + (k % 16);
+                break;
+
+            case MAKEFOURCC('N','V','1','2'):
+                ok(stride * ptr->height * 3 / 2 <= length2, "Insufficient buffer space: expected at least %lu bytes, got only %lu\n",
+                        stride * ptr->height * 3 / 2, length2);
+                for (j = 0; j < ptr->height / 2; j++)
+                    for (k = 0; k < stride; k++)
+                        data[j * stride + k] = (((j + ptr->height) % 16) << 4) + (k % 16);
+                break;
+        }
 
         hr = IMFMediaBuffer_Unlock(buffer);
         ok(hr == S_OK, "Failed to unlock buffer, hr %#lx.\n", hr);
-
-        hr = pMFGetPlaneSize(ptr->fourcc, ptr->width, ptr->height, &length2);
-        ok(hr == S_OK, "Failed to get plane size, hr %#lx.\n", hr);
-        if (ptr->plane_multiplier)
-            length2 *= ptr->plane_multiplier;
-        ok(length2 == length, "%d: contiguous length %lu does not match plane size %lu, %u x %u, format %s.\n", i, length,
-                length2, ptr->width, ptr->height, wine_dbgstr_an((char *)&ptr->fourcc, 4));
 
         hr = IMF2DBuffer_Lock2D(_2dbuffer, &data, &pitch);
         ok(hr == S_OK, "Failed to lock buffer, hr %#lx.\n", hr);
@@ -6014,37 +6039,41 @@ static void test_MFCreate2DMediaBuffer(void)
         ok(pitch == pitch2, "Unexpected pitch.\n");
 
         /* primary plane */
-        for(j = 0; j < ptr->height; j++)
-            for (k = 0; k < ptr->width; k++)
-                ok(data[j * pitch + k] == 0xff, "Unexpected byte %02x at test %d row %d column %d.\n", data[j * pitch + k], i, j, k);
+        for (j = 0; j < ptr->height; j++)
+            for (k = 0; k < stride; k++)
+                ok(data[j * pitch + k] == ((j % 16) << 4) + (k % 16),
+                        "Unexpected byte %02x instead of %02x at test %d row %d column %d.\n",
+                        data[j * pitch + k], ((j % 16) << 4) + (k % 16), i, j, k);
 
-        hr = pMFGetStrideForBitmapInfoHeader(ptr->fourcc, ptr->width, &stride);
-        ok(hr == S_OK, "Failed to get stride, hr %#lx.\n", hr);
+        data += ptr->height * pitch;
 
         /* secondary planes */
         switch (ptr->fourcc)
         {
             case MAKEFOURCC('I','M','C','1'):
             case MAKEFOURCC('I','M','C','3'):
-                for (j = ptr->height; j < length2 / stride; j++)
-                    for (k = 0; k < ptr->width / 2; k++)
-                        ok(data[j * pitch + k] == 0xff, "Unexpected byte %02x at test %d row %d column %d.\n", data[j * pitch + k], i, j, k);
+                for (j = 0; j < ptr->height; j++)
+                    for (k = 0; k < stride / 2; k++)
+                        ok(data[j * pitch + k] == (((j + ptr->height) % 16) << 4) + (k % 16),
+                                "Unexpected byte %02x instead of %02x at test %d row %d column %d.\n",
+                                data[j * pitch + k], (((j + ptr->height) % 16) << 4) + (k % 16), i, j + ptr->height, k);
                 break;
 
             case MAKEFOURCC('I','M','C','2'):
             case MAKEFOURCC('I','M','C','4'):
-                for (j = ptr->height; j < length2 / stride; j++)
-                    for (k = 0; k < ptr->width / 2; k++)
-                        ok(data[j * pitch + k] == 0xff, "Unexpected byte %02x at test %d row %d column %d.\n", data[j * pitch + k], i, j, k);
-                for (j = ptr->height; j < length2 / stride; j++)
-                    for (k = pitch / 2; k < pitch / 2 + ptr->width / 2; k++)
-                        ok(data[j * pitch + k] == 0xff, "Unexpected byte %02x at test %d row %d column %d.\n", data[j * pitch + k], i, j, k);
+                for (j = 0; j < ptr->height; j++)
+                    for (k = 0; k < stride / 2; k++)
+                        ok(data[j * (pitch / 2) + k] == (((j + ptr->height) % 16) << 4) + (k % 16),
+                                "Unexpected byte %02x instead of %02x at test %d row %d column %d.\n",
+                                data[j * (pitch / 2) + k], (((j + ptr->height) % 16) << 4) + (k % 16), i, j + ptr->height, k);
                 break;
 
             case MAKEFOURCC('N','V','1','2'):
-                for (j = ptr->height; j < length2 / stride; j++)
-                    for (k = 0; k < ptr->width; k++)
-                        ok(data[j * pitch + k] == 0xff, "Unexpected byte %02x at test %d row %d column %d.\n", data[j * pitch + k], i, j, k);
+                for (j = 0; j < ptr->height / 2; j++)
+                    for (k = 0; k < stride; k++)
+                        ok(data[j * pitch + k] == (((j + ptr->height) % 16) << 4) + (k % 16),
+                                "Unexpected byte %02x instead of %02x at test %d row %d column %d.\n",
+                                data[j * pitch + k], (((j + ptr->height) % 16) << 4) + (k % 16), i, j + ptr->height, k);
                 break;
 
             default:
@@ -6600,11 +6629,12 @@ static void test_MFCreateDXSurfaceBuffer(void)
     IMF2DBuffer2_Release(_2dbuffer2);
 
     IMFMediaBuffer_Release(buffer);
+    IDirect3DDevice9_Release(device);
 
 done:
     if (backbuffer)
         IDirect3DSurface9_Release(backbuffer);
-    IDirect3D9_Release(d3d);
+    ok(!IDirect3D9_Release(d3d), "Unexpected refcount.\n");
     DestroyWindow(window);
 }
 
@@ -7579,6 +7609,8 @@ static void test_sample_allocator_d3d9(void)
 
     IMFVideoSampleAllocator_Release(allocator);
     IMFMediaType_Release(video_type);
+    IDirect3DDeviceManager9_Release(d3d9_manager);
+    IDirect3DDevice9_Release(d3d9_device);
 
 done:
     IDirect3D9_Release(d3d9);
@@ -7686,6 +7718,7 @@ static void test_sample_allocator_d3d11(void)
     hr = IMFMediaBuffer_Unlock(buffer);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
+    IMFMediaBuffer_Release(buffer);
     IMFSample_Release(sample);
 
     IMFVideoSampleAllocator_Release(allocator);
@@ -7828,7 +7861,7 @@ static void test_sample_allocator_d3d11(void)
 
 static void test_sample_allocator_d3d12(void)
 {
-    IMFVideoSampleAllocator *allocator;
+    IMFVideoSampleAllocator *allocator = NULL;
     D3D12_HEAP_PROPERTIES heap_props;
     IMFDXGIDeviceManager *manager;
     D3D12_HEAP_FLAGS heap_flags;
@@ -7916,11 +7949,12 @@ static void test_sample_allocator_d3d12(void)
 
     ID3D12Resource_Release(resource);
     IMFDXGIBuffer_Release(dxgi_buffer);
+    IMFMediaBuffer_Release(buffer);
     IMFSample_Release(sample);
 
-    IMFVideoSampleAllocator_Release(allocator);
-
 done:
+    if (allocator)
+        IMFVideoSampleAllocator_Release(allocator);
     IMFDXGIDeviceManager_Release(manager);
     ID3D12Device_Release(device);
 }

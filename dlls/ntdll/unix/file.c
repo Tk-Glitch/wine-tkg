@@ -2825,7 +2825,7 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
 
 not_found:
     unix_name[pos - 1] = 0;
-    return STATUS_OBJECT_PATH_NOT_FOUND;
+    return STATUS_OBJECT_NAME_NOT_FOUND;
 }
 
 
@@ -3418,7 +3418,7 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
 
         /* grow the buffer if needed */
 
-        if (unix_len - pos < MAX_DIR_ENTRY_LEN + 2)
+        if (unix_len - pos < MAX_DIR_ENTRY_LEN + 3)
         {
             char *new_name;
             unix_len += 2 * MAX_DIR_ENTRY_LEN;
@@ -3431,17 +3431,18 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
         /* if this is the last element, not finding it is not necessarily fatal */
         if (!name_len)
         {
-            if (status == STATUS_OBJECT_PATH_NOT_FOUND
+            if (status == STATUS_OBJECT_NAME_NOT_FOUND
                 || (disposition == FILE_WINE_PATH && status == STATUS_OBJECT_NAME_NOT_FOUND))
             {
-                status = STATUS_OBJECT_NAME_NOT_FOUND;
                 if (disposition != FILE_OPEN && disposition != FILE_OVERWRITE)
                 {
                     ret = ntdll_wcstoumbs( name, end - name, unix_name + pos + 1, MAX_DIR_ENTRY_LEN + 1, TRUE );
                     if (ret > 0 && ret <= MAX_DIR_ENTRY_LEN)
                     {
                         unix_name[pos] = '/';
-                        unix_name[pos + 1 + ret] = 0;
+                        pos += ret + 1;
+                        if (end < next) unix_name[pos++] = '/';
+                        unix_name[pos] = 0;
                         status = STATUS_NO_SUCH_FILE;
                         break;
                     }
@@ -3451,6 +3452,7 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
             {
                 status = STATUS_OBJECT_NAME_COLLISION;
             }
+            if (end < next) strcat( unix_name, "/" );
         }
         else if (disposition == FILE_WINE_PATH && (status == STATUS_OBJECT_PATH_NOT_FOUND
                  || status == STATUS_OBJECT_NAME_NOT_FOUND))
@@ -3466,6 +3468,7 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
                 continue;
             }
         }
+        else if (status == STATUS_OBJECT_NAME_NOT_FOUND) status = STATUS_OBJECT_PATH_NOT_FOUND;
 
         if (status != STATUS_SUCCESS) break;
 

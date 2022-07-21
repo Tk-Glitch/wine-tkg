@@ -81,7 +81,7 @@ static void d2d_size_set(D2D1_SIZE_U *dst, float width, float height)
 
 static BOOL d2d_clip_stack_init(struct d2d_clip_stack *stack)
 {
-    if (!(stack->stack = heap_alloc(INITIAL_CLIP_STACK_SIZE * sizeof(*stack->stack))))
+    if (!(stack->stack = malloc(INITIAL_CLIP_STACK_SIZE * sizeof(*stack->stack))))
         return FALSE;
 
     stack->size = INITIAL_CLIP_STACK_SIZE;
@@ -92,7 +92,7 @@ static BOOL d2d_clip_stack_init(struct d2d_clip_stack *stack)
 
 static void d2d_clip_stack_cleanup(struct d2d_clip_stack *stack)
 {
-    heap_free(stack->stack);
+    free(stack->stack);
 }
 
 static BOOL d2d_clip_stack_push(struct d2d_clip_stack *stack, const D2D1_RECT_F *rect)
@@ -294,7 +294,7 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
         ID3D11Device1_Release(context->d3d_device);
         ID2D1Factory_Release(context->factory);
         ID2D1Device_Release(context->device);
-        heap_free(context);
+        free(context);
     }
 
     return refcount;
@@ -517,14 +517,14 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateCompatibleRenderTarget
     TRACE("iface %p, size %p, pixel_size %p, format %p, options %#x, render_target %p.\n",
             iface, size, pixel_size, format, options, rt);
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     if (FAILED(hr = d2d_bitmap_render_target_init(object, render_target, size, pixel_size,
             format, options)))
     {
         WARN("Failed to initialise render target, hr %#lx.\n", hr);
-        heap_free(object);
+        free(object);
         return hr;
     }
 
@@ -1345,7 +1345,7 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
 
     if (texture_type == DWRITE_TEXTURE_CLEARTYPE_3x1)
         bitmap_size.width *= 3;
-    if (!(opacity_values = heap_calloc(bitmap_size.height, bitmap_size.width)))
+    if (!(opacity_values = calloc(bitmap_size.height, bitmap_size.width)))
     {
         ERR("Failed to allocate opacity values.\n");
         goto done;
@@ -1408,7 +1408,7 @@ done:
         ID2D1BitmapBrush_Release(opacity_brush);
     if (opacity_bitmap)
         ID2D1Bitmap_Release(opacity_bitmap);
-    heap_free(opacity_values);
+    free(opacity_values);
     IDWriteGlyphRunAnalysis_Release(analysis);
 }
 
@@ -1946,19 +1946,10 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateEffect(ID2D1DeviceCont
         REFCLSID effect_id, ID2D1Effect **effect)
 {
     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
-    struct d2d_effect_context *effect_context;
-    HRESULT hr;
 
-    FIXME("iface %p, effect_id %s, effect %p stub!\n", iface, debugstr_guid(effect_id), effect);
+    TRACE("iface %p, effect_id %s, effect %p.\n", iface, debugstr_guid(effect_id), effect);
 
-    if (!(effect_context = heap_alloc_zero(sizeof(*effect_context))))
-        return E_OUTOFMEMORY;
-    d2d_effect_context_init(effect_context, context);
-
-    hr = ID2D1EffectContext_CreateEffect(&effect_context->ID2D1EffectContext_iface, effect_id, effect);
-
-    ID2D1EffectContext_Release(&effect_context->ID2D1EffectContext_iface);
-    return hr;
+    return d2d_effect_create(context, effect_id, effect);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGradientStopCollection(
@@ -2028,9 +2019,31 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
 static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D1DeviceContext1 *iface,
         D2D1_BUFFER_PRECISION buffer_precision)
 {
-    FIXME("iface %p, buffer_precision %#x stub!\n", iface, buffer_precision);
+    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+    DXGI_FORMAT format;
+    UINT support = 0;
+    HRESULT hr;
 
-    return FALSE;
+    TRACE("iface %p, buffer_precision %u.\n", iface, buffer_precision);
+
+    switch (buffer_precision)
+    {
+        case D2D1_BUFFER_PRECISION_8BPC_UNORM: format = DXGI_FORMAT_R8G8B8A8_UNORM; break;
+        case D2D1_BUFFER_PRECISION_8BPC_UNORM_SRGB: format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; break;
+        case D2D1_BUFFER_PRECISION_16BPC_UNORM: format = DXGI_FORMAT_R16G16B16A16_UNORM; break;
+        case D2D1_BUFFER_PRECISION_16BPC_FLOAT: format = DXGI_FORMAT_R16G16B16A16_FLOAT; break;
+        case D2D1_BUFFER_PRECISION_32BPC_FLOAT: format = DXGI_FORMAT_R32G32B32A32_FLOAT; break;
+        default:
+            WARN("Unexpected precision %u.\n", buffer_precision);
+            return FALSE;
+    }
+
+    if (FAILED(hr = ID3D11Device1_CheckFormatSupport(context->d3d_device, format, &support)))
+    {
+        WARN("Format support check failed, hr %#lx.\n", hr);
+    }
+
+    return !!(support & D3D11_FORMAT_SUPPORT_BUFFER);
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1DeviceContext1 *iface,
@@ -4202,13 +4215,13 @@ HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface,
     else if (bitmap_desc.dpiX <= 0.0f || bitmap_desc.dpiY <= 0.0f)
         return E_INVALIDARG;
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     if (FAILED(hr = d2d_device_context_init(object, device, outer_unknown, ops)))
     {
         WARN("Failed to initialise render target, hr %#lx.\n", hr);
-        heap_free(object);
+        free(object);
         return hr;
     }
 
@@ -4225,7 +4238,7 @@ HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface,
         {
             WARN("Failed to create target bitmap, hr %#lx.\n", hr);
             IUnknown_Release(&object->IUnknown_iface);
-            heap_free(object);
+            free(object);
             return hr;
         }
 
@@ -4281,7 +4294,7 @@ static ULONG WINAPI d2d_device_Release(ID2D1Device *iface)
     {
         IDXGIDevice_Release(device->dxgi_device);
         ID2D1Factory1_Release(device->factory);
-        heap_free(device);
+        free(device);
     }
 
     return refcount;
@@ -4308,13 +4321,13 @@ static HRESULT WINAPI d2d_device_CreateDeviceContext(ID2D1Device *iface, D2D1_DE
     if (options)
         FIXME("Options are ignored %#x.\n", options);
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     if (FAILED(hr = d2d_device_context_init(object, iface, NULL, NULL)))
     {
         WARN("Failed to initialise device context, hr %#lx.\n", hr);
-        heap_free(object);
+        free(object);
         return hr;
     }
 

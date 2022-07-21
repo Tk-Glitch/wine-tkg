@@ -419,11 +419,9 @@ static void open_file_test(void)
     pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
     status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
                           FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
-    todo_wine
     ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %lx\n", wine_dbgstr_w(nameW.Buffer), status );
     status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
                           FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_NON_DIRECTORY_FILE );
-    todo_wine
     ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %lx\n", wine_dbgstr_w(nameW.Buffer), status );
     pRtlFreeUnicodeString( &nameW );
 
@@ -4247,6 +4245,18 @@ static void test_NtCreateFile(void)
     pRtlFreeUnicodeString( &nameW );
     SetFileAttributesW(path, FILE_ATTRIBUTE_ARCHIVE);
     DeleteFileW( path );
+
+    wcscat( path, L"\\" );
+    pRtlDosPathNameToNtPathName_U(path, &nameW, NULL, NULL);
+
+    status = pNtCreateFile( &handle, GENERIC_READ, &attr, &io, NULL,
+                            0, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_CREATE, 0, NULL, 0);
+    ok( status == STATUS_OBJECT_NAME_INVALID, "failed %s %lx\n", debugstr_w(nameW.Buffer), status );
+    status = pNtCreateFile( &handle, GENERIC_READ, &attr, &io, NULL,
+                            0, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_CREATE,
+                            FILE_DIRECTORY_FILE, NULL, 0);
+    ok( !status, "failed %s %lx\n", debugstr_w(nameW.Buffer), status );
+    RemoveDirectoryW( path );
 }
 
 static void test_readonly(void)

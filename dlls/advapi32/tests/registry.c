@@ -4482,6 +4482,64 @@ static void test_EnumDynamicTimeZoneInformation(void)
     RegCloseKey(key);
 }
 
+static void test_RegRenameKey(void)
+{
+    HKEY key, key2;
+    LSTATUS ret;
+
+    ret = RegRenameKey(NULL, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(NULL, NULL, L"newname");
+    ok(ret == ERROR_INVALID_HANDLE, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(NULL, L"oldname", NULL);
+    ok(ret == ERROR_INVALID_HANDLE, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(NULL, L"oldname", L"newname");
+    ok(ret == ERROR_INVALID_HANDLE, "Unexpected return value %ld.\n", ret);
+
+    ret = RegCreateKeyExA(hkey_main, "TestRenameKey", 0, NULL, 0, KEY_READ, NULL, &key, NULL);
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(key, NULL, L"TestNewRenameKey");
+    ok(ret == ERROR_ACCESS_DENIED, "Unexpected return value %ld.\n", ret);
+    RegCloseKey(key);
+
+    /* Rename itself. */
+    ret = RegCreateKeyExA(hkey_main, "TestRenameKey", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL);
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(key, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(key, NULL, L"TestNewRenameKey");
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    RegCloseKey(key);
+
+    ret = RegDeleteKeyA(hkey_main, "TestNewRenameKey");
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    ret = RegDeleteKeyA(hkey_main, "TestRenameKey");
+    ok(ret, "Unexpected return value %ld.\n", ret);
+
+    /* Subkey does not exist. */
+    ret = RegCreateKeyExA(hkey_main, "TestRenameKey", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL);
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(key, L"unknown_subkey", NULL);
+    ok(ret == ERROR_FILE_NOT_FOUND, "Unexpected return value %ld.\n", ret);
+    ret = RegRenameKey(key, L"unknown_subkey", L"known_subkey");
+    ok(ret == ERROR_FILE_NOT_FOUND, "Unexpected return value %ld.\n", ret);
+
+    /* Rename existing subkey. */
+    ret = RegCreateKeyExA(key, "known_subkey", 0, NULL, 0, KEY_WRITE, NULL, &key2, NULL);
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    RegCloseKey(key2);
+
+    ret = RegRenameKey(key, L"known_subkey", L"renamed_subkey");
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+
+    ret = RegDeleteKeyA(key, "renamed_subkey");
+    ok(!ret, "Unexpected return value %ld.\n", ret);
+    ret = RegDeleteKeyA(key, "known_subkey");
+    ok(ret, "Unexpected return value %ld.\n", ret);
+
+    RegCloseKey(key);
+}
+
 START_TEST(registry)
 {
     /* Load pointers for functions that are not available in all Windows versions */
@@ -4521,6 +4579,7 @@ START_TEST(registry)
     test_RegLoadMUIString();
     test_EnumDynamicTimeZoneInformation();
     test_perflib_key();
+    test_RegRenameKey();
 
     /* cleanup */
     delete_key( hkey_main );

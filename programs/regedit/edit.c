@@ -86,17 +86,18 @@ static void WINAPIV error_code_messagebox(HWND hwnd, unsigned int msg_id, ...)
 static BOOL change_dword_base(HWND hwndDlg, BOOL toHex)
 {
     WCHAR buf[128];
-    DWORD val;
+    UINT64 val;
 
     if (!GetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf, ARRAY_SIZE(buf))) return FALSE;
-    if (!swscanf(buf, toHex ? L"%u" : L"%x", &val)) return FALSE;
-    wsprintfW(buf, toHex ? L"%x" : L"%u", val);
+    if (!swscanf(buf, toHex ? L"%I64u" : L"%I64x", &val)) return FALSE;
+    wsprintfW(buf, toHex ? L"%I64x" : L"%I64u", val);
     return SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf);
 }
 
 static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     HWND hwndValue;
+    WCHAR buff[64];
     int len;
 
     switch(uMsg) {
@@ -105,6 +106,8 @@ static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, L
         SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, stringValueData);
         CheckRadioButton(hwndDlg, IDC_DWORD_HEX, IDC_DWORD_DEC, IDC_DWORD_HEX);
         isDecimal = FALSE;
+        if (lParam == REG_QWORD && LoadStringW(GetModuleHandleW(0), IDS_EDIT_QWORD, buff, ARRAY_SIZE(buff)))
+            SetWindowTextW(hwndDlg, buff);
         return TRUE;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -281,16 +284,29 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
         DWORD value = *((DWORD*)stringValueData);
         stringValueData = heap_xrealloc(stringValueData, 64);
         wsprintfW(stringValueData, L"%x", value);
-	if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc) == IDOK) {
-	    DWORD val;
-	    CHAR* valueA = GetMultiByteString(stringValueData);
-	    if (sscanf(valueA, isDecimal ? "%lu" : "%lx", &val)) {
-		lRet = RegSetValueExW(hKey, valueName, 0, type, (BYTE*)&val, sizeof(val));
-		if (lRet == ERROR_SUCCESS) result = TRUE;
+        if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc) == IDOK)
+        {
+            DWORD val;
+            if (swscanf(stringValueData, isDecimal ? L"%lu" : L"%lx", &val))
+            {
+                lRet = RegSetValueExW(hKey, valueName, 0, type, (BYTE*)&val, sizeof(val));
+                if (lRet == ERROR_SUCCESS) result = TRUE;
                 else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
-	    }
-	    heap_free(valueA);
-	}
+            }
+        }
+    } else if ( type == REG_QWORD ) {
+        UINT64 value = *((UINT64 *)stringValueData);
+        stringValueData = heap_xrealloc(stringValueData, 64);
+        swprintf(stringValueData, 64, L"%I64x", value);
+        if (DialogBoxParamW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc, type) == IDOK)
+        {
+            if (swscanf(stringValueData, isDecimal ? L"%I64u" : L"%I64x", &value))
+            {
+                lRet = RegSetValueExW(hKey, valueName, 0, type, (BYTE *)&value, sizeof(value));
+                if (lRet == ERROR_SUCCESS) result = TRUE;
+                else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
+            }
+        }
     } else if ( type == REG_MULTI_SZ ) {
         WCHAR char1 = '\r', char2 = '\n';
         WCHAR *tmpValueData = NULL;
@@ -426,7 +442,8 @@ BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, DWORD valueType, LPW
 {
     LONG lRet = ERROR_SUCCESS;
     WCHAR newValue[256];
-    DWORD valueDword = 0;
+    UINT64 value = 0;
+    DWORD size_bytes;
     BOOL result = FALSE;
     int valueNum, index;
     HKEY hKey;
@@ -450,16 +467,34 @@ BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, DWORD valueType, LPW
         error_code_messagebox(hwnd, IDS_CREATE_VALUE_FAILED);
 	goto done;
     }
-   
-    lRet = RegSetValueExW(hKey, valueName, 0, valueType, (BYTE*)&valueDword, sizeof(DWORD));
+
+    switch (valueType)
+    {
+        case REG_DWORD:
+        case REG_DWORD_BIG_ENDIAN:
+            size_bytes = sizeof(DWORD);
+            break;
+        case REG_QWORD:
+            size_bytes = sizeof(UINT64);
+            break;
+        case REG_BINARY:
+            size_bytes = 0;
+            break;
+        case REG_MULTI_SZ:
+            size_bytes = 2 * sizeof(WCHAR);
+            break;
+        default: /* REG_NONE, REG_SZ, REG_EXPAND_SZ */
+            size_bytes = sizeof(WCHAR);
+    }
+
+    lRet = RegSetValueExW(hKey, valueName, 0, valueType, (BYTE *)&value, size_bytes);
     if (lRet) {
         error_code_messagebox(hwnd, IDS_CREATE_VALUE_FAILED);
 	goto done;
     }
 
     /* Add the new item to the listview */
-    index = AddEntryToList(g_pChildWnd->hListWnd, valueName, valueType,
-                           (BYTE *)&valueDword, sizeof(DWORD), -1);
+    index = AddEntryToList(g_pChildWnd->hListWnd, valueName, valueType, (BYTE *)&value, size_bytes, -1);
     item.state = LVIS_FOCUSED | LVIS_SELECTED;
     item.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
     SendMessageW(g_pChildWnd->hListWnd, LVM_SETITEMSTATE, index, (LPARAM)&item);

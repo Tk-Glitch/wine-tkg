@@ -132,15 +132,13 @@ static void dump(const void* ptr, unsigned len)
  * Process CodeView type information.
  */
 
-#define MAX_BUILTIN_TYPES	0x06FF
-#define FIRST_DEFINABLE_TYPE    0x1000
-
-static struct symt*     cv_basic_types[MAX_BUILTIN_TYPES];
+static struct symt*     cv_basic_types[T_MAXPREDEFINEDTYPE];
 
 struct cv_defined_module
 {
     BOOL                allowed;
-    unsigned int        num_defined_types;
+    unsigned int        first_type_index;
+    unsigned int        last_type_index;
     struct symt**       defined_types;
 };
 /* FIXME: don't make it static */
@@ -532,15 +530,12 @@ static struct symt*  codeview_get_type(unsigned int typeno, BOOL quiet)
 
     /*
      * Convert Codeview type numbers into something we can grok internally.
-     * Numbers < FIRST_DEFINABLE_TYPE are all fixed builtin types.
-     * Numbers from FIRST_DEFINABLE_TYPE and up are all user defined (structs, etc).
+     * Numbers < T_MAXPREDEFINEDTYPE all fixed builtin types.
+     * Numbers from T_FIRSTDEFINABLETYPE and up are all user defined (structs, etc).
      */
-    if (typeno < FIRST_DEFINABLE_TYPE)
-    {
-        if (typeno < MAX_BUILTIN_TYPES)
-	    symt = cv_basic_types[typeno];
-    }
-    else
+    if (typeno < T_MAXPREDEFINEDTYPE)
+        symt = cv_basic_types[typeno];
+    else if (typeno >= T_FIRSTDEFINABLETYPE)
     {
         unsigned        mod_index = typeno >> 24;
         unsigned        mod_typeno = typeno & 0x00FFFFFF;
@@ -548,37 +543,44 @@ static struct symt*  codeview_get_type(unsigned int typeno, BOOL quiet)
 
         mod = (mod_index == 0) ? cv_current_module : &cv_zmodules[mod_index];
 
-        if (mod_index >= CV_MAX_MODULES || !mod->allowed) 
+        if (mod_index >= CV_MAX_MODULES || !mod->allowed)
             FIXME("Module of index %d isn't loaded yet (%x)\n", mod_index, typeno);
         else
         {
-            if (mod_typeno - FIRST_DEFINABLE_TYPE < mod->num_defined_types)
-                symt = mod->defined_types[mod_typeno - FIRST_DEFINABLE_TYPE];
+            if (mod_typeno >= mod->first_type_index && mod_typeno < mod->last_type_index)
+                symt = mod->defined_types[mod_typeno - mod->first_type_index];
         }
     }
     if (!quiet && !symt && typeno) FIXME("Returning NULL symt for type-id %x\n", typeno);
     return symt;
 }
 
+struct hash_link
+{
+    unsigned            id;
+    struct hash_link*   next;
+};
+
 struct codeview_type_parse
 {
     struct module*      module;
+    PDB_TYPES           header;
     const BYTE*         table;
-    const DWORD*        offset;
-    DWORD               num;
+    const DWORD*        offset;      /* typeindex => offset in 'table' */
+    BYTE*               hash_stream; /* content of stream header.hash_file */
+    struct hash_link**  hash;        /* hash_table (deserialized from PDB hash table) */
+    struct hash_link*   alloc_hash;  /* allocated hash_link (id => hash_link) */
 };
 
 static inline const void* codeview_jump_to_type(const struct codeview_type_parse* ctp, DWORD idx)
 {
-    if (idx < FIRST_DEFINABLE_TYPE) return NULL;
-    idx -= FIRST_DEFINABLE_TYPE;
-    return (idx >= ctp->num) ? NULL : (ctp->table + ctp->offset[idx]); 
+    return (idx >= ctp->header.first_index && idx < ctp->header.last_index) ?
+        ctp->table + ctp->offset[idx - ctp->header.first_index] : NULL;
 }
 
 static int codeview_add_type(unsigned int typeno, struct symt* dt)
 {
-    if (typeno < FIRST_DEFINABLE_TYPE)
-        FIXME("What the heck\n");
+    unsigned idx;
     if (!cv_current_module)
     {
         FIXME("Adding %x to non allowed module\n", typeno);
@@ -587,31 +589,19 @@ static int codeview_add_type(unsigned int typeno, struct symt* dt)
     if ((typeno >> 24) != 0)
         FIXME("No module index while inserting type-id assumption is wrong %x\n",
               typeno);
-    if (typeno - FIRST_DEFINABLE_TYPE >= cv_current_module->num_defined_types)
+    if (typeno < cv_current_module->first_type_index || typeno >= cv_current_module->last_type_index)
     {
-        if (cv_current_module->defined_types)
-        {
-            cv_current_module->num_defined_types = max( cv_current_module->num_defined_types * 2,
-                                                        typeno - FIRST_DEFINABLE_TYPE + 1 );
-            cv_current_module->defined_types = HeapReAlloc(GetProcessHeap(),
-                            HEAP_ZERO_MEMORY, cv_current_module->defined_types,
-                            cv_current_module->num_defined_types * sizeof(struct symt*));
-        }
-        else
-        {
-            cv_current_module->num_defined_types = max( 256, typeno - FIRST_DEFINABLE_TYPE + 1 );
-            cv_current_module->defined_types = HeapAlloc(GetProcessHeap(),
-                            HEAP_ZERO_MEMORY,
-                            cv_current_module->num_defined_types * sizeof(struct symt*));
-        }
-        if (cv_current_module->defined_types == NULL) return FALSE;
+        FIXME("Type number %x out of bounds [%x, %x)\n",
+              typeno, cv_current_module->first_type_index, typeno >= cv_current_module->last_type_index);
+        return FALSE;
     }
-    if (cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE])
+    idx = typeno - cv_current_module->first_type_index;
+    if (cv_current_module->defined_types[idx])
     {
-        if (cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE] != dt)
+        if (cv_current_module->defined_types[idx] != dt)
             FIXME("Overwriting at %x\n", typeno);
     }
-    cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE] = dt;
+    cv_current_module->defined_types[idx] = dt;
     return TRUE;
 }
 
@@ -622,30 +612,21 @@ static void codeview_clear_type_table(void)
     for (i = 0; i < CV_MAX_MODULES; i++)
     {
         if (cv_zmodules[i].allowed)
-            HeapFree(GetProcessHeap(), 0, cv_zmodules[i].defined_types);
+            free(cv_zmodules[i].defined_types);
         cv_zmodules[i].allowed = FALSE;
         cv_zmodules[i].defined_types = NULL;
-        cv_zmodules[i].num_defined_types = 0;
+        cv_zmodules[i].first_type_index = 0;
+        cv_zmodules[i].last_type_index = 0;
     }
     cv_current_module = NULL;
 }
 
 static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
                                             unsigned curr_type,
-                                            const union codeview_type* type, BOOL details);
-
-static void* codeview_cast_symt(struct symt* symt, enum SymTagEnum tag)
-{
-    if (symt->tag != tag)
-    {
-        FIXME("Bad tag. Expected %d, but got %d\n", tag, symt->tag);
-        return NULL;
-    }   
-    return symt;
-}
+                                            const union codeview_type* type);
 
 static struct symt* codeview_fetch_type(struct codeview_type_parse* ctp,
-                                        unsigned typeno, BOOL details)
+                                        unsigned typeno)
 {
     struct symt*                symt;
     const union codeview_type*  p;
@@ -653,29 +634,211 @@ static struct symt* codeview_fetch_type(struct codeview_type_parse* ctp,
     if (!typeno) return NULL;
     if ((symt = codeview_get_type(typeno, TRUE))) return symt;
 
-    /* forward declaration */
-    if (!(p = codeview_jump_to_type(ctp, typeno)))
-    {
-        FIXME("Cannot locate type %x\n", typeno);
-        return NULL;
-    }
-    symt = codeview_parse_one_type(ctp, typeno, p, details);
-    if (!symt) FIXME("Couldn't load forward type %x\n", typeno);
+    if ((p = codeview_jump_to_type(ctp, typeno)))
+        symt = codeview_parse_one_type(ctp, typeno, p);
+    if (!symt) FIXME("Couldn't load type %x\n", typeno);
     return symt;
 }
 
+static UINT32 codeview_compute_hash(const char* ptr, unsigned len)
+{
+    const char* last = ptr + len;
+    UINT32 ret = 0;
+
+    while (ptr + sizeof(UINT32) <= last)
+    {
+        ret ^= *(UINT32*)ptr;
+        ptr += sizeof(UINT32);
+    }
+    if (ptr + sizeof(UINT16) <= last)
+    {
+        ret ^= *(UINT16*)ptr;
+        ptr += sizeof(UINT16);
+    }
+    if (ptr + sizeof(BYTE) <= last)
+        ret ^= *(BYTE*)ptr;
+    ret |= 0x20202020;
+    ret ^= (ret >> 11);
+    return ret ^ (ret >> 16);
+}
+
+/* We call 'forwardable' a type which can have a forward declaration, and we need to merge
+ * (when they both exist) the type record of the forward declaration and the type record
+ * of the full definition into a single symt.
+ */
+static BOOL codeview_is_forwardable_type(const union codeview_type* type)
+{
+    switch (type->generic.id)
+    {
+    case LF_CLASS_V1:
+    case LF_CLASS_V2:
+    case LF_CLASS_V3:
+    case LF_ENUM_V1:
+    case LF_ENUM_V2:
+    case LF_ENUM_V3:
+    case LF_STRUCTURE_V1:
+    case LF_STRUCTURE_V2:
+    case LF_STRUCTURE_V3:
+    case LF_UNION_V1:
+    case LF_UNION_V2:
+    case LF_UNION_V3:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static BOOL codeview_type_is_forward(const union codeview_type* cvtype)
+{
+    cv_property_t property;
+
+    switch (cvtype->generic.id)
+    {
+    case LF_STRUCTURE_V1:
+    case LF_CLASS_V1:     property = cvtype->struct_v1.property;       break;
+    case LF_STRUCTURE_V2:
+    case LF_CLASS_V2:     property = cvtype->struct_v2.property;       break;
+    case LF_STRUCTURE_V3:
+    case LF_CLASS_V3:     property = cvtype->struct_v3.property;       break;
+    case LF_UNION_V1:     property = cvtype->union_v1.property;        break;
+    case LF_UNION_V2:     property = cvtype->union_v2.property;        break;
+    case LF_UNION_V3:     property = cvtype->union_v3.property;        break;
+    case LF_ENUM_V1:      property = cvtype->enumeration_v1.property;  break;
+    case LF_ENUM_V2:      property = cvtype->enumeration_v1.property;  break;
+    case LF_ENUM_V3:      property = cvtype->enumeration_v1.property;  break;
+    default:
+        return FALSE;
+    }
+    return property.is_forward_defn;
+}
+
+static BOOL codeview_type_extract_name(const union codeview_type* cvtype,
+                                       const char** name, unsigned* len, const char** decorated_name)
+{
+    int value, leaf_len;
+    const struct p_string* p_name = NULL;
+    const char* c_name = NULL;
+    BOOL decorated = FALSE;
+
+    switch (cvtype->generic.id)
+    {
+    case LF_STRUCTURE_V1:
+    case LF_CLASS_V1:
+        leaf_len = numeric_leaf(&value, &cvtype->struct_v1.structlen);
+        p_name = (const struct p_string*)((const unsigned char*)&cvtype->struct_v1.structlen + leaf_len);
+        break;
+    case LF_STRUCTURE_V2:
+    case LF_CLASS_V2:
+        leaf_len = numeric_leaf(&value, &cvtype->struct_v2.structlen);
+        p_name = (const struct p_string*)((const unsigned char*)&cvtype->struct_v2.structlen + leaf_len);
+        break;
+    case LF_STRUCTURE_V3:
+    case LF_CLASS_V3:
+        leaf_len = numeric_leaf(&value, &cvtype->struct_v3.structlen);
+        c_name = (const char*)&cvtype->struct_v3.structlen + leaf_len;
+        decorated = cvtype->struct_v3.property.has_decorated_name;
+        break;
+    case LF_UNION_V1:
+        leaf_len = numeric_leaf(&value, &cvtype->union_v1.un_len);
+        p_name = (const struct p_string*)((const unsigned char*)&cvtype->union_v1.un_len + leaf_len);
+        break;
+    case LF_UNION_V2:
+        leaf_len = numeric_leaf(&value, &cvtype->union_v2.un_len);
+        p_name = (const struct p_string*)((const unsigned char*)&cvtype->union_v2.un_len + leaf_len);
+        break;
+    case LF_UNION_V3:
+        leaf_len = numeric_leaf(&value, &cvtype->union_v3.un_len);
+        c_name = (const char*)&cvtype->union_v3.un_len + leaf_len;
+        decorated = cvtype->union_v3.property.has_decorated_name;
+        break;
+    case LF_ENUM_V1:
+        p_name = &cvtype->enumeration_v1.p_name;
+        break;
+    case LF_ENUM_V2:
+        p_name = &cvtype->enumeration_v2.p_name;
+        break;
+    case LF_ENUM_V3:
+        c_name = cvtype->enumeration_v3.name;
+        decorated = cvtype->union_v3.property.has_decorated_name;
+        break;
+    default:
+        return FALSE;
+    }
+    if (p_name)
+    {
+        *name = p_name->name;
+        *len = p_name->namelen;
+        *decorated_name = NULL;
+        return TRUE;
+    }
+    if (c_name)
+    {
+        *name = c_name;
+        *len = strlen(c_name);
+        *decorated_name = decorated ? (c_name + *len + 1) : NULL;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static unsigned pdb_read_hash_value(const struct codeview_type_parse* ctp, unsigned idx)
+{
+    const void* where = ctp->hash_stream + ctp->header.hash_offset + (idx - ctp->header.first_index) * ctp->header.hash_size;
+    switch (ctp->header.hash_size)
+    {
+    case 2: return *(unsigned short*)where;
+    case 4: return *(unsigned*)where;
+    }
+    return 0;
+}
+
+static BOOL codeview_resolve_forward_type(struct codeview_type_parse* ctp, const union codeview_type* cvref,
+                                          unsigned reftype, unsigned *impl_type)
+{
+    const union codeview_type* cvdecl;
+    struct hash_link* hl;
+    const char* nameref;
+    const char* decoratedref;
+    unsigned lenref;
+    unsigned hash;
+
+    /* Unfortunately, hash of forward defs are computed on the whole type record, not its name
+     * (unlike hash of UDT & enum implementations which is based primarly on the name... sigh)
+     * So compute the hash of the expected implementation.
+     */
+    if (!codeview_type_extract_name(cvref,  &nameref,  &lenref,  &decoratedref)) return FALSE;
+    hash = codeview_compute_hash(nameref, lenref) % ctp->header.hash_num_buckets;
+
+    for (hl = ctp->hash[hash]; hl; hl = hl->next)
+    {
+        if (hl->id == reftype) continue;
+        cvdecl = codeview_jump_to_type(ctp, hl->id);
+        if (cvdecl && !codeview_type_is_forward(cvdecl) && cvref->generic.id == cvdecl->generic.id)
+        {
+            const char* namedecl;
+            const char* decorateddecl;
+            unsigned lendecl;
+
+            if (codeview_type_extract_name(cvdecl, &namedecl, &lendecl, &decorateddecl) &&
+                ((decoratedref && decorateddecl && !strcmp(decoratedref, decorateddecl)) ||
+                 (!decoratedref && !decorateddecl && lenref == lendecl && !memcmp(nameref, namedecl, lenref))))
+            {
+                TRACE("mapping forward type %.*s (%s) %x into %x\n", lenref, nameref, debugstr_a(decoratedref), reftype, hl->id);
+                *impl_type = hl->id;
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
 static struct symt* codeview_add_type_pointer(struct codeview_type_parse* ctp,
-                                              struct symt* existing,
                                               unsigned int pointee_type)
 {
     struct symt* pointee;
 
-    if (existing)
-    {
-        existing = codeview_cast_symt(existing, SymTagPointerType);
-        return existing;
-    }
-    pointee = codeview_fetch_type(ctp, pointee_type, FALSE);
+    pointee = codeview_fetch_type(ctp, pointee_type);
+    if (!pointee) return NULL;
     return &symt_new_pointer(ctp->module, pointee, ctp->module->cpu->word_size)->symt;
 }
 
@@ -685,8 +848,8 @@ static struct symt* codeview_add_type_array(struct codeview_type_parse* ctp,
                                             unsigned int indextype,
                                             unsigned int arr_len)
 {
-    struct symt*        elem = codeview_fetch_type(ctp, elemtype, FALSE);
-    struct symt*        index = codeview_fetch_type(ctp, indextype, FALSE);
+    struct symt*        elem = codeview_fetch_type(ctp, elemtype);
+    struct symt*        index = codeview_fetch_type(ctp, indextype);
     DWORD64             elem_size;
     DWORD               count = 0;
 
@@ -699,13 +862,19 @@ static struct symt* codeview_add_type_array(struct codeview_type_parse* ctp,
     return &symt_new_array(ctp->module, 0, count, elem, index)->symt;
 }
 
-static BOOL codeview_add_type_enum_field_list(struct module* module,
+static BOOL codeview_add_type_enum_field_list(struct codeview_type_parse* ctp,
                                               struct symt_enum* symt,
-                                              const union codeview_reftype* ref_type)
+                                              unsigned typeno)
 {
-    const unsigned char*                ptr = ref_type->fieldlist.list;
-    const unsigned char*                last = (const BYTE*)ref_type + ref_type->generic.len + 2;
+    const union codeview_reftype*       ref_type;
+    const unsigned char*                ptr;
+    const unsigned char*                last;
     const union codeview_fieldtype*     type;
+
+    if (!typeno) return TRUE;
+    if (!(ref_type = codeview_jump_to_type(ctp, typeno))) return FALSE;
+    ptr = ref_type->fieldlist.list;
+    last = (const BYTE*)ref_type + ref_type->generic.len + 2;
 
     while (ptr < last)
     {
@@ -724,7 +893,7 @@ static BOOL codeview_add_type_enum_field_list(struct module* module,
             int value, vlen = numeric_leaf(&value, &type->enumerate_v1.value);
             const struct p_string* p_name = (const struct p_string*)((const unsigned char*)&type->enumerate_v1.value + vlen);
 
-            symt_add_enum_element(module, symt, terminate_string(p_name), value);
+            symt_add_enum_element(ctp->module, symt, terminate_string(p_name), value);
             ptr += 2 + 2 + vlen + (1 + p_name->namelen);
             break;
         }
@@ -733,10 +902,22 @@ static BOOL codeview_add_type_enum_field_list(struct module* module,
             int value, vlen = numeric_leaf(&value, &type->enumerate_v3.value);
             const char* name = (const char*)&type->enumerate_v3.value + vlen;
 
-            symt_add_enum_element(module, symt, name, value);
+            symt_add_enum_element(ctp->module, symt, name, value);
             ptr += 2 + 2 + vlen + (1 + strlen(name));
             break;
         }
+
+        case LF_INDEX_V1:
+            if (!codeview_add_type_enum_field_list(ctp, symt, type->index_v1.ref))
+                return FALSE;
+            ptr += 2 + 2;
+            break;
+
+        case LF_INDEX_V2:
+            if (!codeview_add_type_enum_field_list(ctp, symt, type->index_v2.ref))
+                return FALSE;
+            ptr += 2 + 2 + 4;
+            break;
 
         default:
             FIXME("Unsupported type %04x in ENUM field list\n", type->generic.id);
@@ -759,19 +940,19 @@ static void codeview_add_udt_element(struct codeview_type_parse* ctp,
         {
         case LF_BITFIELD_V1:
             symt_add_udt_element(ctp->module, symt, name,
-                                 codeview_fetch_type(ctp, cv_type->bitfield_v1.type, FALSE),
+                                 codeview_fetch_type(ctp, cv_type->bitfield_v1.type),
                                  value, cv_type->bitfield_v1.bitoff,
                                  cv_type->bitfield_v1.nbits);
             return;
         case LF_BITFIELD_V2:
             symt_add_udt_element(ctp->module, symt, name,
-                                 codeview_fetch_type(ctp, cv_type->bitfield_v2.type, FALSE),
+                                 codeview_fetch_type(ctp, cv_type->bitfield_v2.type),
                                  value, cv_type->bitfield_v2.bitoff,
                                  cv_type->bitfield_v2.nbits);
             return;
         }
     }
-    subtype = codeview_fetch_type(ctp, type, FALSE);
+    subtype = codeview_fetch_type(ctp, type);
 
     if (subtype)
     {
@@ -1003,94 +1184,12 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
     return TRUE;
 }
 
-static struct symt* codeview_add_type_enum(struct codeview_type_parse* ctp,
-                                           struct symt* existing,
-                                           const char* name,
-                                           unsigned fieldlistno,
-                                           unsigned basetype)
-{
-    struct symt_enum*   symt;
-
-    if (existing)
-    {
-        if (!(symt = codeview_cast_symt(existing, SymTagEnum))) return NULL;
-        /* should also check that all fields are the same */
-    }
-    else
-    {
-        symt = symt_new_enum(ctp->module, name,
-                             codeview_fetch_type(ctp, basetype, FALSE));
-        if (fieldlistno)
-        {
-            const union codeview_reftype* fieldlist;
-            fieldlist = codeview_jump_to_type(ctp, fieldlistno);
-            codeview_add_type_enum_field_list(ctp->module, symt, fieldlist);
-        }
-    }
-    return &symt->symt;
-}
-
-static struct symt* codeview_add_type_struct(struct codeview_type_parse* ctp,
-                                             struct symt* existing,
-                                             const char* name, int structlen,
-                                             enum UdtKind kind, unsigned property)
-{
-    struct symt_udt*    symt;
-
-    /* if we don't have an existing type, try to find one with same name
-     * FIXME: what to do when several types in different CUs have same name ?
-     */
-    if (!existing)
-    {
-        void*                       ptr;
-        struct symt_ht*             type;
-        struct hash_table_iter      hti;
-
-        hash_table_iter_init(&ctp->module->ht_types, &hti, name);
-        while ((ptr = hash_table_iter_up(&hti)))
-        {
-            type = CONTAINING_RECORD(ptr, struct symt_ht, hash_elt);
-
-            if (type->symt.tag == SymTagUDT &&
-                type->hash_elt.name && !strcmp(type->hash_elt.name, name))
-            {
-                existing = &type->symt;
-                break;
-            }
-        }
-    }
-    if (existing)
-    {
-        if (!(symt = codeview_cast_symt(existing, SymTagUDT))) return NULL;
-        /* should also check that all fields are the same */
-        if (!(property & 0x80)) /* 0x80 = forward declaration */
-        {
-            if (!symt->size) /* likely prior forward declaration, set UDT size */
-                symt_set_udt_size(ctp->module, symt, structlen);
-            else /* different UDT with same name, create a new type */
-                existing = NULL;
-        }
-    }
-    if (!existing) symt = symt_new_udt(ctp->module, name, structlen, kind);
-
-    return &symt->symt;
-}
-
-static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp, 
-                                                struct symt* existing,
+static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp,
                                                 enum CV_call_e call_conv)
 {
     struct symt_function_signature*     sym;
 
-    if (existing)
-    {
-        sym = codeview_cast_symt(existing, SymTagFunctionType);
-        if (!sym) return NULL;
-    }
-    else
-    {
-        sym = symt_new_function_signature(ctp->module, NULL, call_conv);
-    }
+    sym = symt_new_function_signature(ctp->module, NULL, call_conv);
     return &sym->symt;
 }
 
@@ -1101,7 +1200,7 @@ static void codeview_add_func_signature_args(struct codeview_type_parse* ctp,
 {
     const union codeview_reftype*       reftype;
 
-    sym->rettype = codeview_fetch_type(ctp, ret_type, FALSE);
+    sym->rettype = codeview_fetch_type(ctp, ret_type);
     if (args_list && (reftype = codeview_jump_to_type(ctp, args_list)))
     {
         unsigned int i;
@@ -1110,12 +1209,12 @@ static void codeview_add_func_signature_args(struct codeview_type_parse* ctp,
         case LF_ARGLIST_V1:
             for (i = 0; i < reftype->arglist_v1.num; i++)
                 symt_add_function_signature_parameter(ctp->module, sym,
-                                                      codeview_fetch_type(ctp, reftype->arglist_v1.args[i], FALSE));
+                                                      codeview_fetch_type(ctp, reftype->arglist_v1.args[i]));
             break;
         case LF_ARGLIST_V2:
             for (i = 0; i < reftype->arglist_v2.num; i++)
                 symt_add_function_signature_parameter(ctp->module, sym,
-                                                      codeview_fetch_type(ctp, reftype->arglist_v2.args[i], FALSE));
+                                                      codeview_fetch_type(ctp, reftype->arglist_v2.args[i]));
             break;
         default:
             FIXME("Unexpected leaf %x for signature's pmt\n", reftype->generic.id);
@@ -1125,15 +1224,12 @@ static void codeview_add_func_signature_args(struct codeview_type_parse* ctp,
 
 static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
                                             unsigned curr_type,
-                                            const union codeview_type* type, BOOL details)
+                                            const union codeview_type* type)
 {
-    struct symt*                symt;
+    struct symt*                symt = NULL;
     int                         value, leaf_len;
     const struct p_string*      p_name;
     const char*                 c_name;
-    struct symt*                existing;
-
-    existing = codeview_get_type(curr_type, TRUE);
 
     switch (type->generic.id)
     {
@@ -1147,7 +1243,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
              type->modifier_v1.attribute & 0x02 ? "volatile " : "",
              type->modifier_v1.attribute & 0x04 ? "unaligned " : "",
              type->modifier_v1.attribute & ~0x07 ? "unknown " : "");
-        symt = codeview_fetch_type(ctp, type->modifier_v1.type, details);
+        symt = codeview_fetch_type(ctp, type->modifier_v1.type);
         break;
     case LF_MODIFIER_V2:
         /* FIXME: we don't handle modifiers, but readd previous type on the curr_type */
@@ -1157,214 +1253,141 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
              type->modifier_v2.attribute & 0x02 ? "volatile " : "",
              type->modifier_v2.attribute & 0x04 ? "unaligned " : "",
              type->modifier_v2.attribute & ~0x07 ? "unknown " : "");
-        symt = codeview_fetch_type(ctp, type->modifier_v2.type, details);
+        symt = codeview_fetch_type(ctp, type->modifier_v2.type);
         break;
 
     case LF_POINTER_V1:
-        symt = codeview_add_type_pointer(ctp, existing, type->pointer_v1.datatype);
+        symt = codeview_add_type_pointer(ctp, type->pointer_v1.datatype);
         break;
     case LF_POINTER_V2:
-        symt = codeview_add_type_pointer(ctp, existing, type->pointer_v2.datatype);
+        symt = codeview_add_type_pointer(ctp, type->pointer_v2.datatype);
         break;
 
     case LF_ARRAY_V1:
-        if (existing) symt = codeview_cast_symt(existing, SymTagArrayType);
-        else
-        {
-            leaf_len = numeric_leaf(&value, &type->array_v1.arrlen);
-            p_name = (const struct p_string*)((const unsigned char*)&type->array_v1.arrlen + leaf_len);
-            symt = codeview_add_type_array(ctp, terminate_string(p_name),
-                                           type->array_v1.elemtype,
-                                           type->array_v1.idxtype, value);
-        }
+        leaf_len = numeric_leaf(&value, &type->array_v1.arrlen);
+        p_name = (const struct p_string*)((const unsigned char*)&type->array_v1.arrlen + leaf_len);
+        symt = codeview_add_type_array(ctp, terminate_string(p_name),
+                                       type->array_v1.elemtype,
+                                       type->array_v1.idxtype, value);
         break;
     case LF_ARRAY_V2:
-        if (existing) symt = codeview_cast_symt(existing, SymTagArrayType);
-        else
-        {
-            leaf_len = numeric_leaf(&value, &type->array_v2.arrlen);
-            p_name = (const struct p_string*)((const unsigned char*)&type->array_v2.arrlen + leaf_len);
+        leaf_len = numeric_leaf(&value, &type->array_v2.arrlen);
+        p_name = (const struct p_string*)((const unsigned char*)&type->array_v2.arrlen + leaf_len);
 
-            symt = codeview_add_type_array(ctp, terminate_string(p_name),
-                                           type->array_v2.elemtype,
-                                           type->array_v2.idxtype, value);
-        }
+        symt = codeview_add_type_array(ctp, terminate_string(p_name),
+                                       type->array_v2.elemtype,
+                                       type->array_v2.idxtype, value);
         break;
     case LF_ARRAY_V3:
-        if (existing) symt = codeview_cast_symt(existing, SymTagArrayType);
-        else
-        {
-            leaf_len = numeric_leaf(&value, &type->array_v3.arrlen);
-            c_name = (const char*)&type->array_v3.arrlen + leaf_len;
+        leaf_len = numeric_leaf(&value, &type->array_v3.arrlen);
+        c_name = (const char*)&type->array_v3.arrlen + leaf_len;
 
-            symt = codeview_add_type_array(ctp, c_name,
-                                           type->array_v3.elemtype,
-                                           type->array_v3.idxtype, value);
-        }
+        symt = codeview_add_type_array(ctp, c_name,
+                                       type->array_v3.elemtype,
+                                       type->array_v3.idxtype, value);
         break;
 
     case LF_STRUCTURE_V1:
     case LF_CLASS_V1:
-        leaf_len = numeric_leaf(&value, &type->struct_v1.structlen);
-        p_name = (const struct p_string*)((const unsigned char*)&type->struct_v1.structlen + leaf_len);
-        symt = codeview_add_type_struct(ctp, existing, terminate_string(p_name), value,
-                                        type->generic.id == LF_CLASS_V1 ? UdtClass : UdtStruct,
-                                        type->struct_v1.property);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            if (!(type->struct_v1.property & 0x80)) /* 0x80 = forward declaration */
-                codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
-                                                    type->struct_v1.fieldlist);
-        }
+        if (!type->struct_v1.property.is_forward_defn)
+            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)codeview_get_type(curr_type, TRUE),
+                                                type->struct_v1.fieldlist);
         break;
 
     case LF_STRUCTURE_V2:
     case LF_CLASS_V2:
-        leaf_len = numeric_leaf(&value, &type->struct_v2.structlen);
-        p_name = (const struct p_string*)((const unsigned char*)&type->struct_v2.structlen + leaf_len);
-        symt = codeview_add_type_struct(ctp, existing, terminate_string(p_name), value,
-                                        type->generic.id == LF_CLASS_V2 ? UdtClass : UdtStruct,
-                                        type->struct_v2.property);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            if (!(type->struct_v2.property & 0x80)) /* 0x80 = forward declaration */
-                codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
-                                                    type->struct_v2.fieldlist);
-        }
+        if (!type->struct_v2.property.is_forward_defn)
+            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)codeview_get_type(curr_type, TRUE),
+                                                type->struct_v2.fieldlist);
         break;
 
     case LF_STRUCTURE_V3:
     case LF_CLASS_V3:
-        leaf_len = numeric_leaf(&value, &type->struct_v3.structlen);
-        c_name = (const char*)&type->struct_v3.structlen + leaf_len;
-        symt = codeview_add_type_struct(ctp, existing, c_name, value,
-                                        type->generic.id == LF_CLASS_V3 ? UdtClass : UdtStruct,
-                                        type->struct_v3.property);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            if (!(type->struct_v3.property & 0x80)) /* 0x80 = forward declaration */
-                codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
-                                                    type->struct_v3.fieldlist);
-        }
+        if (!type->struct_v3.property.is_forward_defn)
+            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)codeview_get_type(curr_type, TRUE),
+                                                type->struct_v3.fieldlist);
         break;
 
     case LF_UNION_V1:
-        leaf_len = numeric_leaf(&value, &type->union_v1.un_len);
-        p_name = (const struct p_string*)((const unsigned char*)&type->union_v1.un_len + leaf_len);
-        symt = codeview_add_type_struct(ctp, existing, terminate_string(p_name),
-                                        value, UdtUnion, type->union_v1.property);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
+        if (!type->union_v1.property.is_forward_defn)
+            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)codeview_get_type(curr_type, TRUE),
                                                 type->union_v1.fieldlist);
-        }
         break;
 
     case LF_UNION_V2:
-        leaf_len = numeric_leaf(&value, &type->union_v2.un_len);
-        p_name = (const struct p_string*)((const unsigned char*)&type->union_v2.un_len + leaf_len);
-        symt = codeview_add_type_struct(ctp, existing, terminate_string(p_name),
-                                        value, UdtUnion, type->union_v2.property);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
+        if (!type->union_v2.property.is_forward_defn)
+            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)codeview_get_type(curr_type, TRUE),
                                                 type->union_v2.fieldlist);
-        }
         break;
 
     case LF_UNION_V3:
-        leaf_len = numeric_leaf(&value, &type->union_v3.un_len);
-        c_name = (const char*)&type->union_v3.un_len + leaf_len;
-        symt = codeview_add_type_struct(ctp, existing, c_name,
-                                        value, UdtUnion, type->union_v3.property);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
+        if (!type->union_v3.property.is_forward_defn)
+            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)codeview_get_type(curr_type, TRUE),
                                                 type->union_v3.fieldlist);
-        }
         break;
 
     case LF_ENUM_V1:
-        symt = codeview_add_type_enum(ctp, existing,
-                                      terminate_string(&type->enumeration_v1.p_name),
-                                      type->enumeration_v1.fieldlist,
-                                      type->enumeration_v1.type);
+        {
+            struct symt_enum* senum = (struct symt_enum*)codeview_get_type(curr_type, TRUE);
+            senum->base_type = codeview_fetch_type(ctp, type->enumeration_v1.type);
+            codeview_add_type_enum_field_list(ctp, senum, type->enumeration_v1.fieldlist);
+        }
         break;
 
     case LF_ENUM_V2:
-        symt = codeview_add_type_enum(ctp, existing,
-                                      terminate_string(&type->enumeration_v2.p_name),
-                                      type->enumeration_v2.fieldlist,
-                                      type->enumeration_v2.type);
+        {
+            struct symt_enum* senum = (struct symt_enum*)codeview_get_type(curr_type, TRUE);
+            senum->base_type = codeview_fetch_type(ctp, type->enumeration_v2.type);
+            codeview_add_type_enum_field_list(ctp, senum, type->enumeration_v2.fieldlist);
+        }
         break;
 
     case LF_ENUM_V3:
-        symt = codeview_add_type_enum(ctp, existing, type->enumeration_v3.name,
-                                      type->enumeration_v3.fieldlist,
-                                      type->enumeration_v3.type);
+        {
+            struct symt_enum* senum = (struct symt_enum*)codeview_get_type(curr_type, TRUE);
+            senum->base_type = codeview_fetch_type(ctp, type->enumeration_v3.type);
+            codeview_add_type_enum_field_list(ctp, senum, type->enumeration_v3.fieldlist);
+        }
         break;
 
     case LF_PROCEDURE_V1:
-        symt = codeview_new_func_signature(ctp, existing, type->procedure_v1.callconv);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_func_signature_args(ctp,
-                                             (struct symt_function_signature*)symt,
-                                             type->procedure_v1.rvtype,
-                                             type->procedure_v1.arglist);
-        }
+        symt = codeview_new_func_signature(ctp, type->procedure_v1.callconv);
+        codeview_add_func_signature_args(ctp,
+                                         (struct symt_function_signature*)symt,
+                                         type->procedure_v1.rvtype,
+                                         type->procedure_v1.arglist);
         break;
     case LF_PROCEDURE_V2:
-        symt = codeview_new_func_signature(ctp, existing,type->procedure_v2.callconv);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_func_signature_args(ctp,
-                                             (struct symt_function_signature*)symt,
-                                             type->procedure_v2.rvtype,
-                                             type->procedure_v2.arglist);
-        }
+        symt = codeview_new_func_signature(ctp,type->procedure_v2.callconv);
+        codeview_add_func_signature_args(ctp,
+                                         (struct symt_function_signature*)symt,
+                                         type->procedure_v2.rvtype,
+                                         type->procedure_v2.arglist);
         break;
 
     case LF_MFUNCTION_V1:
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v1.callconv);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_func_signature_args(ctp,
-                                             (struct symt_function_signature*)symt,
-                                             type->mfunction_v1.rvtype,
-                                             type->mfunction_v1.arglist);
-        }
+        symt = codeview_new_func_signature(ctp, type->mfunction_v1.callconv);
+        codeview_add_func_signature_args(ctp,
+                                         (struct symt_function_signature*)symt,
+                                         type->mfunction_v1.rvtype,
+                                         type->mfunction_v1.arglist);
         break;
     case LF_MFUNCTION_V2:
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v2.callconv);
-        if (details)
-        {
-            codeview_add_type(curr_type, symt);
-            codeview_add_func_signature_args(ctp,
-                                             (struct symt_function_signature*)symt,
-                                             type->mfunction_v2.rvtype,
-                                             type->mfunction_v2.arglist);
-        }
+        symt = codeview_new_func_signature(ctp, type->mfunction_v2.callconv);
+        codeview_add_func_signature_args(ctp,
+                                         (struct symt_function_signature*)symt,
+                                         type->mfunction_v2.rvtype,
+                                         type->mfunction_v2.arglist);
         break;
 
     case LF_VTSHAPE_V1:
         /* this is an ugly hack... FIXME when we have C++ support */
-        if (!(symt = existing))
         {
             char    buf[128];
             snprintf(buf, sizeof(buf), "__internal_vt_shape_%x\n", curr_type);
@@ -1376,31 +1399,164 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         dump(type, 2 + type->generic.len);
         return NULL;
     }
-    return codeview_add_type(curr_type, symt) ? symt : NULL;
+    return symt && codeview_add_type(curr_type, symt) ? symt : NULL;
+}
+
+static struct symt* codeview_load_forwardable_type(struct codeview_type_parse* ctp,
+                                                   const union codeview_type* type)
+{
+    struct symt*                symt;
+    int                         value, leaf_len;
+    const struct p_string*      p_name;
+    const char*                 c_name;
+
+    switch (type->generic.id)
+    {
+    case LF_STRUCTURE_V1:
+    case LF_CLASS_V1:
+        leaf_len = numeric_leaf(&value, &type->struct_v1.structlen);
+        p_name = (const struct p_string*)((const unsigned char*)&type->struct_v1.structlen + leaf_len);
+        symt = &symt_new_udt(ctp->module, terminate_string(p_name), value,
+                             type->generic.id == LF_CLASS_V1 ? UdtClass : UdtStruct)->symt;
+        break;
+
+    case LF_STRUCTURE_V2:
+    case LF_CLASS_V2:
+        leaf_len = numeric_leaf(&value, &type->struct_v2.structlen);
+        p_name = (const struct p_string*)((const unsigned char*)&type->struct_v2.structlen + leaf_len);
+        symt = &symt_new_udt(ctp->module, terminate_string(p_name), value,
+                             type->generic.id == LF_CLASS_V2 ? UdtClass : UdtStruct)->symt;
+        break;
+
+    case LF_STRUCTURE_V3:
+    case LF_CLASS_V3:
+        leaf_len = numeric_leaf(&value, &type->struct_v3.structlen);
+        c_name = (const char*)&type->struct_v3.structlen + leaf_len;
+        symt = &symt_new_udt(ctp->module, c_name, value,
+                             type->generic.id == LF_CLASS_V3 ? UdtClass : UdtStruct)->symt;
+        break;
+
+    case LF_UNION_V1:
+        leaf_len = numeric_leaf(&value, &type->union_v1.un_len);
+        p_name = (const struct p_string*)((const unsigned char*)&type->union_v1.un_len + leaf_len);
+        symt = &symt_new_udt(ctp->module, terminate_string(p_name), value, UdtUnion)->symt;
+        break;
+
+    case LF_UNION_V2:
+        leaf_len = numeric_leaf(&value, &type->union_v2.un_len);
+        p_name = (const struct p_string*)((const unsigned char*)&type->union_v2.un_len + leaf_len);
+        symt = &symt_new_udt(ctp->module, terminate_string(p_name), value, UdtUnion)->symt;
+        break;
+
+    case LF_UNION_V3:
+        leaf_len = numeric_leaf(&value, &type->union_v3.un_len);
+        c_name = (const char*)&type->union_v3.un_len + leaf_len;
+        symt = &symt_new_udt(ctp->module, c_name, value, UdtUnion)->symt;
+        break;
+
+    case LF_ENUM_V1:
+        symt = &symt_new_enum(ctp->module, terminate_string(&type->enumeration_v1.p_name), NULL)->symt;
+        break;
+
+    case LF_ENUM_V2:
+        symt = &symt_new_enum(ctp->module, terminate_string(&type->enumeration_v2.p_name), NULL)->symt;
+        break;
+
+    case LF_ENUM_V3:
+        symt = &symt_new_enum(ctp->module, type->enumeration_v3.name, NULL)->symt;
+        break;
+
+    default: symt = NULL;
+    }
+    return symt;
+}
+
+static inline BOOL codeview_is_top_level_type(const union codeview_type* type)
+{
+    /* type records we're interested in are the ones referenced by symbols
+     * The known ranges are (X mark the ones we want):
+     *   X  0000-0016       for V1 types
+     *      0200-020c       for V1 types referenced by other types
+     *      0400-040f       for V1 types (complex lists & sets)
+     *   X  1000-100f       for V2 types
+     *      1200-120c       for V2 types referenced by other types
+     *      1400-140f       for V1 types (complex lists & sets)
+     *   X  1500-150d       for V3 types
+     *      8000-8010       for numeric leafes
+     */
+    return !(type->generic.id & 0x8600) || (type->generic.id & 0x0100);
 }
 
 static BOOL codeview_parse_type_table(struct codeview_type_parse* ctp)
 {
-    unsigned int                curr_type = FIRST_DEFINABLE_TYPE;
+    unsigned int                i, curr_type;
     const union codeview_type*  type;
 
-    for (curr_type = FIRST_DEFINABLE_TYPE; curr_type < FIRST_DEFINABLE_TYPE + ctp->num; curr_type++)
+    cv_current_module->first_type_index = ctp->header.first_index;
+    cv_current_module->last_type_index = ctp->header.last_index;
+    cv_current_module->defined_types = calloc(ctp->header.last_index - ctp->header.first_index,
+                                              sizeof(*cv_current_module->defined_types));
+
+    /* pass I: + load implementation of forwardable types, but without their content
+     *         + merge forward declarations with their implementations (when the later exists)
+     *         + do it in the order generated from PDB hash table to preserve that order
+     *           (several versions coming from different compilations can exist in the PDB file,
+     *           and using PDB order ensures that we use the relevant one.
+     *           (needed for forward resolution and type lookup by name)
+     *           (dbghelp hash table inserts new elements at the end of bucket's list)
+     * Note: for a given type, we must handle:
+     * - only an implementation type record
+     * - only a forward type record (eg using struct foo* without struct foo being defined)
+     * - a forward type record and on an implementation type record: this is the most common, but
+     *   depending on hash values, we cannot tell which on will show up first
+     */
+    for (i = 0; i < ctp->header.hash_num_buckets; i++)
+    {
+        struct hash_link* hl;
+        for (hl = ctp->hash[i]; hl; hl = hl->next)
+        {
+            struct symt* symt;
+            type = codeview_jump_to_type(ctp, hl->id);
+            if (!codeview_is_top_level_type(type)) continue;
+            if (codeview_type_is_forward(type))
+            {
+                unsigned impl_type;
+                /* make the forward declaration point to the implementation (if any) */
+                if (codeview_resolve_forward_type(ctp, type, hl->id, &impl_type))
+                {
+                    /* impl already loaded? */
+                    if (!(symt = codeview_get_type(impl_type, TRUE)))
+                    {
+                        /* no load it */
+                        if ((symt = codeview_load_forwardable_type(ctp, codeview_jump_to_type(ctp, impl_type))))
+                            codeview_add_type(impl_type, symt);
+                        else
+                            FIXME("forward def of %x => %x, unable to load impl\n", hl->id, impl_type);
+                    }
+                }
+                else
+                    /* forward type definition without implementation, create empty type */
+                    symt = codeview_load_forwardable_type(ctp, type);
+            }
+            else
+            {
+                /* if not already loaded (from previous forward declaration), load it */
+                if (!(symt = codeview_get_type(hl->id, TRUE)))
+                    symt = codeview_load_forwardable_type(ctp, type);
+            }
+            codeview_add_type(hl->id, symt);
+        }
+    }
+    /* pass II: + non forwardable types: load them, but since they can be indirectly
+     *            loaded (from another type), but don't load them twice
+     *          + forwardable types: load their content
+     */
+    for (curr_type = ctp->header.first_index; curr_type < ctp->header.last_index; curr_type++)
     {
         type = codeview_jump_to_type(ctp, curr_type);
-
-        /* type records we're interested in are the ones referenced by symbols
-         * The known ranges are (X mark the ones we want):
-         *   X  0000-0016       for V1 types
-         *      0200-020c       for V1 types referenced by other types
-         *      0400-040f       for V1 types (complex lists & sets)
-         *   X  1000-100f       for V2 types
-         *      1200-120c       for V2 types referenced by other types
-         *      1400-140f       for V1 types (complex lists & sets)
-         *   X  1500-150d       for V3 types
-         *      8000-8010       for numeric leafes
-         */
-        if (!(type->generic.id & 0x8600) || (type->generic.id & 0x0100))
-            codeview_parse_one_type(ctp, curr_type, type, TRUE);
+        if (codeview_is_top_level_type(type) &&
+            (!codeview_get_type(curr_type, TRUE) || codeview_is_forwardable_type(type)))
+            codeview_parse_one_type(ctp, curr_type, type);
     }
 
     return TRUE;
@@ -2954,7 +3110,7 @@ static void pdb_convert_types_header(PDB_TYPES* types, const BYTE* image)
         types->type_size   = old->type_size;
         types->first_index = old->first_index;
         types->last_index  = old->last_index;
-        types->file        = old->file;
+        types->hash_file   = old->hash_file;
     }
     else
     {
@@ -3049,19 +3205,37 @@ static HANDLE map_pdb_file(const struct process* pcs,
     return hMap;
 }
 
+static void pdb_dispose_type_parse(struct codeview_type_parse* ctp)
+{
+    pdb_free(ctp->hash_stream);
+    free((DWORD*)ctp->offset);
+    free((DWORD*)ctp->hash);
+    free((DWORD*)ctp->alloc_hash);
+}
+
+static BOOL pdb_bitfield_is_bit_set(const unsigned* dw, unsigned len, unsigned i)
+{
+    if (i >= len * sizeof(unsigned) * 8) return FALSE;
+    return (dw[i >> 5] & (1u << (i & 31u))) != 0;
+}
+
 static BOOL pdb_init_type_parse(const struct msc_debug_info* msc_dbg,
+                                const struct pdb_file_info* pdb_file,
                                 struct codeview_type_parse* ctp,
                                 BYTE* image)
 {
-    PDB_TYPES types;
-    DWORD total;
     const BYTE* ptr;
     DWORD* offset;
+    int i;
 
-    pdb_convert_types_header(&types, image);
+    ctp->hash_stream = NULL;
+    ctp->offset = NULL;
+    ctp->hash = NULL;
+    ctp->alloc_hash = NULL;
+    pdb_convert_types_header(&ctp->header, image);
 
     /* Check for unknown versions */
-    switch (types.version)
+    switch (ctp->header.version)
     {
     case 19950410:      /* VC 4.0 */
     case 19951122:
@@ -3070,26 +3244,88 @@ static BOOL pdb_init_type_parse(const struct msc_debug_info* msc_dbg,
     case 20040203:      /* VC 8.0 */
         break;
     default:
-        ERR("-Unknown type info version %d\n", types.version);
+        ERR("-Unknown type info version %d\n", ctp->header.version);
+        return FALSE;
+    }
+    if (ctp->header.hash_size != 2 && ctp->header.hash_size != 4)
+    {
+        ERR("-Unsupported hash of size %u\n", ctp->header.hash_size);
+        return FALSE;
+    }
+    ctp->hash_stream = pdb_read_file(pdb_file, ctp->header.hash_file);
+    /* FIXME always present? if not reconstruct ?*/
+    if (!ctp->hash_stream)
+    {
+        ERR("-Missing hash table in PDB file\n");
         return FALSE;
     }
 
     ctp->module = msc_dbg->module;
-    /* reconstruct the types offset...
-     * FIXME: maybe it's present in the newest PDB_TYPES structures
+    /* Reconstruct the types offset table
+     * Note: the hash subfile of the PDB_TYPES only contains a partial table
+     * (not all the indexes are present, so it requires first a binary search in partial table,
+     * followed by a linear search...)
      */
-    total = types.last_index - types.first_index + 1;
-    offset = HeapAlloc(GetProcessHeap(), 0, sizeof(DWORD) * total);
-    if (!offset) return FALSE;
-    ctp->table = ptr = image + types.type_offset;
-    ctp->num = 0;
-    while (ptr < ctp->table + types.type_size && ctp->num < total)
+    offset = malloc(sizeof(DWORD) * (ctp->header.last_index - ctp->header.first_index));
+    if (!offset) goto oom;
+    ctp->table = ptr = image + ctp->header.type_offset;
+    for (i = ctp->header.first_index; i < ctp->header.last_index; i++)
     {
-        offset[ctp->num++] = ptr - ctp->table;
+        offset[i - ctp->header.first_index] = ptr - ctp->table;
         ptr += ((const union codeview_type*)ptr)->generic.len + 2;
     }
     ctp->offset = offset;
+    ctp->hash = calloc(ctp->header.hash_num_buckets, sizeof(struct hash_link*));
+    if (!ctp->hash) goto oom;
+    ctp->alloc_hash = calloc(ctp->header.last_index - ctp->header.first_index, sizeof(struct hash_link));
+    if (!ctp->alloc_hash) goto oom;
+    for (i = ctp->header.first_index; i < ctp->header.last_index; i++)
+    {
+        unsigned hash_i = pdb_read_hash_value(ctp, i);
+        ctp->alloc_hash[i - ctp->header.first_index].id = i;
+        ctp->alloc_hash[i - ctp->header.first_index].next = ctp->hash[hash_i];
+        ctp->hash[hash_i] = &ctp->alloc_hash[i - ctp->header.first_index];
+    }
+    /* parse the remap table
+     * => move listed type_id at first position of their hash buckets so that we force remap to them
+     */
+    if (ctp->header.type_remap_len)
+    {
+        const unsigned* remap = (const unsigned*)((const BYTE*)ctp->hash_stream + ctp->header.type_remap_offset);
+        unsigned i, capa, count_present;
+        const unsigned* present_bitset;
+        remap++; /* no need of num */
+        capa = *remap++;
+        count_present = *remap++;
+        present_bitset = remap;
+        remap += count_present;
+        remap += *remap + 1; /* skip deleted bit set */
+        for (i = 0; i < capa; ++i)
+        {
+            if (pdb_bitfield_is_bit_set(present_bitset, count_present, i))
+            {
+                unsigned hash_i;
+                struct hash_link** phl;
+                /* remap[0] is an offset for a string in /string stream, followed by type_id to force */
+                hash_i = pdb_read_hash_value(ctp, remap[1]);
+                for (phl = &ctp->hash[hash_i]; *phl; phl = &(*phl)->next)
+                    if ((*phl)->id == remap[1])
+                    {
+                        struct hash_link* hl = *phl;
+                        /* move hl node at first position of its hash bucket */
+                        *phl = hl->next;
+                        hl->next = ctp->hash[hash_i];
+                        ctp->hash[hash_i] = hl;
+                        break;
+                    }
+                remap += 2;
+            }
+        }
+    }
     return TRUE;
+oom:
+    pdb_dispose_type_parse(ctp);
+    return FALSE;
 }
 
 static void pdb_process_types(const struct msc_debug_info* msc_dbg,
@@ -3100,11 +3336,11 @@ static void pdb_process_types(const struct msc_debug_info* msc_dbg,
 
     if (types_image)
     {
-        if (pdb_init_type_parse(msc_dbg, &ctp, types_image))
+        if (pdb_init_type_parse(msc_dbg, pdb_file, &ctp, types_image))
         {
             /* Read type table */
             codeview_parse_type_table(&ctp);
-            HeapFree(GetProcessHeap(), 0, (DWORD*)ctp.offset);
+            pdb_dispose_type_parse(&ctp);
         }
         pdb_free(types_image);
     }
@@ -3388,7 +3624,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
         pdb_process_types(msc_dbg, pdb_file);
 
         ipi_image = pdb_read_file(pdb_file, 4);
-        ipi_ok = pdb_init_type_parse(msc_dbg, &ipi_ctp, ipi_image);
+        ipi_ok = pdb_init_type_parse(msc_dbg, pdb_file, &ipi_ctp, ipi_image);
 
         /* Read global symbol table */
         globalimage = pdb_read_file(pdb_file, symbols.gsym_file);
@@ -3882,7 +4118,9 @@ static BOOL codeview_process_info(const struct process* pcs,
                 types = (const OMFGlobalTypes*)(msc_dbg->root + ent->lfo);
                 ctp.module = msc_dbg->module;
                 ctp.offset = (const DWORD*)(types + 1);
-                ctp.num    = types->cTypes;
+                memset(&ctp.header, 0, sizeof(ctp.header));
+                ctp.header.first_index = T_FIRSTDEFINABLETYPE;
+                ctp.header.last_index = ctp.header.first_index + types->cTypes;
                 ctp.table  = (const BYTE*)(ctp.offset + types->cTypes);
 
                 cv_current_module = &cv_zmodules[0];

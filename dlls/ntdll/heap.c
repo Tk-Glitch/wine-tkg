@@ -206,7 +206,7 @@ C_ASSERT( offsetof(struct heap, subheap) <= COMMIT_MASK );
 
 #define HEAP_MAGIC       ((DWORD)('H' | ('E'<<8) | ('A'<<16) | ('P'<<24)))
 
-#define HEAP_DEF_SIZE        (0x40000 * ALIGNMENT)
+#define HEAP_DEF_SIZE        (0x80000 * ALIGNMENT)
 #define MAX_FREE_PENDING     1024    /* max number of free requests to delay */
 
 /* some undocumented flags (names are made up) */
