@@ -222,11 +222,19 @@ system_fallback_config[] =
     { "0000-007F, 0080-00FF, 0100-017F, 0180-024F, "
       "0250-02AF, 02B0-02FF, 0300-036F", L"Tahoma" },
 
+    { "0530-058F, FB10-FB1C",   L"Noto Sans Armenian" },
+
     { "0590-05FF, FB1D-FB4F",   L"Noto Sans Hebrew" },
 
     { "0600-06FF, 0750-077F, "
       "08A0-08FF, FB50-FDCF, "
       "FDF0-FDFF, FE70-FEFE",   L"Noto Sans Arabic" },
+
+    { "0700-074F",              L"Noto Sans Syriac" },
+    { "0780-07BF",              L"Noto Sans Thaana" },
+    { "07C0-07FF",              L"Noto Sans NKo" },
+    { "0800-083F",              L"Noto Sans Samaritan" },
+    { "0840-085F",              L"Noto Sans Mandaic" },
 
     { "0900-097F",              L"Noto Sans Devanagari" },
     { "0980-09FF",              L"Noto Sans Bengali" },
@@ -242,13 +250,111 @@ system_fallback_config[] =
     { "0E00-0E7F",              L"Noto Sans Thai" },
     { "0E80-0EFF",              L"Noto Sans Lao" },
 
+    { "0F00-0FFF",              L"Noto Serif Tibetan" },
+
+    { "1000-109F, A9E0-A9FF, AA60-AA7F", L"Noto Sans Myanmar" },
+
+    { "10A0-10FF, 2D00-2D2F",   L"Noto Sans Georgian" },
+
+    /* Hangul Jamo               - 1100-11FF
+       Hangul Compatibility Jamo - 3130-318F
+       Enc. CJK (Paren Hangul)   - 3200-321F
+       Enc. CJK (Circled Hangul) - 3260-327F
+       Hangul Jamo Extended-A    - A960-A97F
+       Hangul Syllables          - AC00-D7AF
+       Hangul Jamo Extended-B    - D7B0-D7FF */
+
+    { "1100-11FF, 3130-318F, "
+      "3200-321F, 3260-327F, "
+      "A960-A97F, AC00-D7FF, "
+      "D7B0-D7FF",              L"Noto Sans CJK KR" },
+
     { "1680-169F",              L"Noto Sans Ogham" },
 
     { "16A0-16FF",              L"Noto Sans Runic" },
 
+    { "1700-171F",              L"Noto Sans Tagalog" },
+    { "1720-173F",              L"Noto Sans Hanunoo" },
+    { "1740-175F",              L"Noto Sans Buhid" },
+    { "1760-177F",              L"Noto Sans Tagbanwa" },
     { "1800-18AF, 11660-1167F", L"Noto Sans Mongolian" },
 
-    { "3000-30FF, 31F0-31FF, 4E00-9FFF", L"Meiryo" },
+    { "1900-194F",              L"Noto Sans Limbu" },
+    { "1950-197F",              L"Noto Sans Tai Le" },
+    { "1980-19DF",              L"Noto Sans New Tai Lue" },
+    { "1A00-1A1F",              L"Noto Sans Buginese" },
+    { "1A20-1AAF",              L"Noto Sans Tai Tham" },
+    { "1B00-1B7F",              L"Noto Sans Balinese" },
+    { "1B80-1BBF, 1CC0-1CCF",   L"Noto Sans Sundanes" },
+    { "1BC0-1BFF",              L"Noto Sans Batak" },
+    { "1C00-1C4F",              L"Noto Sans Lepcha" },
+    { "1C50-1C7F",              L"Noto Sans Ol Chiki" },
+
+    { "2C80-2CFF",              L"Noto Sans Coptic" },
+    { "2D30-2D7F",              L"Noto Sans Tifinagh" },
+
+    /* CJK Radicals Supplement - 2E80-2EFF */
+
+    { "2E80-2EFF",              L"Noto Sans CJK SC", L"zh-Hans" },
+    { "2E80-2EFF",              L"Noto Sans CJK TC", L"zh-Hant" },
+    { "2E80-2EFF",              L"Noto Sans CJK KR", L"ko" },
+
+    /* CJK Symbols and Punctuation - 3000-303F
+       Hiragana                    - 3040-309F
+       Katakana                    - 30A0-30FF
+       Katakana Phonetic Ext.      - 31F0-31FF */
+
+    { "3000-30FF, 31F0-31FF",   L"Noto Sans CJK SC", L"zh-Hans" },
+    { "3000-30FF, 31F0-31FF",   L"Noto Sans CJK TC", L"zh-Hant" },
+    { "3000-30FF, 31F0-31FF",   L"Noto Sans CJK KR", L"ko" },
+    { "3000-30FF, 31F0-31FF",   L"Noto Sans CJK JP" },
+
+    /* CJK Unified Ext A - 3400-4DBF
+       CJK Unified       - 4E00-9FFF */
+
+    { "3400-4DBF, 4E00-9FFF",   L"Noto Sans CJK SC", L"zh-Hans" },
+    { "3400-4DBF, 4E00-9FFF",   L"Noto Sans CJK TC", L"zh-Hant" },
+    { "3400-4DBF, 4E00-9FFF",   L"Noto Sans CJK KR", L"ko" },
+    { "3400-4DBF, 4E00-9FFF",   L"Noto Sans CJK JP" },
+
+    { "A000-A4CF",              L"Noto Sans Yi" },
+    { "A4D0-A4FF",              L"Noto Sans Lisu" },
+    { "A500-A63F",              L"Noto Sans Vai" },
+    { "A6A0-A6FF",              L"Noto Sans Bamum" },
+    { "A800-A82F",              L"Noto Sans Syloti Nagri" },
+    { "A840-A87F",              L"Noto Sans PhagsPa" },
+    { "A880-A8DF",              L"Noto Sans Saurashtra" },
+    { "A900-A92F",              L"Noto Sans Kayah Li" },
+    { "A930-A95F",              L"Noto Sans Rejang" },
+    { "A980-A9DF",              L"Noto Sans Javanese" },
+    { "AA00-AA5F",              L"Noto Sans Cham" },
+
+    /* CJK Compatibility Ideographs - F900-FAFF */
+
+    { "F900-FAFF",              L"Noto Sans CJK SC", L"zh-Hans" },
+    { "F900-FAFF",              L"Noto Sans CJK TC", L"zh-Hant" },
+    { "F900-FAFF",              L"Noto Sans CJK KR", L"ko" },
+    { "F900-FAFF",              L"Noto Sans CJK JP" },
+
+    /* Vertical Forms - FE10-FE1F */
+
+    { "FE10-FE1F",              L"Noto Sans CJK SC", L"zh-Hans" },
+    { "FE10-FE1F",              L"Noto Sans CJK KR", L"ko" },
+    { "FE10-FE1F",              L"Noto Sans CJK TC" },
+
+    /* CJK Compatibility Forms - FE30-FE4F
+       Small Form Variants     - FE50-FE6F */
+
+    { "FE30-FE6F",              L"Noto Sans CJK SC", L"zh-Hans" },
+    { "FE30-FE6F",              L"Noto Sans CJK KR", L"ko" },
+    { "FE30-FE6F",              L"Noto Sans CJK JP", L"ja" },
+    { "FE30-FE6F",              L"Noto Sans CJK TC" },
+
+    /* Halfwidth and Fullwidth Forms */
+    { "FF00-FFEF",              L"Noto Sans CJK SC", L"zh-Hans" },
+    { "FF00-FFEF",              L"Noto Sans CJK TC", L"zh-Hant" },
+    { "FF00-FFEF",              L"Noto Sans CJK KR", L"ko" },
+    { "FF00-FFEF",              L"Noto Sans CJK JP" },
 };
 
 struct text_source_context
@@ -462,11 +568,24 @@ static void release_fallback_data(struct fallback_data *data)
     fallback_locale_list_destroy(&data->locales);
 }
 
+static BOOL fallback_mapping_contains_character(const struct fallback_mapping *mapping, UINT32 ch)
+{
+    size_t i;
+
+    for (i = 0; i < mapping->ranges_count; ++i)
+    {
+        const DWRITE_UNICODE_RANGE *range = &mapping->ranges[i];
+        if (range->first <= ch && range->last >= ch) return TRUE;
+    }
+
+    return FALSE;
+}
+
 static const struct fallback_mapping * find_fallback_mapping(const struct fallback_data *fallback,
         const struct fallback_locale *locale, UINT32 ch)
 {
     const struct fallback_mapping *mapping;
-    size_t i, j, r;
+    size_t i, j;
 
     for (i = 0; i < locale->ranges.count; i += 2)
     {
@@ -474,11 +593,7 @@ static const struct fallback_mapping * find_fallback_mapping(const struct fallba
         for (j = start; j <= end; ++j)
         {
             mapping = &fallback->mappings[j];
-            for (r = 0; r < mapping->ranges_count; ++r)
-            {
-                const DWRITE_UNICODE_RANGE *range = &mapping->ranges[r];
-                if (range->first <= ch && range->last >= ch) return mapping;
-            }
+            if (fallback_mapping_contains_character(mapping, ch)) return mapping;
         }
     }
 
@@ -2252,8 +2367,8 @@ static ULONG WINAPI fontfallback_Release(IDWriteFontFallback1 *iface)
     return IDWriteFactory7_Release(fallback->factory);
 }
 
-static UINT32 fallback_font_get_supported_length(IDWriteFont3 *font, IDWriteTextAnalysisSource *source, UINT32 position,
-        UINT32 length)
+static UINT32 fallback_font_get_supported_length(IDWriteFont3 *font, const struct fallback_mapping *mapping,
+        IDWriteTextAnalysisSource *source, UINT32 position, UINT32 length)
 {
     struct text_source_context context;
     UINT32 mapped = 0;
@@ -2261,8 +2376,9 @@ static UINT32 fallback_font_get_supported_length(IDWriteFont3 *font, IDWriteText
     text_source_context_init(&context, source, position, length);
     while (!text_source_get_next_u32_char(&context))
     {
+        if (mapping && !fallback_mapping_contains_character(mapping, context.ch)) break;
         if (!IDWriteFont3_HasCharacter(font, context.ch)) break;
-        mapped++;
+        mapped += context.ch > 0xffff ? 2 : 1;
     }
 
     return mapped;
@@ -2318,7 +2434,7 @@ static HRESULT fallback_map_characters(const struct dwrite_fontfallback *fallbac
         if (SUCCEEDED(create_matching_font(mapping->collection ? mapping->collection : fallback->systemcollection,
                 mapping->families[i], weight, style, stretch, &IID_IDWriteFont3, (void **)&font)))
         {
-            if (!(mapped = fallback_font_get_supported_length(font, source, position, length)))
+            if (!(mapped = fallback_font_get_supported_length(font, mapping, source, position, length)))
             {
                 IDWriteFont3_Release(font);
                 continue;
@@ -2402,7 +2518,7 @@ static HRESULT WINAPI fontfallback_MapCharacters(IDWriteFontFallback1 *iface, ID
         if (SUCCEEDED(create_matching_font(basecollection, basefamily, weight, style, stretch,
                 &IID_IDWriteFont, (void **)&font)))
         {
-            if ((*mapped_length = fallback_font_get_supported_length(font, source, position, length)))
+            if ((*mapped_length = fallback_font_get_supported_length(font, NULL, source, position, length)))
             {
                 *ret_font = (IDWriteFont *)font;
                 *scale = 1.0f;

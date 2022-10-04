@@ -1196,6 +1196,10 @@ static void test_CreateTextFormat(void)
             10, 10.0f, L"en-us", &format);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
+    hr = IDWriteFactory_CreateTextFormat(factory, L"Tahoma", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC,
+            DWRITE_FONT_STRETCH_UNDEFINED, 10.0f, L"en-us", &format);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
     /* empty family name */
     hr = IDWriteFactory_CreateTextFormat(factory, L"", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 10.0f, L"en-us", &format);
@@ -4682,14 +4686,12 @@ static void test_MapCharacters(void)
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 1, 2, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    todo_wine
-    ok(mappedlength == 1, "got %u\n", mappedlength);
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     /* Try with explicit collection, Tahoma will be forced. */
     /* 1. Latin part */
     g_source = str2W;
@@ -4722,7 +4724,6 @@ if (font) {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
 
     if (font)
@@ -4732,7 +4733,6 @@ if (font) {
         ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
         hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
         ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-        todo_wine
         ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
         IDWriteLocalizedStrings_Release(strings);
         IDWriteFont_Release(font);

@@ -1,5 +1,7 @@
 /*
- * Copyright 2020 Nikolay Sivov for CodeWeavers
+ * Resource file for mci tests.
+ *
+ * Copyright 2022 Akihiro Sagawa
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,7 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-extern HRESULT create_sink_writer_from_url(const WCHAR *url, IMFByteStream *stream,
-        IMFAttributes *attributes, REFIID riid, void **out) DECLSPEC_HIDDEN;
-extern HRESULT create_sink_writer_from_sink(IMFMediaSink *sink, IMFAttributes *attributes,
-        REFIID riid, void **out) DECLSPEC_HIDDEN;
+#include "windef.h"
+
+/* ffmpeg -f lavfi -i smptebars -f lavfi -i "sine=frequency=1000" -t 0.16 -r 25 -f mpeg -vcodec mpeg1video -vf scale=32x24 -acodec mp2 test.mpg */
+/* @makedep: test.mpg */
+test.mpg RCDATA "test.mpg"

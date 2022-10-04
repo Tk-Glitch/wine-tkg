@@ -711,7 +711,6 @@ static ssize_t fixup_icmp_over_dgram( struct msghdr *hdr, union unix_sockaddr *u
             icmp_h->checksum = chksum( (BYTE *)icmp_h, recv_len - sizeof(ip_h) );
         }
     }
-    ip_h.checksum = 0;
     ip_h.checksum = chksum( (BYTE *)&ip_h, sizeof(ip_h) );
     memcpy( buf, &ip_h, min( sizeof(ip_h), buf_len ));
 
@@ -974,6 +973,7 @@ NTSTATUS sock_read( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc,
     async->addr = NULL;
     async->addr_len = NULL;
     async->ret_flags = NULL;
+    async->icmp_over_dgram = is_icmp_over_dgram( fd );
 
     return sock_recv( handle, event, apc, apc_user, io, fd, async, 1 );
 }

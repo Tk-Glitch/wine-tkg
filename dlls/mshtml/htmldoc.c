@@ -1064,6 +1064,16 @@ static HRESULT WINAPI HTMLDocument_get_location(IHTMLDocument2 *iface, IHTMLLoca
     return IHTMLWindow2_get_location(&This->window->base.IHTMLWindow2_iface, p);
 }
 
+static HRESULT IHTMLDocument2_location_hook(HTMLDocument *doc, WORD flags, DISPPARAMS *dp, VARIANT *res,
+        EXCEPINFO *ei, IServiceProvider *caller)
+{
+    if(!(flags & DISPATCH_PROPERTYPUT) || !doc->window)
+        return S_FALSE;
+
+    return IDispatchEx_InvokeEx(&doc->window->base.IDispatchEx_iface, DISPID_IHTMLWINDOW2_LOCATION,
+                                0, flags, dp, res, ei, caller);
+}
+
 static HRESULT WINAPI HTMLDocument_get_lastModified(IHTMLDocument2 *iface, BSTR *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
@@ -4912,20 +4922,8 @@ static HRESULT WINAPI DocDispatchEx_Invoke(IDispatchEx *iface, DISPID dispIdMemb
     TRACE("(%p)->(%ld %s %ld %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
-    switch(dispIdMember) {
-    case DISPID_READYSTATE:
-        TRACE("DISPID_READYSTATE\n");
-
-        if(!(wFlags & DISPATCH_PROPERTYGET))
-            return E_INVALIDARG;
-
-        V_VT(pVarResult) = VT_I4;
-        V_I4(pVarResult) = This->window->readystate;
-        return S_OK;
-    }
-
-    return IDispatchEx_Invoke(This->dispex, dispIdMember, riid, lcid, wFlags, pDispParams,
-                              pVarResult, pExcepInfo, puArgErr);
+    return IDispatchEx_InvokeEx(&This->IDispatchEx_iface, dispIdMember, lcid, wFlags, pDispParams,
+            pVarResult, pExcepInfo, NULL);
 }
 
 static HRESULT WINAPI DocDispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
@@ -4945,10 +4943,21 @@ static HRESULT WINAPI DocDispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID
 {
     HTMLDocument *This = impl_from_IDispatchEx(iface);
 
-    if(This->window && id == DISPID_IHTMLDOCUMENT2_LOCATION && (wFlags & DISPATCH_PROPERTYPUT))
-        return IDispatchEx_InvokeEx(&This->window->base.IDispatchEx_iface, DISPID_IHTMLWINDOW2_LOCATION,
-                lcid, wFlags, pdp, pvarRes, pei, pspCaller);
+    if(This->window) {
+        switch(id) {
+        case DISPID_READYSTATE:
+            TRACE("DISPID_READYSTATE\n");
 
+            if(!(wFlags & DISPATCH_PROPERTYGET))
+                return E_INVALIDARG;
+
+            V_VT(pvarRes) = VT_I4;
+            V_I4(pvarRes) = This->window->readystate;
+            return S_OK;
+        default:
+            break;
+        }
+    }
 
     return IDispatchEx_InvokeEx(This->dispex, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller);
 }
@@ -5834,7 +5843,7 @@ static HRESULT HTMLDocumentNode_invoke(DispatchEx *dispex, DISPID id, LCID lcid,
     i = id - MSHTML_DISPID_CUSTOM_MIN;
 
     if(!This->nsdoc || i >= This->elem_vars_cnt)
-        return DISP_E_UNKNOWNNAME;
+        return DISP_E_MEMBERNOTFOUND;
 
     nsAString_InitDepend(&name_str, This->elem_vars[i]);
     nsres = nsIDOMHTMLDocument_GetElementsByName(This->nsdoc, &name_str, &node_list);
@@ -5845,7 +5854,7 @@ static HRESULT HTMLDocumentNode_invoke(DispatchEx *dispex, DISPID id, LCID lcid,
     nsres = nsIDOMNodeList_Item(node_list, 0, &nsnode);
     nsIDOMNodeList_Release(node_list);
     if(NS_FAILED(nsres) || !nsnode)
-        return DISP_E_UNKNOWNNAME;
+        return DISP_E_MEMBERNOTFOUND;
 
     hres = get_node(nsnode, TRUE, &node);
     if(FAILED(hres))
@@ -5901,6 +5910,12 @@ static IHTMLEventObj *HTMLDocumentNode_set_current_event(DispatchEx *dispex, IHT
     return default_set_current_event(This->window, event);
 }
 
+static HRESULT HTMLDocumentNode_location_hook(DispatchEx *dispex, WORD flags, DISPPARAMS *dp, VARIANT *res,
+        EXCEPINFO *ei, IServiceProvider *caller)
+{
+    return IHTMLDocument2_location_hook(&impl_from_DispatchEx(dispex)->basedoc, flags, dp, res, ei, caller);
+}
+
 static const event_target_vtbl_t HTMLDocumentNode_event_target_vtbl = {
     {
         NULL,
@@ -5928,7 +5943,6 @@ static const NodeImplVtbl HTMLDocumentFragmentImplVtbl = {
 static const tid_t HTMLDocumentNode_iface_tids[] = {
     IHTMLDOMNode_tid,
     IHTMLDOMNode2_tid,
-    IHTMLDocument2_tid,
     IHTMLDocument4_tid,
     IHTMLDocument5_tid,
     IDocumentSelector_tid,
@@ -5937,6 +5951,11 @@ static const tid_t HTMLDocumentNode_iface_tids[] = {
 
 static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 {
+    static const dispex_hook_t document2_hooks[] = {
+        {DISPID_IHTMLDOCUMENT2_LOCATION, HTMLDocumentNode_location_hook},
+        {DISPID_UNKNOWN}
+    };
+
     HTMLDOMNode_init_dispex_info(info, mode);
 
     if(mode >= COMPAT_MODE_IE9) {
@@ -5953,6 +5972,7 @@ static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t
         dispex_info_add_interface(info, IHTMLDocument6_tid, NULL);
         dispex_info_add_interface(info, IHTMLDocument3_tid, NULL);
     }
+    dispex_info_add_interface(info, IHTMLDocument2_tid, document2_hooks);
 }
 
 static dispex_static_data_t HTMLDocumentNode_dispex = {
@@ -6244,18 +6264,34 @@ static const ICustomDocVtbl CustomDocVtbl = {
     CustomDoc_SetUIHandler
 };
 
+static HRESULT HTMLDocumentObj_location_hook(DispatchEx *dispex, WORD flags, DISPPARAMS *dp, VARIANT *res,
+        EXCEPINFO *ei, IServiceProvider *caller)
+{
+    return IHTMLDocument2_location_hook(&CONTAINING_RECORD(dispex, HTMLDocumentObj, dispex)->basedoc, flags, dp, res, ei, caller);
+}
+
 static const tid_t HTMLDocumentObj_iface_tids[] = {
-    IHTMLDocument2_tid,
     IHTMLDocument3_tid,
     IHTMLDocument4_tid,
     IHTMLDocument5_tid,
     0
 };
+
+static void HTMLDocumentObj_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t document2_hooks[] = {
+        {DISPID_IHTMLDOCUMENT2_LOCATION, HTMLDocumentObj_location_hook},
+        {DISPID_UNKNOWN}
+    };
+    dispex_info_add_interface(info, IHTMLDocument2_tid, document2_hooks);
+}
+
 static dispex_static_data_t HTMLDocumentObj_dispex = {
     L"HTMLDocumentObj",
     NULL,
     DispHTMLDocument_tid,
-    HTMLDocumentObj_iface_tids
+    HTMLDocumentObj_iface_tids,
+    HTMLDocumentObj_init_dispex_info
 };
 
 static HRESULT create_document_object(BOOL is_mhtml, IUnknown *outer, REFIID riid, void **ppv)

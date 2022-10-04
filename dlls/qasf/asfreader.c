@@ -41,12 +41,101 @@ struct asf_reader
     AM_MEDIA_TYPE media_type;
     WCHAR *file_name;
 
+    HRESULT result;
+    WMT_STATUS status;
+    CRITICAL_SECTION status_cs;
+    CONDITION_VARIABLE status_cv;
+
     IWMReaderCallback *callback;
     IWMReader *reader;
 
     UINT stream_count;
     struct asf_stream streams[16];
 };
+
+static inline struct asf_stream *impl_from_strmbase_pin(struct strmbase_pin *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_stream, source.pin);
+}
+
+static inline struct asf_reader *asf_reader_from_asf_stream(struct asf_stream *stream)
+{
+    return CONTAINING_RECORD(stream, struct asf_reader, streams[stream->index]);
+}
+
+static HRESULT asf_stream_query_accept(struct strmbase_pin *iface, const AM_MEDIA_TYPE *media_type)
+{
+    struct asf_stream *stream = impl_from_strmbase_pin(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+    IWMOutputMediaProps *props;
+    WM_MEDIA_TYPE *mt;
+    DWORD size, i = 0;
+    HRESULT hr;
+
+    TRACE("iface %p, media_type %p.\n", iface, media_type);
+
+    if (FAILED(hr = IWMReader_GetOutputFormat(filter->reader, stream->index, i, &props)))
+        return hr;
+    if (FAILED(hr = IWMOutputMediaProps_GetMediaType(props, NULL, &size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return hr;
+    }
+    if (!(mt = malloc(size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return E_OUTOFMEMORY;
+    }
+
+    do
+    {
+        if (SUCCEEDED(hr = IWMOutputMediaProps_GetMediaType(props, mt, &size))
+                && IsEqualGUID(&mt->majortype, &media_type->majortype)
+                && IsEqualGUID(&mt->subtype, &media_type->subtype))
+        {
+            IWMOutputMediaProps_Release(props);
+            break;
+        }
+
+        IWMOutputMediaProps_Release(props);
+    } while (SUCCEEDED(hr = IWMReader_GetOutputFormat(filter->reader, stream->index, ++i, &props)));
+
+    free(mt);
+    return hr;
+}
+
+static HRESULT asf_stream_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *media_type)
+{
+    struct asf_stream *stream = impl_from_strmbase_pin(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+    IWMOutputMediaProps *props;
+    WM_MEDIA_TYPE *mt;
+    DWORD size;
+    HRESULT hr;
+
+    TRACE("iface %p, index %u, media_type %p.\n", iface, index, media_type);
+
+    if (FAILED(IWMReader_GetOutputFormat(filter->reader, stream->index, index, &props)))
+        return VFW_S_NO_MORE_ITEMS;
+    if (FAILED(hr = IWMOutputMediaProps_GetMediaType(props, NULL, &size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return hr;
+    }
+    if (!(mt = malloc(size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return E_OUTOFMEMORY;
+    }
+
+    hr = IWMOutputMediaProps_GetMediaType(props, mt, &size);
+    if (SUCCEEDED(hr))
+        hr = CopyMediaType(media_type, (AM_MEDIA_TYPE *)mt);
+
+    free(mt);
+    IWMOutputMediaProps_Release(props);
+    return hr;
+}
 
 static inline struct asf_reader *impl_from_strmbase_filter(struct strmbase_filter *iface)
 {
@@ -87,6 +176,10 @@ static void asf_reader_destroy(struct strmbase_filter *iface)
     IWMReader_Release(filter->reader);
 
     strmbase_filter_cleanup(&filter->filter);
+
+    filter->status_cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&filter->status_cs);
+
     free(filter);
 }
 
@@ -104,22 +197,166 @@ static HRESULT asf_reader_query_interface(struct strmbase_filter *iface, REFIID 
     return E_NOINTERFACE;
 }
 
+static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
+{
+    struct asf_reader *filter = impl_from_strmbase_filter(iface);
+    WMT_STREAM_SELECTION selections[ARRAY_SIZE(filter->streams)];
+    WORD stream_numbers[ARRAY_SIZE(filter->streams)];
+    IWMReaderAdvanced *reader_advanced;
+    HRESULT hr = S_OK;
+    int i;
+
+    TRACE("iface %p\n", iface);
+
+    if (FAILED(hr = IWMReader_QueryInterface(filter->reader, &IID_IWMReaderAdvanced, (void **)&reader_advanced)))
+        return hr;
+
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        struct asf_stream *stream = filter->streams + i;
+        IWMOutputMediaProps *props;
+
+        stream_numbers[i] = i + 1;
+        selections[i] = WMT_OFF;
+
+        if (!stream->source.pin.peer)
+            continue;
+
+        if (FAILED(hr = IMemAllocator_Commit(stream->source.pAllocator)))
+        {
+            WARN("Failed to commit stream %u allocator, hr %#lx\n", i, hr);
+            break;
+        }
+
+        if (FAILED(hr = IWMReader_GetOutputFormat(filter->reader, stream->index, 0, &props)))
+        {
+            WARN("Failed to get stream %u output format, hr %#lx\n", i, hr);
+            break;
+        }
+
+        hr = IWMOutputMediaProps_SetMediaType(props, (WM_MEDIA_TYPE *)&stream->source.pin.mt);
+        if (SUCCEEDED(hr))
+            hr = IWMReader_SetOutputProps(filter->reader, stream->index, props);
+        IWMOutputMediaProps_Release(props);
+        if (FAILED(hr))
+        {
+            WARN("Failed to set stream %u output format, hr %#lx\n", i, hr);
+            break;
+        }
+
+        if (FAILED(hr = IPin_NewSegment(stream->source.pin.peer, 0, 0, 1)))
+        {
+            WARN("Failed to start stream %u new segment, hr %#lx\n", i, hr);
+            break;
+        }
+
+        selections[i] = WMT_ON;
+    }
+
+    if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced_SetStreamsSelected(reader_advanced,
+            filter->stream_count, stream_numbers, selections)))
+        WARN("Failed to set reader %p stream selection, hr %#lx\n", filter->reader, hr);
+
+    IWMReaderAdvanced_Release(reader_advanced);
+
+    if (FAILED(hr))
+        return hr;
+
+    EnterCriticalSection(&filter->status_cs);
+    if (SUCCEEDED(hr = IWMReader_Start(filter->reader, 0, 0, 1, NULL)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_STARTED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+    LeaveCriticalSection(&filter->status_cs);
+
+    if (FAILED(hr))
+        WARN("Failed to start WMReader %p, hr %#lx\n", filter->reader, hr);
+
+    return hr;
+}
+
+static HRESULT asf_reader_cleanup_stream(struct strmbase_filter *iface)
+{
+    struct asf_reader *filter = impl_from_strmbase_filter(iface);
+    HRESULT hr = S_OK;
+    int i;
+
+    TRACE("iface %p\n", iface);
+
+    EnterCriticalSection(&filter->status_cs);
+    if (SUCCEEDED(hr = IWMReader_Stop(filter->reader)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_STOPPED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+    LeaveCriticalSection(&filter->status_cs);
+
+    if (FAILED(hr))
+        WARN("Failed to stop WMReader %p, hr %#lx\n", filter->reader, hr);
+
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        struct asf_stream *stream = filter->streams + i;
+
+        if (!stream->source.pin.peer)
+            continue;
+
+        if (FAILED(hr = IMemAllocator_Decommit(stream->source.pAllocator)))
+        {
+            WARN("Failed to decommit stream %u allocator, hr %#lx\n", i, hr);
+            break;
+        }
+    }
+
+    return hr;
+}
+
 static const struct strmbase_filter_ops filter_ops =
 {
     .filter_get_pin = asf_reader_get_pin,
     .filter_destroy = asf_reader_destroy,
     .filter_query_interface = asf_reader_query_interface,
+    .filter_init_stream = asf_reader_init_stream,
+    .filter_cleanup_stream = asf_reader_cleanup_stream,
 };
 
 static HRESULT WINAPI asf_reader_DecideBufferSize(struct strmbase_source *iface,
         IMemAllocator *allocator, ALLOCATOR_PROPERTIES *req_props)
 {
-    FIXME("iface %p, allocator %p, req_props %p stub!\n", iface, allocator, req_props);
-    return E_NOTIMPL;
+    struct asf_stream *stream = impl_from_strmbase_pin(&iface->pin);
+    unsigned int buffer_size = 16384;
+    ALLOCATOR_PROPERTIES ret_props;
+
+    TRACE("iface %p, allocator %p, req_props %p.\n", iface, allocator, req_props);
+
+    if (IsEqualGUID(&stream->source.pin.mt.formattype, &FORMAT_VideoInfo))
+    {
+        VIDEOINFOHEADER *format = (VIDEOINFOHEADER *)stream->source.pin.mt.pbFormat;
+        buffer_size = format->bmiHeader.biSizeImage;
+    }
+    else if (IsEqualGUID(&stream->source.pin.mt.formattype, &FORMAT_WaveFormatEx)
+            && (IsEqualGUID(&stream->source.pin.mt.subtype, &MEDIASUBTYPE_PCM)
+            || IsEqualGUID(&stream->source.pin.mt.subtype, &MEDIASUBTYPE_IEEE_FLOAT)))
+    {
+        WAVEFORMATEX *format = (WAVEFORMATEX *)stream->source.pin.mt.pbFormat;
+        buffer_size = format->nAvgBytesPerSec;
+    }
+
+    req_props->cBuffers = max(req_props->cBuffers, 1);
+    req_props->cbBuffer = max(req_props->cbBuffer, buffer_size);
+    req_props->cbAlign = max(req_props->cbAlign, 1);
+    return IMemAllocator_SetProperties(allocator, req_props, &ret_props);
 }
 
 static const struct strmbase_source_ops source_ops =
 {
+    .base.pin_query_accept = asf_stream_query_accept,
+    .base.pin_get_media_type = asf_stream_get_media_type,
     .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
     .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
     .pfnDecideBufferSize = asf_reader_DecideBufferSize,
@@ -162,17 +399,34 @@ static HRESULT WINAPI file_source_Load(IFileSourceFilter *iface, LPCOLESTR file_
     if (!file_name)
         return E_POINTER;
 
-    if (filter->file_name)
+    EnterCriticalSection(&filter->filter.filter_cs);
+
+    if (filter->file_name || !(filter->file_name = wcsdup(file_name)))
+    {
+        LeaveCriticalSection(&filter->filter.filter_cs);
         return E_FAIL;
+    }
 
-    if (!(filter->file_name = wcsdup(file_name)))
-        return E_OUTOFMEMORY;
+    if (media_type && FAILED(hr = CopyMediaType(&filter->media_type, media_type)))
+    {
+        LeaveCriticalSection(&filter->filter.filter_cs);
+        return hr;
+    }
 
-    if (media_type)
-        CopyMediaType(&filter->media_type, media_type);
+    EnterCriticalSection(&filter->status_cs);
+    if (SUCCEEDED(hr = IWMReader_Open(filter->reader, filter->file_name, filter->callback, NULL)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_OPENED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+    LeaveCriticalSection(&filter->status_cs);
 
-    if (FAILED(hr = IWMReader_Open(filter->reader, filter->file_name, filter->callback, NULL)))
+    if (FAILED(hr))
         WARN("Failed to open WM reader, hr %#lx.\n", hr);
+
+    LeaveCriticalSection(&filter->filter.filter_cs);
 
     return S_OK;
 }
@@ -271,28 +525,25 @@ static ULONG WINAPI reader_callback_Release(IWMReaderCallback *iface)
     return ref;
 }
 
-static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STATUS status, HRESULT hr,
+static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STATUS status, HRESULT result,
         WMT_ATTR_DATATYPE type, BYTE *value, void *context)
 {
     struct asf_reader *filter = impl_from_IWMReaderCallback(iface)->filter;
+    AM_MEDIA_TYPE stream_media_type = {{0}};
     DWORD i, stream_count;
     WCHAR name[MAX_PATH];
+    HRESULT hr;
 
-    TRACE("iface %p, status %d, hr %#lx, type %d, value %p, context %p.\n",
-            iface, status, hr, type, value, context);
+    TRACE("iface %p, status %d, result %#lx, type %d, value %p, context %p.\n",
+            iface, status, result, type, value, context);
 
     switch (status)
     {
         case WMT_OPENED:
-            if (FAILED(hr))
-            {
-                ERR("Failed to open WMReader, hr %#lx.\n", hr);
-                break;
-            }
             if (FAILED(hr = IWMReader_GetOutputCount(filter->reader, &stream_count)))
             {
                 ERR("Failed to get WMReader output count, hr %#lx.\n", hr);
-                break;
+                stream_count = 0;
             }
             if (stream_count > ARRAY_SIZE(filter->streams))
             {
@@ -300,17 +551,56 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
                 stream_count = ARRAY_SIZE(filter->streams);
             }
 
-            EnterCriticalSection(&filter->filter.filter_cs);
             for (i = 0; i < stream_count; ++i)
             {
                 struct asf_stream *stream = filter->streams + i;
-                swprintf(name, ARRAY_SIZE(name), L"Raw Stream %u", stream->index);
+
+                if (FAILED(hr = asf_stream_get_media_type(&stream->source.pin, 0, &stream_media_type)))
+                    WARN("Failed to get stream media type, hr %#lx.\n", hr);
+                if (IsEqualGUID(&stream_media_type.majortype, &MEDIATYPE_Video))
+                    swprintf(name, ARRAY_SIZE(name), L"Raw Video %u", stream->index);
+                else
+                    swprintf(name, ARRAY_SIZE(name), L"Raw Audio %u", stream->index);
+                FreeMediaType(&stream_media_type);
+
                 strmbase_source_init(&stream->source, &filter->filter, name, &source_ops);
             }
             filter->stream_count = stream_count;
-            LeaveCriticalSection(&filter->filter.filter_cs);
-
             BaseFilterImpl_IncrementPinVersion(&filter->filter);
+
+            EnterCriticalSection(&filter->status_cs);
+            filter->result = result;
+            filter->status = WMT_OPENED;
+            LeaveCriticalSection(&filter->status_cs);
+            WakeConditionVariable(&filter->status_cv);
+            break;
+
+        case WMT_END_OF_STREAMING:
+            for (i = 0; i < filter->stream_count; ++i)
+            {
+                struct asf_stream *stream = filter->streams + i;
+
+                if (!stream->source.pin.peer)
+                    continue;
+
+                IPin_EndOfStream(stream->source.pin.peer);
+            }
+            break;
+
+        case WMT_STARTED:
+            EnterCriticalSection(&filter->status_cs);
+            filter->result = result;
+            filter->status = WMT_STARTED;
+            LeaveCriticalSection(&filter->status_cs);
+            WakeConditionVariable(&filter->status_cv);
+            break;
+
+        case WMT_STOPPED:
+            EnterCriticalSection(&filter->status_cs);
+            filter->result = result;
+            filter->status = WMT_STOPPED;
+            LeaveCriticalSection(&filter->status_cs);
+            WakeConditionVariable(&filter->status_cv);
             break;
 
         default:
@@ -377,6 +667,9 @@ HRESULT asf_reader_create(IUnknown *outer, IUnknown **out)
     for (i = 0; i < ARRAY_SIZE(object->streams); ++i) object->streams[i].index = i;
     strmbase_filter_init(&object->filter, outer, &CLSID_WMAsfReader, &filter_ops);
     object->IFileSourceFilter_iface.lpVtbl = &file_source_vtbl;
+
+    InitializeCriticalSection(&object->status_cs);
+    object->status_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": status_cs");
 
     TRACE("Created WM ASF reader %p.\n", object);
     *out = &object->filter.IUnknown_inner;

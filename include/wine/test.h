@@ -23,6 +23,7 @@
 
 #include <stdarg.h>
 #include <stdlib.h>
+#include <io.h>
 #include <windef.h>
 #include <winbase.h>
 #include <wine/debug.h>
@@ -206,6 +207,9 @@ int winetest_report_success = 0;
 /* silence todos and skips above this threshold */
 int winetest_mute_threshold = 42;
 
+/* use ANSI escape codes for output coloring */
+static int winetest_color;
+
 /* passing arguments around */
 static int winetest_argc;
 static char** winetest_argv;
@@ -284,6 +288,13 @@ const char *winetest_elapsed(void)
     return wine_dbg_sprintf( "%.3f", (now - winetest_start_time) / 1000.0);
 }
 
+static const char color_reset[] = "\e[0m";
+static const char color_dark_red[] = "\e[31m";
+static const char color_green[] = "\e[32m";
+static const char color_yellow[] = "\e[33m";
+static const char color_blue[] = "\e[34m";
+static const char color_bright_red[] = "\e[1;91m";
+
 static void winetest_printf( const char *msg, ... ) __WINE_PRINTF_ATTR(1,2);
 static void winetest_printf( const char *msg, ... )
 {
@@ -355,8 +366,10 @@ int winetest_vok( int condition, const char *msg, va_list args )
     {
         if (condition)
         {
+            if (winetest_color) printf( color_dark_red );
             winetest_print_context( "Test succeeded inside todo block: " );
             vprintf(msg, args);
+            if (winetest_color) printf( color_reset );
             InterlockedIncrement(&todo_failures);
             return 0;
         }
@@ -367,8 +380,10 @@ int winetest_vok( int condition, const char *msg, va_list args )
             {
                 if (winetest_debug > 0)
                 {
+                    if (winetest_color) printf( color_yellow );
                     winetest_print_context( "Test marked todo: " );
                     vprintf(msg, args);
+                    if (winetest_color) printf( color_reset );
                 }
                 InterlockedIncrement(&todo_successes);
             }
@@ -381,8 +396,10 @@ int winetest_vok( int condition, const char *msg, va_list args )
     {
         if (!condition)
         {
+            if (winetest_color) printf( color_bright_red );
             winetest_print_context( "Test failed: " );
             vprintf(msg, args);
+            if (winetest_color) printf( color_reset );
             InterlockedIncrement(&failures);
             return 0;
         }
@@ -391,7 +408,9 @@ int winetest_vok( int condition, const char *msg, va_list args )
             if (winetest_report_success ||
                 (winetest_time && GetTickCount() >= winetest_last_time + 1000))
             {
+                if (winetest_color) printf( color_green );
                 winetest_printf("Test succeeded\n");
+                if (winetest_color) printf( color_reset );
             }
             InterlockedIncrement(&successes);
             return 1;
@@ -429,8 +448,10 @@ void winetest_vskip( const char *msg, va_list args )
 {
     if (winetest_add_line() < winetest_mute_threshold)
     {
+        if (winetest_color) printf( color_blue );
         winetest_print_context( "Tests skipped: " );
         vprintf(msg, args);
+        if (winetest_color) printf( color_reset );
         InterlockedIncrement(&skipped);
     }
     else
@@ -663,6 +684,8 @@ int main( int argc, char **argv )
     else if (running_under_wine())
         winetest_platform = "wine";
 
+    if (GetEnvironmentVariableA( "WINETEST_COLOR", p, sizeof(p) ))
+        winetest_color = !strcasecmp(p, "auto") ? isatty(fileno(stdout)) : atoi(p);
     if (GetEnvironmentVariableA( "WINETEST_DEBUG", p, sizeof(p) )) winetest_debug = atoi(p);
     if (GetEnvironmentVariableA( "WINETEST_INTERACTIVE", p, sizeof(p) )) winetest_interactive = atoi(p);
     if (GetEnvironmentVariableA( "WINETEST_REPORT_SUCCESS", p, sizeof(p) )) winetest_report_success = atoi(p);

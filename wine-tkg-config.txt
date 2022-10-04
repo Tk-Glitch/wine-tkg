@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - mar. 04 oct. 2022 15:26:32 CEST :
+# Last wine-tkg-staging-fsync-git configuration - mar. 04 oct. 2022 15:27:51 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.14.r0.gc86955d3806
-Using wine-staging patchset (version 7.14.r0.g1d21e2b6)
+Wine (plain) version: 7.15.r0.ga1af412482d
+Using wine-staging patchset (version 7.15.r0.g552b03f7)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -11,6 +11,7 @@ Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 Done applying backports hotfixes (if any) - list available in prepare.log
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+Applied hotfix win32u_reverts32.earlystagingpatch
 Applied hotfix win32u_reverts31.earlystagingpatch
 Applied hotfix win32u_reverts30.earlystagingpatch
 Applied hotfix win32u_reverts29.earlystagingpatch
@@ -50,7 +51,7 @@ Applied hotfix fshack-84bed15-a3ebf88-monolith-reverts-2.myearlypatch
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W xactengine3_7-callbacks -W user32-alttab-focus -W user32-alttab-focus -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11-MWM_Decorations -W winex11-key_translation
+Staging overrides, if any: -W user32-alttab-focus -W wined3d-adapter_create_output -W user32-alttab-focus -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11-MWM_Decorations -W winex11-key_translation
 
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32 and disabling libglesv2 dll) )

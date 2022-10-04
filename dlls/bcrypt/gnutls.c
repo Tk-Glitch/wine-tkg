@@ -82,6 +82,12 @@ typedef enum
 } gnutls_ecc_curve_t;
 #endif
 
+#if GNUTLS_VERSION_MAJOR < 3 || (GNUTLS_VERSION_MAJOR == 3 && GNUTLS_VERSION_MINOR < 6)
+#define GNUTLS_CIPHER_AES_128_CFB8 29
+#define GNUTLS_CIPHER_AES_192_CFB8 30
+#define GNUTLS_CIPHER_AES_256_CFB8 31
+#endif
+
 union key_data
 {
     gnutls_cipher_hd_t cipher;
@@ -624,6 +630,11 @@ static gnutls_cipher_algorithm_t get_gnutls_cipher( const struct key *key )
             if (key->u.s.secret_len == 16) return GNUTLS_CIPHER_AES_128_CBC;
             if (key->u.s.secret_len == 24) return GNUTLS_CIPHER_AES_192_CBC;
             if (key->u.s.secret_len == 32) return GNUTLS_CIPHER_AES_256_CBC;
+            break;
+        case MODE_ID_CFB:
+            if (key->u.s.secret_len == 16) return GNUTLS_CIPHER_AES_128_CFB8;
+            if (key->u.s.secret_len == 24) return GNUTLS_CIPHER_AES_192_CFB8;
+            if (key->u.s.secret_len == 32) return GNUTLS_CIPHER_AES_256_CFB8;
             break;
         default:
             break;

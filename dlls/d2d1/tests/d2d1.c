@@ -9444,8 +9444,8 @@ static void test_command_list(BOOL d3d11)
     ID2D1StrokeStyle *stroke_style;
     ID2D1CommandList *command_list;
     struct d2d1_test_context ctx;
+    D2D1_PIXEL_FORMAT format;
     ID2D1Geometry *geometry;
-    ID2D1Factory1 *factory;
     ID2D1RenderTarget *rt;
     D2D1_POINT_2F p0, p1;
     ID2D1Bitmap *bitmap;
@@ -9460,28 +9460,28 @@ static void test_command_list(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    if (!ctx.factory1)
     {
-        win_skip("ID2D1Factory1 is not supported.\n");
+        win_skip("Command lists are not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    device_context = create_device_context(factory, ctx.device, d3d11);
-    ok(device_context != NULL, "Failed to create device context.\n");
+    device_context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateCommandList(device_context, &command_list);
-    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-    if (FAILED(hr))
-    {
-        ID2D1DeviceContext_Release(device_context);
-        ID2D1Factory1_Release(factory);
-        release_test_context(&ctx);
-        return;
-    }
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)command_list);
+
+    size = ID2D1DeviceContext_GetPixelSize(device_context);
+    ok(!size.width, "Got unexpected width %u.\n", size.width);
+    ok(!size.height, "Got unexpected height %u.\n", size.height);
+
+    format = ID2D1DeviceContext_GetPixelFormat(device_context);
+    ok(format.format == DXGI_FORMAT_UNKNOWN && format.alphaMode == D2D1_ALPHA_MODE_UNKNOWN,
+            "Unexpected format %u, alpha mode %u.\n", format.format, format.alphaMode);
+
     ID2D1DeviceContext_BeginDraw(device_context);
 
     hr = ID2D1DeviceContext_QueryInterface(device_context, &IID_ID2D1RenderTarget, (void **)&rt);
@@ -9542,7 +9542,7 @@ static void test_command_list(BOOL d3d11)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
-    hr = ID2D1Factory1_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometry);
+    hr = ID2D1Factory1_CreateRectangleGeometry(ctx.factory1, &rect, (ID2D1RectangleGeometry **)&geometry);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_FillGeometry(rt, geometry, brush, NULL);
@@ -9570,7 +9570,7 @@ static void test_command_list(BOOL d3d11)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
-    hr = ID2D1Factory1_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometry);
+    hr = ID2D1Factory1_CreateRectangleGeometry(ctx.factory1, &rect, (ID2D1RectangleGeometry **)&geometry);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_FillGeometry(rt, geometry, brush, NULL);
@@ -9586,7 +9586,7 @@ static void test_command_list(BOOL d3d11)
 
     /* Geometry. */
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
-    hr = ID2D1Factory1_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometry);
+    hr = ID2D1Factory1_CreateRectangleGeometry(ctx.factory1, &rect, (ID2D1RectangleGeometry **)&geometry);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -9610,7 +9610,7 @@ static void test_command_list(BOOL d3d11)
     stroke_desc.dashStyle = D2D1_DASH_STYLE_DOT;
     stroke_desc.dashOffset = -1.0f;
 
-    hr = ID2D1Factory_CreateStrokeStyle((ID2D1Factory *)factory, &stroke_desc, NULL, 0, &stroke_style);
+    hr = ID2D1Factory_CreateStrokeStyle((ID2D1Factory *)ctx.factory, &stroke_desc, NULL, 0, &stroke_style);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -9636,7 +9636,9 @@ static void test_command_list(BOOL d3d11)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_GetTarget(device_context, &target);
+    todo_wine
     ok(target == NULL, "Unexpected context target.\n");
+    if (target) ID2D1Image_Release(target);
 
     hr = ID2D1CommandList_Close(command_list);
     ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
@@ -9648,12 +9650,13 @@ static void test_command_list(BOOL d3d11)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1CommandList_Close(command_list);
+    todo_wine
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1CommandList_Release(command_list);
 
     /* List created with different context. */
-    device_context2 = create_device_context(factory, ctx.device, d3d11);
+    device_context2 = create_device_context(ctx.factory1, ctx.device, d3d11);
     ok(device_context2 != NULL, "Failed to create device context.\n");
 
     hr = ID2D1DeviceContext_CreateCommandList(device_context, &command_list);
@@ -9661,14 +9664,14 @@ static void test_command_list(BOOL d3d11)
 
     ID2D1DeviceContext_SetTarget(device_context2, (ID2D1Image *)command_list);
     ID2D1DeviceContext_GetTarget(device_context2, &target);
+    todo_wine
     ok(target == NULL, "Unexpected target.\n");
+    if (target) ID2D1Image_Release(target);
 
     ID2D1CommandList_Release(command_list);
     ID2D1DeviceContext_Release(device_context2);
 
     ID2D1RenderTarget_Release(rt);
-    ID2D1DeviceContext_Release(device_context);
-    ID2D1Factory1_Release(factory);
     release_test_context(&ctx);
 }
 

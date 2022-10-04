@@ -219,6 +219,42 @@ __ASM_GLOBAL_FUNC( alloc_fs_sel,
 
 #include <i386/user_ldt.h>
 
+/* The 'full' structs were added in the macOS 10.14.6 SDK/Xcode 10.3. */
+#ifndef _STRUCT_X86_THREAD_FULL_STATE64
+#define _STRUCT_X86_THREAD_FULL_STATE64 struct __darwin_x86_thread_full_state64
+_STRUCT_X86_THREAD_FULL_STATE64
+{
+        _STRUCT_X86_THREAD_STATE64      __ss64;
+        __uint64_t                      __ds;
+        __uint64_t                      __es;
+        __uint64_t                      __ss;
+        __uint64_t                      __gsbase;
+};
+
+#define _STRUCT_MCONTEXT64_FULL      struct __darwin_mcontext64_full
+_STRUCT_MCONTEXT64_FULL
+{
+        _STRUCT_X86_EXCEPTION_STATE64   __es;
+        _STRUCT_X86_THREAD_FULL_STATE64 __ss;
+        _STRUCT_X86_FLOAT_STATE64       __fs;
+};
+
+#define _STRUCT_MCONTEXT_AVX64_FULL  struct __darwin_mcontext_avx64_full
+_STRUCT_MCONTEXT_AVX64_FULL
+{
+        _STRUCT_X86_EXCEPTION_STATE64   __es;
+        _STRUCT_X86_THREAD_FULL_STATE64 __ss;
+        _STRUCT_X86_AVX_STATE64         __fs;
+};
+#endif
+
+/* AVX512 structs were added in the macOS 10.13 SDK/Xcode 9. */
+#ifdef _STRUCT_MCONTEXT_AVX512_64_FULL
+#define SIZEOF_STRUCT_MCONTEXT_AVX512_64_FULL sizeof(_STRUCT_MCONTEXT_AVX512_64_FULL)
+#else
+#define SIZEOF_STRUCT_MCONTEXT_AVX512_64_FULL 2664
+#endif
+
 #define RAX_sig(context)     ((context)->uc_mcontext->__ss.__rax)
 #define RBX_sig(context)     ((context)->uc_mcontext->__ss.__rbx)
 #define RCX_sig(context)     ((context)->uc_mcontext->__ss.__rcx)
@@ -242,7 +278,23 @@ __ASM_GLOBAL_FUNC( alloc_fs_sel,
 #define RSP_sig(context)     ((context)->uc_mcontext->__ss.__rsp)
 #define TRAP_sig(context)    ((context)->uc_mcontext->__es.__trapno)
 #define ERROR_sig(context)   ((context)->uc_mcontext->__es.__err)
-#define FPU_sig(context)     ((XMM_SAVE_AREA32 *)&(context)->uc_mcontext->__fs.__fpu_fcw)
+
+/* Once a custom LDT is installed (i.e. Wow64), mcontext will point to a
+ * larger '_full' struct which includes DS, ES, SS, and GSbase.
+ * This changes the offset of the FPU state.
+ * Checking mcsize is the only way to determine which mcontext is in use.
+ */
+static inline XMM_SAVE_AREA32 *FPU_sig( const ucontext_t *context )
+{
+    if (context->uc_mcsize == sizeof(_STRUCT_MCONTEXT64_FULL) ||
+        context->uc_mcsize == sizeof(_STRUCT_MCONTEXT_AVX64_FULL) ||
+        context->uc_mcsize == SIZEOF_STRUCT_MCONTEXT_AVX512_64_FULL)
+    {
+        return (XMM_SAVE_AREA32 *)&((_STRUCT_MCONTEXT64_FULL *)context->uc_mcontext)->__fs.__fpu_fcw;
+    }
+    return (XMM_SAVE_AREA32 *)&(context)->uc_mcontext->__fs.__fpu_fcw;
+}
+
 #define XState_sig(context)  NULL
 
 #else
@@ -2035,10 +2087,12 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
     if (flags & CONTEXT_I386_EXTENDED_REGISTERS)
     {
         memcpy( &frame->xsave, context->ExtendedRegisters, sizeof(frame->xsave) );
+        frame->restore_flags |= CONTEXT_FLOATING_POINT;
     }
     else if (flags & CONTEXT_I386_FLOATING_POINT)
     {
         fpu_to_fpux( &frame->xsave, &context->FloatSave );
+        frame->restore_flags |= CONTEXT_FLOATING_POINT;
     }
     if (flags & CONTEXT_I386_XSTATE)
     {
@@ -3253,7 +3307,10 @@ static void *mac_thread_gsbase(void)
     unsigned int info_count = THREAD_IDENTIFIER_INFO_COUNT;
     static int gsbase_offset = -1;
 
-    kern_return_t kr = thread_info(mach_thread_self(), THREAD_IDENTIFIER_INFO, (thread_info_t) &tiinfo, &info_count);
+    mach_port_t self = mach_thread_self();
+    kern_return_t kr = thread_info(self, THREAD_IDENTIFIER_INFO, (thread_info_t) &tiinfo, &info_count);
+    mach_port_deallocate(mach_task_self(), self);
+
     if (kr == KERN_SUCCESS) return (void*)tiinfo.thread_handle;
 
     if (gsbase_offset < 0)
