@@ -2330,18 +2330,40 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
     case SIO_IDEAL_SEND_BACKLOG_QUERY:
     {
         DWORD ret;
+        WSAPROTOCOL_INFOA proto_info;
+        int proto_len, len;
+        struct sockaddr addr;
 
-        if (!out_buff)
+        if (!out_buff || out_size < sizeof(DWORD))
         {
             SetLastError(WSAEFAULT);
             return SOCKET_ERROR;
         }
 
-        ret = server_ioctl_sock( s, IOCTL_AFD_WINE_SEND_BACKLOG_QUERY, in_buff, in_size,
-                                 out_buff, out_size, ret_size, overlapped, completion );
+        proto_len = sizeof(WSAPROTOCOL_INFOA);
+        ret = getsockopt(s, SOL_SOCKET, SO_PROTOCOL_INFOA, (char *)&proto_info, &proto_len);
+        if (ret == SOCKET_ERROR)
+            return SOCKET_ERROR;
+
+        if (proto_info.iSocketType != SOCK_STREAM)
+        {
+            SetLastError( WSAEOPNOTSUPP );
+            return SOCKET_ERROR;
+        }
+
+        len = sizeof(addr);
+        if (getpeername( s, &addr, &len ) == SOCKET_ERROR)
+        {
+            return SOCKET_ERROR;
+        }
+
+        *(DWORD*)out_buff = 0x10000; /* 64k */
+
+        WARN("SIO_IDEAL_SEND_BACKLOG_QUERY Always returning 64k\n");
+
         SetLastError( ret );
-        if (!ret) *ret_size = sizeof(u_long);
-        return ret ? -1 : 0;
+        *ret_size = sizeof(DWORD);
+        return 0;
     }
 
     case SIOCATMARK:

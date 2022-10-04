@@ -387,6 +387,8 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
     if (FAILED(IMFMediaType_GetItemType(type, &MF_MT_AUDIO_NUM_CHANNELS, &item_type)) ||
         item_type != MF_ATTRIBUTE_UINT32)
         return MF_E_INVALIDMEDIATYPE;
+    if (flags & MFT_SET_TYPE_TEST_ONLY)
+        return S_OK;
 
     if (!decoder->input_type && FAILED(hr = MFCreateMediaType(&decoder->input_type)))
         return hr;
@@ -443,9 +445,6 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
         return hr;
     }
 
-    if (FAILED(IMFMediaType_SetUINT32(decoder->input_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, sample_size)))
-        return MF_E_INVALIDMEDIATYPE;
-
     if (FAILED(IMFMediaType_GetItemType(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &item_type)) ||
         item_type != MF_ATTRIBUTE_UINT32)
         return MF_E_INVALIDMEDIATYPE;
@@ -460,6 +459,11 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
         return MF_E_INVALIDMEDIATYPE;
     if (FAILED(IMFMediaType_GetItemType(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &item_type)) ||
         item_type != MF_ATTRIBUTE_UINT32)
+        return MF_E_INVALIDMEDIATYPE;
+    if (flags & MFT_SET_TYPE_TEST_ONLY)
+        return S_OK;
+
+    if (FAILED(IMFMediaType_SetUINT32(decoder->input_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, sample_size)))
         return MF_E_INVALIDMEDIATYPE;
 
     if (!decoder->output_type && FAILED(hr = MFCreateMediaType(&decoder->output_type)))
@@ -525,8 +529,8 @@ static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_
 static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
     struct wma_decoder *decoder = impl_from_IMFTransform(iface);
-    struct wg_sample *wg_sample;
     MFT_INPUT_STREAM_INFO info;
+    DWORD total_length;
     HRESULT hr;
 
     TRACE("iface %p, id %lu, sample %p, flags %#lx.\n", iface, id, sample, flags);
@@ -534,20 +538,15 @@ static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFS
     if (!decoder->wg_transform)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info)))
-        return hr;
-
-    if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
+    if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info))
+            || FAILED(hr = IMFSample_GetTotalLength(sample, &total_length)))
         return hr;
 
     /* WMA transform uses fixed size input samples and ignores samples with invalid sizes */
-    if (wg_sample->size % info.cbSize)
-    {
-        wg_sample_release(wg_sample);
+    if (total_length % info.cbSize)
         return S_OK;
-    }
 
-    return wg_transform_push_mf(decoder->wg_transform, wg_sample, decoder->wg_sample_queue);
+    return wg_transform_push_mf(decoder->wg_transform, sample, decoder->wg_sample_queue);
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
@@ -587,21 +586,11 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
         return MF_E_BUFFERTOOSMALL;
     }
 
-    if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, wg_sample, NULL)))
-    {
-        if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
-            samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
+    if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, wg_sample, NULL,
+            &samples[0].dwStatus)))
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
-    }
 
     wg_sample_release(wg_sample);
-
-    if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
-    {
-        FIXME("Unexpected stream format change!\n");
-        samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
-        *status |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
-    }
 
     return hr;
 }

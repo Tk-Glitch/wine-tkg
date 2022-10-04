@@ -20,6 +20,7 @@
 
 #include "wmcodecdsp.h"
 #include "mfapi.h"
+#include "mferror.h"
 
 #include "wine/debug.h"
 #include "wine/list.h"
@@ -251,28 +252,31 @@ HRESULT wg_transform_push_data(struct wg_transform *transform, struct wg_sample 
 HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample,
         struct wg_format *format);
 
-HRESULT wg_transform_push_mf(struct wg_transform *transform, struct wg_sample *wg_sample,
+HRESULT wg_transform_push_mf(struct wg_transform *transform, IMFSample *sample,
         struct wg_sample_queue *queue)
 {
-    struct sample *sample = unsafe_mf_from_wg_sample(wg_sample);
+    struct wg_sample *wg_sample;
     LONGLONG time, duration;
     UINT32 value;
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %p, wg_sample %p, queue %p.\n", transform, wg_sample, queue);
+    TRACE_(mfplat)("transform %p, sample %p, queue %p.\n", transform, sample, queue);
 
-    if (SUCCEEDED(IMFSample_GetSampleTime(sample->u.mf.sample, &time)))
+    if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
+        return hr;
+
+    if (SUCCEEDED(IMFSample_GetSampleTime(sample, &time)))
     {
-        sample->wg_sample.flags |= WG_SAMPLE_FLAG_HAS_PTS;
-        sample->wg_sample.pts = time;
+        wg_sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
+        wg_sample->pts = time;
     }
-    if (SUCCEEDED(IMFSample_GetSampleDuration(sample->u.mf.sample, &duration)))
+    if (SUCCEEDED(IMFSample_GetSampleDuration(sample, &duration)))
     {
-        sample->wg_sample.flags |= WG_SAMPLE_FLAG_HAS_DURATION;
-        sample->wg_sample.duration = duration;
+        wg_sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
+        wg_sample->duration = duration;
     }
-    if (SUCCEEDED(IMFSample_GetUINT32(sample->u.mf.sample, &MFSampleExtension_CleanPoint, &value)) && value)
-        sample->wg_sample.flags |= WG_SAMPLE_FLAG_SYNC_POINT;
+    if (SUCCEEDED(IMFSample_GetUINT32(sample, &MFSampleExtension_CleanPoint, &value)) && value)
+        wg_sample->flags |= WG_SAMPLE_FLAG_SYNC_POINT;
 
     wg_sample_queue_begin_append(queue, wg_sample);
     hr = wg_transform_push_data(transform, wg_sample);
@@ -282,19 +286,25 @@ HRESULT wg_transform_push_mf(struct wg_transform *transform, struct wg_sample *w
 }
 
 HRESULT wg_transform_read_mf(struct wg_transform *transform, struct wg_sample *wg_sample,
-        struct wg_format *format)
+        struct wg_format *format, DWORD *flags)
 {
     struct sample *sample = unsafe_mf_from_wg_sample(wg_sample);
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %p, wg_sample %p, format %p.\n", transform, wg_sample, format);
+    TRACE_(mfplat)("transform %p, wg_sample %p, format %p, flags %p.\n", transform, wg_sample, format, flags);
 
     if (FAILED(hr = wg_transform_read_data(transform, wg_sample, format)))
+    {
+        if (hr == MF_E_TRANSFORM_STREAM_CHANGE && !format)
+            FIXME("Unexpected stream format change!\n");
         return hr;
+    }
 
     if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(sample->u.mf.buffer, wg_sample->size)))
         return hr;
 
+    if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
+        *flags |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
     if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_PTS)
         IMFSample_SetSampleTime(sample->u.mf.sample, wg_sample->pts);
     if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_DURATION)
@@ -346,7 +356,11 @@ HRESULT wg_transform_read_quartz(struct wg_transform *transform, struct wg_sampl
     TRACE_(mfplat)("transform %p, wg_sample %p.\n", transform, wg_sample);
 
     if (FAILED(hr = wg_transform_read_data(transform, wg_sample, NULL)))
+    {
+        if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
+            FIXME("Unexpected stream format change!\n");
         return hr;
+    }
 
     if (FAILED(hr = IMediaSample_SetActualDataLength(sample->u.quartz.sample, wg_sample->size)))
         return hr;

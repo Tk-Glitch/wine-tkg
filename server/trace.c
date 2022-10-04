@@ -1959,7 +1959,6 @@ static void dump_alloc_file_handle_reply( const struct alloc_file_handle_reply *
 static void dump_get_handle_unix_name_request( const struct get_handle_unix_name_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
-    fprintf( stderr, ", nofollow=%d", req->nofollow );
 }
 
 static void dump_get_handle_unix_name_reply( const struct get_handle_unix_name_reply *req )

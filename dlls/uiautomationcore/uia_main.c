@@ -27,6 +27,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(uiautomation);
 
+HMODULE huia_module;
+
 struct uia_object_wrapper
 {
     IUnknown IUnknown_iface;
@@ -298,16 +300,6 @@ HRESULT WINAPI UiaGetReservedNotSupportedValue(IUnknown **value)
 }
 
 /***********************************************************************
- *          UiaReturnRawElementProvider (uiautomationcore.@)
- */
-LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wParam,
-        LPARAM lParam, IRawElementProviderSimple *elprov)
-{
-    FIXME("(%p, %Ix, %Ix, %p) stub!\n", hwnd, wParam, lParam, elprov);
-    return 0;
-}
-
-/***********************************************************************
  *          UiaRaiseAutomationEvent (uiautomationcore.@)
  */
 HRESULT WINAPI UiaRaiseAutomationEvent(IRawElementProviderSimple *provider, EVENTID id)
@@ -358,4 +350,25 @@ HRESULT WINAPI UiaDisconnectProvider(IRawElementProviderSimple *provider)
 {
     FIXME("(%p): stub\n", provider);
     return E_NOTIMPL;
+}
+
+/***********************************************************************
+ *          DllMain (uiautomationcore.@)
+ */
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
+{
+    TRACE("(%p, %ld, %p)\n", hinst, reason, reserved);
+
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(hinst);
+        huia_module = hinst;
+        break;
+
+    default:
+        break;
+    }
+
+    return TRUE;
 }

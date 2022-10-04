@@ -401,6 +401,8 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
             break;
     if (i == ARRAY_SIZE(input_types))
         return MF_E_INVALIDMEDIATYPE;
+    if (flags & MFT_SET_TYPE_TEST_ONLY)
+        return S_OK;
 
     if (!impl->input_type && FAILED(hr = MFCreateMediaType(&impl->input_type)))
         return hr;
@@ -444,6 +446,8 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
             break;
     if (i == ARRAY_SIZE(output_types))
         return MF_E_INVALIDMEDIATYPE;
+    if (flags & MFT_SET_TYPE_TEST_ONLY)
+        return S_OK;
 
     if (!impl->output_type && FAILED(hr = MFCreateMediaType(&impl->output_type)))
         return hr;
@@ -540,23 +544,13 @@ static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_
 static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
     struct color_convert *impl = impl_from_IMFTransform(iface);
-    struct wg_sample *wg_sample;
-    MFT_INPUT_STREAM_INFO info;
-    HRESULT hr;
 
     TRACE("iface %p, id %#lx, sample %p, flags %#lx.\n", iface, id, sample, flags);
-
-    if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info)))
-        return hr;
 
     if (!impl->wg_transform)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
-        return hr;
-
-    return wg_transform_push_mf(impl->wg_transform, wg_sample,
-            impl->wg_sample_queue);
+    return wg_transform_push_mf(impl->wg_transform, sample, impl->wg_sample_queue);
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
@@ -591,16 +585,11 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
         return MF_E_BUFFERTOOSMALL;
     }
 
-    if (SUCCEEDED(hr = wg_transform_read_mf(impl->wg_transform, wg_sample, NULL)))
+    if (SUCCEEDED(hr = wg_transform_read_mf(impl->wg_transform, wg_sample, NULL,
+            &samples[0].dwStatus)))
         wg_sample_queue_flush(impl->wg_sample_queue, false);
-    wg_sample_release(wg_sample);
 
-    if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
-    {
-        FIXME("Unexpected stream format change!\n");
-        samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
-        *status |= MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE;
-    }
+    wg_sample_release(wg_sample);
 
     return hr;
 }

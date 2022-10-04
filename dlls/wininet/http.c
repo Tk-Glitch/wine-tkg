@@ -58,11 +58,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wininet);
 
-#define HTTP_ADDHDR_FLAG_ADD				0x20000000
-#define HTTP_ADDHDR_FLAG_ADD_IF_NEW			0x10000000
-#define HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA		0x40000000
-#define HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON	0x01000000
-#define HTTP_ADDHDR_FLAG_REPLACE			0x80000000
 #define HTTP_ADDHDR_FLAG_REQ				0x02000000
 
 #define COLLECT_TIME 60000
@@ -1600,7 +1595,7 @@ static BOOL HTTP_InsertAuthorization( http_request_t *request, struct HttpAuthIn
         TRACE("Inserting authorization: %s\n", debugstr_w(authorization));
 
         HTTP_ProcessHeader(request, header, authorization,
-                           HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD);
+                           HTTP_ADDHDR_FLAG_REQ | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD);
         heap_free(authorization);
     }
     else
@@ -1629,7 +1624,7 @@ static BOOL HTTP_InsertAuthorization( http_request_t *request, struct HttpAuthIn
             TRACE("Inserting authorization: %s\n", debugstr_w(authorization));
 
             HTTP_ProcessHeader(request, header, authorization,
-                               HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD);
+                               HTTP_ADDHDR_FLAG_REQ | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD);
             heap_free(data);
             heap_free(authorization);
         }
@@ -3431,9 +3426,9 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
         {
             if (!*lpszAcceptTypes[i]) continue;
             HTTP_ProcessHeader(request, L"Accept", lpszAcceptTypes[i],
-                               HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA |
+                               HTTP_ADDREQ_FLAG_COALESCE_WITH_COMMA |
                                HTTP_ADDHDR_FLAG_REQ |
-                               (i == 0 ? (HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD) : 0));
+                               (i == 0 ? (HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD) : 0));
         }
     }
 
@@ -4954,7 +4949,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
 
     /* add the headers the caller supplied */
     if( lpszHeaders && dwHeaderLength )
-        HTTP_HttpAddRequestHeadersW(request, lpszHeaders, dwHeaderLength, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
+        HTTP_HttpAddRequestHeadersW(request, lpszHeaders, dwHeaderLength, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE);
 
     do
     {
@@ -4983,7 +4978,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
         if (request->hdr.dwFlags & INTERNET_FLAG_KEEP_CONNECTION)
         {
             HTTP_ProcessHeader(request, L"Connection", L"Keep-Alive",
-                               HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD);
+                               HTTP_ADDHDR_FLAG_REQ | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD);
         }
         HTTP_InsertAuthorization(request, request->authInfo, L"Authorization");
         HTTP_InsertAuthorization(request, request->proxyAuthInfo, L"Proxy-Authorization");
@@ -5069,7 +5064,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
 
             INTERNET_SendCallback(&request->hdr, request->hdr.dwContext,
                                 INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
-    
+
             if (HTTP_GetResponseHeaders(request, &responseLen))
             {
                 http_release_netconn(request, FALSE);
@@ -6000,7 +5995,7 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
 
     /* Add status code */
     HTTP_ProcessHeader(request, L"Status", status_code,
-                       HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD);
+                       HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD);
 
     heap_free(request->version);
     heap_free(request->statusText);
@@ -6113,7 +6108,7 @@ static LPWSTR * HTTP_InterpretHttpHeader(LPCWSTR buffer)
  *
  */
 
-#define COALESCEFLAGS (HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA|HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
+#define COALESCEFLAGS (HTTP_ADDREQ_FLAG_COALESCE_WITH_COMMA|HTTP_ADDREQ_FLAG_COALESCE_WITH_SEMICOLON)
 
 static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR value, DWORD dwModifier)
 {
@@ -6132,7 +6127,7 @@ static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR 
          lphttpHdr = &request->custHeaders[index];
 
         /* replace existing header if FLAG_REPLACE is given */
-        if (dwModifier & HTTP_ADDHDR_FLAG_REPLACE)
+        if (dwModifier & HTTP_ADDREQ_FLAG_REPLACE)
         {
             HTTP_DeleteCustomHeader( request, index );
 
@@ -6154,7 +6149,7 @@ static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR 
         }
 
         /* do not add new header if FLAG_ADD_IF_NEW is set */
-        if (dwModifier & HTTP_ADDHDR_FLAG_ADD_IF_NEW)
+        if (dwModifier & HTTP_ADDREQ_FLAG_ADD_IF_NEW)
          {
             res = ERROR_HTTP_INVALID_HEADER; /* FIXME */
             goto out;
@@ -6175,12 +6170,12 @@ static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR 
             else
                 lphttpHdr->wFlags &= ~HDR_ISREQUEST;
 
-            if (dwModifier & HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA)
+            if (dwModifier & HTTP_ADDREQ_FLAG_COALESCE_WITH_COMMA)
             {
                 ch = ',';
                 lphttpHdr->wFlags |= HDR_COMMADELIMITED;
             }
-            else if (dwModifier & HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
+            else if (dwModifier & HTTP_ADDREQ_FLAG_COALESCE_WITH_SEMICOLON)
             {
                 ch = ';';
                 lphttpHdr->wFlags |= HDR_COMMADELIMITED;
@@ -6215,7 +6210,7 @@ static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR 
      }
 
     /* FIXME: What about other combinations? */
-    if ((dwModifier & ~HTTP_ADDHDR_FLAG_REQ) == HTTP_ADDHDR_FLAG_REPLACE)
+    if ((dwModifier & ~HTTP_ADDHDR_FLAG_REQ) == HTTP_ADDREQ_FLAG_REPLACE)
     {
         res = ERROR_HTTP_HEADER_NOT_FOUND;
         goto out;

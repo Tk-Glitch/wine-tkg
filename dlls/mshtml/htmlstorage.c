@@ -29,6 +29,7 @@
 #include "wine/debug.h"
 
 #include "mshtml_private.h"
+#include "htmlevent.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -41,6 +42,7 @@ typedef struct {
     LONG ref;
     unsigned num_props;
     BSTR *props;
+    HTMLInnerWindow *window;
     struct session_map_entry *session_storage;
     WCHAR *filename;
     HANDLE mutex;
@@ -193,6 +195,163 @@ static void release_props(HTMLStorage *This)
 static inline HTMLStorage *impl_from_IHTMLStorage(IHTMLStorage *iface)
 {
     return CONTAINING_RECORD(iface, HTMLStorage, IHTMLStorage_iface);
+}
+
+static HRESULT build_session_origin(IUri*,BSTR,BSTR*);
+
+struct storage_event_task {
+    task_t header;
+    HTMLInnerWindow *window;
+    DOMEvent *event;
+};
+
+static void storage_event_proc(task_t *_task)
+{
+    struct storage_event_task *task = (struct storage_event_task*)_task;
+    HTMLInnerWindow *window = task->window;
+    DOMEvent *event = task->event;
+    VARIANT_BOOL cancelled;
+
+    if(event->event_id == EVENTID_STORAGE && dispex_compat_mode(&window->event_target.dispex) >= COMPAT_MODE_IE9) {
+        dispatch_event(&window->event_target, event);
+        if(window->doc)
+            fire_event(&window->doc->node, L"onstorage", NULL, &cancelled);
+    }else if(window->doc) {
+        dispatch_event(&window->doc->node.event_target, event);
+    }
+}
+
+static void storage_event_destr(task_t *_task)
+{
+    struct storage_event_task *task = (struct storage_event_task*)_task;
+    IDOMEvent_Release(&task->event->IDOMEvent_iface);
+    IHTMLWindow2_Release(&task->window->base.IHTMLWindow2_iface);
+}
+
+struct send_storage_event_ctx {
+    HTMLInnerWindow *skip_window;
+    const WCHAR *origin;
+    UINT origin_len;
+    BSTR key;
+    BSTR old_value;
+    BSTR new_value;
+};
+
+static HRESULT push_storage_event_task(struct send_storage_event_ctx *ctx, HTMLInnerWindow *window, BOOL commit)
+{
+    struct storage_event_task *task;
+    DOMEvent *event;
+    HRESULT hres;
+
+    hres = create_storage_event(window->doc, ctx->key, ctx->old_value, ctx->new_value, commit, &event);
+    if(FAILED(hres))
+        return hres;
+
+    if(!(task = heap_alloc(sizeof(*task)))) {
+        IDOMEvent_Release(&event->IDOMEvent_iface);
+        return E_OUTOFMEMORY;
+    }
+
+    task->event = event;
+    task->window = window;
+    IHTMLWindow2_AddRef(&task->window->base.IHTMLWindow2_iface);
+    return push_task(&task->header, storage_event_proc, storage_event_destr, window->task_magic);
+}
+
+static HRESULT send_storage_event_impl(struct send_storage_event_ctx *ctx, HTMLInnerWindow *window)
+{
+    HTMLOuterWindow *child;
+    const WCHAR *origin;
+    UINT origin_len;
+    BOOL matches;
+    HRESULT hres;
+    BSTR bstr;
+
+    if(!window)
+        return S_OK;
+
+    LIST_FOR_EACH_ENTRY(child, &window->children, HTMLOuterWindow, sibling_entry) {
+        hres = send_storage_event_impl(ctx, child->base.inner_window);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    if(window == ctx->skip_window)
+        return S_OK;
+
+    /* Try it quick from session storage first, if available */
+    if(window->session_storage) {
+        HTMLStorage *storage = impl_from_IHTMLStorage(window->session_storage);
+        origin = storage->session_storage->origin;
+        origin_len = ctx->skip_window ? wcslen(origin) : storage->session_storage->origin_len;
+        bstr = NULL;
+    }else {
+        hres = IUri_GetHost(window->base.outer_window->uri, &bstr);
+        if(hres != S_OK) {
+            if(SUCCEEDED(hres))
+                SysFreeString(bstr);
+            return S_OK;
+        }
+        if(ctx->skip_window)
+            _wcslwr(bstr);
+        else {
+            BSTR tmp = bstr;
+            hres = build_session_origin(window->base.outer_window->uri, tmp, &bstr);
+            SysFreeString(tmp);
+            if(hres != S_OK) {
+                if(SUCCEEDED(hres))
+                    SysFreeString(bstr);
+                return S_OK;
+            }
+        }
+        origin = bstr;
+        origin_len = SysStringLen(bstr);
+    }
+
+    matches = (origin_len == ctx->origin_len && !memcmp(origin, ctx->origin, origin_len * sizeof(WCHAR)));
+    SysFreeString(bstr);
+
+    return matches ? push_storage_event_task(ctx, window, FALSE) : S_OK;
+}
+
+/* Takes ownership of old_value */
+static HRESULT send_storage_event(HTMLStorage *storage, BSTR key, BSTR old_value, BSTR new_value)
+{
+    HTMLInnerWindow *window = storage->window;
+    struct send_storage_event_ctx ctx;
+    HTMLOuterWindow *top_window;
+    BSTR hostname = NULL;
+    HRESULT hres = S_OK;
+
+    if(!window)
+        goto done;
+    get_top_window(window->base.outer_window, &top_window);
+
+    ctx.key = key;
+    ctx.old_value = old_value;
+    ctx.new_value = new_value;
+    if(!storage->filename) {
+        ctx.origin = storage->session_storage->origin;
+        ctx.origin_len = storage->session_storage->origin_len;
+        ctx.skip_window = NULL;
+    }else {
+        hres = IUri_GetHost(window->base.outer_window->uri, &hostname);
+        if(hres != S_OK)
+            goto done;
+        _wcslwr(hostname);
+        ctx.origin = hostname;
+        ctx.origin_len = SysStringLen(hostname);
+        ctx.skip_window = top_window->base.inner_window;  /* localStorage on native skips top window */
+    }
+    hres = send_storage_event_impl(&ctx, top_window->base.inner_window);
+
+    if(ctx.skip_window && hres == S_OK)
+        hres = push_storage_event_task(&ctx, window, TRUE);
+
+done:
+    SysFreeString(hostname);
+    SysFreeString(old_value);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLStorage_QueryInterface(IHTMLStorage *iface, REFIID riid, void **ppv)
@@ -641,7 +800,7 @@ static HRESULT save_document(IXMLDOMDocument *doc, const WCHAR *filename)
     return hres;
 }
 
-static HRESULT set_item(const WCHAR *filename, BSTR key, BSTR value)
+static HRESULT set_item(const WCHAR *filename, BSTR key, BSTR value, BSTR *old_value)
 {
     IXMLDOMDocument *doc;
     IXMLDOMNode *root = NULL, *node = NULL;
@@ -649,6 +808,7 @@ static HRESULT set_item(const WCHAR *filename, BSTR key, BSTR value)
     BSTR query = NULL;
     HRESULT hres;
 
+    *old_value = NULL;
     hres = open_document(filename, &doc);
     if(hres != S_OK)
         return hres;
@@ -665,9 +825,19 @@ static HRESULT set_item(const WCHAR *filename, BSTR key, BSTR value)
 
     hres = IXMLDOMNode_selectSingleNode(root, query, &node);
     if(hres == S_OK) {
+        VARIANT old;
+
         hres = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMElement, (void**)&elem);
         if(hres != S_OK)
             goto done;
+
+        hres = IXMLDOMElement_getAttribute(elem, (BSTR)L"value", &old);
+        if(hres == S_OK) {
+            if(V_VT(&old) == VT_BSTR)
+                *old_value = V_BSTR(&old);
+            else
+                VariantClear(&old);
+        }
 
         hres = set_attribute(elem, L"value", value);
         if(hres != S_OK)
@@ -703,6 +873,8 @@ done:
     if(elem)
         IXMLDOMElement_Release(elem);
     IXMLDOMDocument_Release(doc);
+    if(hres != S_OK)
+        SysFreeString(*old_value);
     return hres;
 }
 
@@ -710,6 +882,7 @@ static HRESULT WINAPI HTMLStorage_setItem(IHTMLStorage *iface, BSTR bstrKey, BST
 {
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
     struct session_entry *session_entry;
+    BSTR old_value;
     HRESULT hres;
 
     TRACE("(%p)->(%s %s)\n", This, debugstr_w(bstrKey), debugstr_w(bstrValue));
@@ -730,26 +903,32 @@ static HRESULT WINAPI HTMLStorage_setItem(IHTMLStorage *iface, BSTR bstrKey, BST
                 return E_OUTOFMEMORY;  /* native returns this when quota is exceeded */
             }
             This->session_storage->quota -= value_len - old_len;
-            SysFreeString(session_entry->value);
+            old_value = session_entry->value;
             session_entry->value = value;
+
+            hres = send_storage_event(This, bstrKey, old_value, value);
         }
         return hres;
     }
 
     WaitForSingleObject(This->mutex, INFINITE);
-    hres = set_item(This->filename, bstrKey, bstrValue);
+    hres = set_item(This->filename, bstrKey, bstrValue, &old_value);
     ReleaseMutex(This->mutex);
 
+    if(hres == S_OK)
+        hres = send_storage_event(This, bstrKey, old_value, bstrValue);
     return hres;
 }
 
-static HRESULT remove_item(const WCHAR *filename, BSTR key)
+static HRESULT remove_item(const WCHAR *filename, BSTR key, BSTR *old_value, BOOL *changed)
 {
     IXMLDOMDocument *doc;
     IXMLDOMNode *root = NULL, *node = NULL;
     BSTR query = NULL;
     HRESULT hres;
 
+    *old_value = NULL;
+    *changed = FALSE;
     hres = open_document(filename, &doc);
     if(hres != S_OK)
         return hres;
@@ -766,6 +945,22 @@ static HRESULT remove_item(const WCHAR *filename, BSTR key)
 
     hres = IXMLDOMNode_selectSingleNode(root, query, &node);
     if(hres == S_OK) {
+        IXMLDOMElement *elem;
+        VARIANT old;
+
+        hres = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMElement, (void**)&elem);
+        if(hres == S_OK) {
+            hres = IXMLDOMElement_getAttribute(elem, (BSTR)L"value", &old);
+            if(hres == S_OK) {
+                if(V_VT(&old) == VT_BSTR)
+                    *old_value = V_BSTR(&old);
+                else
+                    VariantClear(&old);
+            }
+            IXMLDOMElement_Release(elem);
+            *changed = TRUE;
+        }
+
         hres = IXMLDOMNode_removeChild(root, node, NULL);
         if(hres != S_OK)
             goto done;
@@ -780,6 +975,8 @@ done:
     if(node)
         IXMLDOMNode_Release(node);
     IXMLDOMDocument_Release(doc);
+    if(hres != S_OK || !changed)
+        SysFreeString(*old_value);
     return hres;
 }
 
@@ -787,7 +984,9 @@ static HRESULT WINAPI HTMLStorage_removeItem(IHTMLStorage *iface, BSTR bstrKey)
 {
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
     struct session_entry *session_entry;
+    BSTR old_value;
     HRESULT hres;
+    BOOL changed;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(bstrKey));
 
@@ -798,16 +997,20 @@ static HRESULT WINAPI HTMLStorage_removeItem(IHTMLStorage *iface, BSTR bstrKey)
             This->session_storage->num_keys--;
             list_remove(&session_entry->list_entry);
             wine_rb_remove(&This->session_storage->data_map, &session_entry->entry);
-            SysFreeString(session_entry->value);
+            old_value = session_entry->value;
             heap_free(session_entry);
+
+            hres = send_storage_event(This, bstrKey, old_value, NULL);
         }
         return hres;
     }
 
     WaitForSingleObject(This->mutex, INFINITE);
-    hres = remove_item(This->filename, bstrKey);
+    hres = remove_item(This->filename, bstrKey, &old_value, &changed);
     ReleaseMutex(This->mutex);
 
+    if(hres == S_OK && changed)
+        hres = send_storage_event(This, bstrKey, old_value, NULL);
     return hres;
 }
 
@@ -817,8 +1020,9 @@ static HRESULT WINAPI HTMLStorage_clear(IHTMLStorage *iface)
     HRESULT hres = S_OK;
 
     if(!This->filename) {
+        UINT num_keys = This->session_storage->num_keys;
         clear_session_storage(This->session_storage);
-        return S_OK;
+        return num_keys ? send_storage_event(This, NULL, NULL, NULL) : S_OK;
     }
 
     WaitForSingleObject(This->mutex, INFINITE);
@@ -828,6 +1032,8 @@ static HRESULT WINAPI HTMLStorage_clear(IHTMLStorage *iface)
             hres = HRESULT_FROM_WIN32(error);
     }
     ReleaseMutex(This->mutex);
+    if(hres == S_OK)
+        hres = send_storage_event(This, NULL, NULL, NULL);
     return hres;
 }
 
@@ -1266,9 +1472,17 @@ HRESULT create_html_storage(HTMLInnerWindow *window, BOOL local, IHTMLStorage **
 
     storage->IHTMLStorage_iface.lpVtbl = &HTMLStorageVtbl;
     storage->ref = 1;
+    storage->window = window;
+
     init_dispatch(&storage->dispex, (IUnknown*)&storage->IHTMLStorage_iface, &HTMLStorage_dispex,
                   dispex_compat_mode(&window->event_target.dispex));
 
     *p = &storage->IHTMLStorage_iface;
     return S_OK;
+}
+
+void detach_html_storage(IHTMLStorage *iface)
+{
+    HTMLStorage *storage = impl_from_IHTMLStorage(iface);
+    storage->window = NULL;
 }

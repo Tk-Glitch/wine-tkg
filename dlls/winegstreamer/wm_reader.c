@@ -636,70 +636,19 @@ static struct wm_reader *impl_from_IWMProfile3(IWMProfile3 *iface)
 static HRESULT WINAPI profile_QueryInterface(IWMProfile3 *iface, REFIID iid, void **out)
 {
     struct wm_reader *reader = impl_from_IWMProfile3(iface);
-
-    TRACE("reader %p, iid %s, out %p.\n", reader, debugstr_guid(iid), out);
-
-    if (IsEqualIID(iid, &IID_IWMHeaderInfo)
-            || IsEqualIID(iid, &IID_IWMHeaderInfo2)
-            || IsEqualIID(iid, &IID_IWMHeaderInfo3))
-    {
-        *out = &reader->IWMHeaderInfo3_iface;
-    }
-    else if (IsEqualIID(iid, &IID_IWMLanguageList))
-    {
-        *out = &reader->IWMLanguageList_iface;
-    }
-    else if (IsEqualIID(iid, &IID_IWMPacketSize)
-            || IsEqualIID(iid, &IID_IWMPacketSize2))
-    {
-        *out = &reader->IWMPacketSize2_iface;
-    }
-    else if (IsEqualIID(iid, &IID_IUnknown)
-            || IsEqualIID(iid, &IID_IWMProfile)
-            || IsEqualIID(iid, &IID_IWMProfile2)
-            || IsEqualIID(iid, &IID_IWMProfile3))
-    {
-        *out = &reader->IWMProfile3_iface;
-    }
-    else if (IsEqualIID(iid, &IID_IWMReaderPlaylistBurn))
-    {
-        *out = &reader->IWMReaderPlaylistBurn_iface;
-    }
-    else if (IsEqualIID(iid, &IID_IWMReaderTimecode))
-    {
-        *out = &reader->IWMReaderTimecode_iface;
-    }
-    else if (!(*out = reader->ops->query_interface(reader, iid)))
-    {
-        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
-        return E_NOINTERFACE;
-    }
-
-    IUnknown_AddRef((IUnknown *)*out);
-    return S_OK;
+    return IUnknown_QueryInterface(reader->outer, iid, out);
 }
 
 static ULONG WINAPI profile_AddRef(IWMProfile3 *iface)
 {
     struct wm_reader *reader = impl_from_IWMProfile3(iface);
-    ULONG refcount = InterlockedIncrement(&reader->refcount);
-
-    TRACE("%p increasing refcount to %lu.\n", reader, refcount);
-
-    return refcount;
+    return IUnknown_AddRef(reader->outer);
 }
 
 static ULONG WINAPI profile_Release(IWMProfile3 *iface)
 {
     struct wm_reader *reader = impl_from_IWMProfile3(iface);
-    ULONG refcount = InterlockedDecrement(&reader->refcount);
-
-    TRACE("%p decreasing refcount to %lu.\n", reader, refcount);
-
-    if (!refcount)
-        reader->ops->destroy(reader);
-
-    return refcount;
+    return IUnknown_Release(reader->outer);
 }
 
 static HRESULT WINAPI profile_GetVersion(IWMProfile3 *iface, WMT_VERSION *version)
@@ -972,22 +921,19 @@ static struct wm_reader *impl_from_IWMHeaderInfo3(IWMHeaderInfo3 *iface)
 static HRESULT WINAPI header_info_QueryInterface(IWMHeaderInfo3 *iface, REFIID iid, void **out)
 {
     struct wm_reader *reader = impl_from_IWMHeaderInfo3(iface);
-
-    return IWMProfile3_QueryInterface(&reader->IWMProfile3_iface, iid, out);
+    return IUnknown_QueryInterface(reader->outer, iid, out);
 }
 
 static ULONG WINAPI header_info_AddRef(IWMHeaderInfo3 *iface)
 {
     struct wm_reader *reader = impl_from_IWMHeaderInfo3(iface);
-
-    return IWMProfile3_AddRef(&reader->IWMProfile3_iface);
+    return IUnknown_AddRef(reader->outer);
 }
 
 static ULONG WINAPI header_info_Release(IWMHeaderInfo3 *iface)
 {
     struct wm_reader *reader = impl_from_IWMHeaderInfo3(iface);
-
-    return IWMProfile3_Release(&reader->IWMProfile3_iface);
+    return IUnknown_Release(reader->outer);
 }
 
 static HRESULT WINAPI header_info_GetAttributeCount(IWMHeaderInfo3 *iface, WORD stream_number, WORD *count)
@@ -1237,22 +1183,19 @@ static struct wm_reader *impl_from_IWMLanguageList(IWMLanguageList *iface)
 static HRESULT WINAPI language_list_QueryInterface(IWMLanguageList *iface, REFIID iid, void **out)
 {
     struct wm_reader *reader = impl_from_IWMLanguageList(iface);
-
-    return IWMProfile3_QueryInterface(&reader->IWMProfile3_iface, iid, out);
+    return IUnknown_QueryInterface(reader->outer, iid, out);
 }
 
 static ULONG WINAPI language_list_AddRef(IWMLanguageList *iface)
 {
     struct wm_reader *reader = impl_from_IWMLanguageList(iface);
-
-    return IWMProfile3_AddRef(&reader->IWMProfile3_iface);
+    return IUnknown_AddRef(reader->outer);
 }
 
 static ULONG WINAPI language_list_Release(IWMLanguageList *iface)
 {
     struct wm_reader *reader = impl_from_IWMLanguageList(iface);
-
-    return IWMProfile3_Release(&reader->IWMProfile3_iface);
+    return IUnknown_Release(reader->outer);
 }
 
 static HRESULT WINAPI language_list_GetLanguageCount(IWMLanguageList *iface, WORD *count)
@@ -1293,22 +1236,19 @@ static struct wm_reader *impl_from_IWMPacketSize2(IWMPacketSize2 *iface)
 static HRESULT WINAPI packet_size_QueryInterface(IWMPacketSize2 *iface, REFIID iid, void **out)
 {
     struct wm_reader *reader = impl_from_IWMPacketSize2(iface);
-
-    return IWMProfile3_QueryInterface(&reader->IWMProfile3_iface, iid, out);
+    return IUnknown_QueryInterface(reader->outer, iid, out);
 }
 
 static ULONG WINAPI packet_size_AddRef(IWMPacketSize2 *iface)
 {
     struct wm_reader *reader = impl_from_IWMPacketSize2(iface);
-
-    return IWMProfile3_AddRef(&reader->IWMProfile3_iface);
+    return IUnknown_AddRef(reader->outer);
 }
 
 static ULONG WINAPI packet_size_Release(IWMPacketSize2 *iface)
 {
     struct wm_reader *reader = impl_from_IWMPacketSize2(iface);
-
-    return IWMProfile3_Release(&reader->IWMProfile3_iface);
+    return IUnknown_Release(reader->outer);
 }
 
 static HRESULT WINAPI packet_size_GetMaxPacketSize(IWMPacketSize2 *iface, DWORD *size)
@@ -1354,22 +1294,19 @@ static struct wm_reader *impl_from_IWMReaderPlaylistBurn(IWMReaderPlaylistBurn *
 static HRESULT WINAPI playlist_QueryInterface(IWMReaderPlaylistBurn *iface, REFIID iid, void **out)
 {
     struct wm_reader *reader = impl_from_IWMReaderPlaylistBurn(iface);
-
-    return IWMProfile3_QueryInterface(&reader->IWMProfile3_iface, iid, out);
+    return IUnknown_QueryInterface(reader->outer, iid, out);
 }
 
 static ULONG WINAPI playlist_AddRef(IWMReaderPlaylistBurn *iface)
 {
     struct wm_reader *reader = impl_from_IWMReaderPlaylistBurn(iface);
-
-    return IWMProfile3_AddRef(&reader->IWMProfile3_iface);
+    return IUnknown_AddRef(reader->outer);
 }
 
 static ULONG WINAPI playlist_Release(IWMReaderPlaylistBurn *iface)
 {
     struct wm_reader *reader = impl_from_IWMReaderPlaylistBurn(iface);
-
-    return IWMProfile3_Release(&reader->IWMProfile3_iface);
+    return IUnknown_Release(reader->outer);
 }
 
 static HRESULT WINAPI playlist_InitPlaylistBurn(IWMReaderPlaylistBurn *iface, DWORD count,
@@ -1417,22 +1354,19 @@ static struct wm_reader *impl_from_IWMReaderTimecode(IWMReaderTimecode *iface)
 static HRESULT WINAPI timecode_QueryInterface(IWMReaderTimecode *iface, REFIID iid, void **out)
 {
     struct wm_reader *reader = impl_from_IWMReaderTimecode(iface);
-
-    return IWMProfile3_QueryInterface(&reader->IWMProfile3_iface, iid, out);
+    return IUnknown_QueryInterface(reader->outer, iid, out);
 }
 
 static ULONG WINAPI timecode_AddRef(IWMReaderTimecode *iface)
 {
     struct wm_reader *reader = impl_from_IWMReaderTimecode(iface);
-
-    return IWMProfile3_AddRef(&reader->IWMProfile3_iface);
+    return IUnknown_AddRef(reader->outer);
 }
 
 static ULONG WINAPI timecode_Release(IWMReaderTimecode *iface)
 {
     struct wm_reader *reader = impl_from_IWMReaderTimecode(iface);
-
-    return IWMProfile3_Release(&reader->IWMProfile3_iface);
+    return IUnknown_Release(reader->outer);
 }
 
 static HRESULT WINAPI timecode_GetTimecodeRangeCount(IWMReaderTimecode *iface,
@@ -1545,93 +1479,7 @@ out_destroy_parser:
     return hr;
 }
 
-HRESULT wm_reader_open_stream(struct wm_reader *reader, IStream *stream)
-{
-    STATSTG stat;
-    HRESULT hr;
-
-    if (FAILED(hr = IStream_Stat(stream, &stat, STATFLAG_NONAME)))
-    {
-        ERR("Failed to stat stream, hr %#lx.\n", hr);
-        return hr;
-    }
-
-    EnterCriticalSection(&reader->cs);
-
-    IStream_AddRef(reader->source_stream = stream);
-    if (FAILED(hr = init_stream(reader, stat.cbSize.QuadPart)))
-    {
-        IStream_Release(stream);
-        reader->source_stream = NULL;
-    }
-
-    LeaveCriticalSection(&reader->cs);
-    return hr;
-}
-
-HRESULT wm_reader_open_file(struct wm_reader *reader, const WCHAR *filename)
-{
-    LARGE_INTEGER size;
-    HANDLE file;
-    HRESULT hr;
-
-    if ((file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
-            OPEN_EXISTING, 0, NULL)) == INVALID_HANDLE_VALUE)
-    {
-        ERR("Failed to open %s, error %lu.\n", debugstr_w(filename), GetLastError());
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-
-    if (!GetFileSizeEx(file, &size))
-    {
-        ERR("Failed to get the size of %s, error %lu.\n", debugstr_w(filename), GetLastError());
-        CloseHandle(file);
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-
-    EnterCriticalSection(&reader->cs);
-
-    reader->file = file;
-
-    if (FAILED(hr = init_stream(reader, size.QuadPart)))
-        reader->file = NULL;
-
-    LeaveCriticalSection(&reader->cs);
-    return hr;
-}
-
-HRESULT wm_reader_close(struct wm_reader *reader)
-{
-    EnterCriticalSection(&reader->cs);
-
-    if (!reader->wg_parser)
-    {
-        LeaveCriticalSection(&reader->cs);
-        return NS_E_INVALID_REQUEST;
-    }
-
-    wg_parser_disconnect(reader->wg_parser);
-
-    reader->read_thread_shutdown = true;
-    WaitForSingleObject(reader->read_thread, INFINITE);
-    CloseHandle(reader->read_thread);
-    reader->read_thread = NULL;
-
-    wg_parser_destroy(reader->wg_parser);
-    reader->wg_parser = NULL;
-
-    if (reader->source_stream)
-        IStream_Release(reader->source_stream);
-    reader->source_stream = NULL;
-    if (reader->file)
-        CloseHandle(reader->file);
-    reader->file = NULL;
-
-    LeaveCriticalSection(&reader->cs);
-    return S_OK;
-}
-
-struct wm_stream *wm_reader_get_stream_by_stream_number(struct wm_reader *reader, WORD stream_number)
+static struct wm_stream *wm_reader_get_stream_by_stream_number(struct wm_reader *reader, WORD stream_number)
 {
     if (stream_number && stream_number <= reader->stream_count)
         return &reader->streams[stream_number - 1];
@@ -2038,23 +1886,6 @@ HRESULT wm_reader_get_stream_sample(struct wm_reader *reader, IWMReaderCallbackA
     }
 }
 
-void wm_reader_seek(struct wm_reader *reader, QWORD start, LONGLONG duration)
-{
-    WORD i;
-
-    EnterCriticalSection(&reader->cs);
-
-    reader->start_time = start;
-
-    wg_parser_stream_seek(reader->streams[0].wg_stream, 1.0, start, start + duration,
-            AM_SEEKING_AbsolutePositioning, duration ? AM_SEEKING_AbsolutePositioning : AM_SEEKING_NoPositioning);
-
-    for (i = 0; i < reader->stream_count; ++i)
-        reader->streams[i].eos = false;
-
-    LeaveCriticalSection(&reader->cs);
-}
-
 HRESULT wm_reader_set_streams_selected(struct wm_reader *reader, WORD count,
         const WORD *stream_numbers, const WMT_STREAM_SELECTION *selections)
 {
@@ -2154,24 +1985,6 @@ HRESULT wm_reader_set_allocate_for_stream(struct wm_reader *reader, WORD stream_
     return S_OK;
 }
 
-HRESULT wm_reader_set_read_compressed(struct wm_reader *reader, WORD stream_number, BOOL compressed)
-{
-    struct wm_stream *stream;
-
-    EnterCriticalSection(&reader->cs);
-
-    if (!(stream = wm_reader_get_stream_by_stream_number(reader, stream_number)))
-    {
-        LeaveCriticalSection(&reader->cs);
-        return E_INVALIDARG;
-    }
-
-    stream->read_compressed = compressed;
-
-    LeaveCriticalSection(&reader->cs);
-    return S_OK;
-}
-
 HRESULT wm_reader_get_max_stream_size(struct wm_reader *reader, WORD stream_number, DWORD *size)
 {
     struct wm_stream *stream;
@@ -2190,23 +2003,567 @@ HRESULT wm_reader_get_max_stream_size(struct wm_reader *reader, WORD stream_numb
     return S_OK;
 }
 
-void wm_reader_init(struct wm_reader *reader, const struct wm_reader_ops *ops)
+static struct wm_reader *impl_from_IUnknown(IUnknown *iface)
 {
-    reader->IWMHeaderInfo3_iface.lpVtbl = &header_info_vtbl;
-    reader->IWMLanguageList_iface.lpVtbl = &language_list_vtbl;
-    reader->IWMPacketSize2_iface.lpVtbl = &packet_size_vtbl;
-    reader->IWMProfile3_iface.lpVtbl = &profile_vtbl;
-    reader->IWMReaderPlaylistBurn_iface.lpVtbl = &playlist_vtbl;
-    reader->IWMReaderTimecode_iface.lpVtbl = &timecode_vtbl;
-    reader->refcount = 1;
-    reader->ops = ops;
-
-    InitializeCriticalSection(&reader->cs);
-    reader->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": wm_reader.cs");
+    return CONTAINING_RECORD(iface, struct wm_reader, IUnknown_inner);
 }
 
-void wm_reader_cleanup(struct wm_reader *reader)
+static HRESULT WINAPI unknown_inner_QueryInterface(IUnknown *iface, REFIID iid, void **out)
 {
-    reader->cs.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&reader->cs);
+    struct wm_reader *reader = impl_from_IUnknown(iface);
+
+    TRACE("reader %p, iid %s, out %p.\n", reader, debugstr_guid(iid), out);
+
+    if (IsEqualIID(iid, &IID_IUnknown)
+            || IsEqualIID(iid, &IID_IWMSyncReader)
+            || IsEqualIID(iid, &IID_IWMSyncReader2))
+        *out = &reader->IWMSyncReader2_iface;
+    else if (IsEqualIID(iid, &IID_IWMHeaderInfo)
+            || IsEqualIID(iid, &IID_IWMHeaderInfo2)
+            || IsEqualIID(iid, &IID_IWMHeaderInfo3))
+        *out = &reader->IWMHeaderInfo3_iface;
+    else if (IsEqualIID(iid, &IID_IWMLanguageList))
+        *out = &reader->IWMLanguageList_iface;
+    else if (IsEqualIID(iid, &IID_IWMPacketSize)
+            || IsEqualIID(iid, &IID_IWMPacketSize2))
+        *out = &reader->IWMPacketSize2_iface;
+    else if (IsEqualIID(iid, &IID_IWMProfile)
+            || IsEqualIID(iid, &IID_IWMProfile2)
+            || IsEqualIID(iid, &IID_IWMProfile3))
+        *out = &reader->IWMProfile3_iface;
+    else if (IsEqualIID(iid, &IID_IWMReaderPlaylistBurn))
+        *out = &reader->IWMReaderPlaylistBurn_iface;
+    else if (IsEqualIID(iid, &IID_IWMReaderTimecode))
+        *out = &reader->IWMReaderTimecode_iface;
+    else
+    {
+        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static ULONG WINAPI unknown_inner_AddRef(IUnknown *iface)
+{
+    struct wm_reader *reader = impl_from_IUnknown(iface);
+    ULONG refcount = InterlockedIncrement(&reader->refcount);
+    TRACE("%p increasing refcount to %lu.\n", reader, refcount);
+    return refcount;
+}
+
+static ULONG WINAPI unknown_inner_Release(IUnknown *iface)
+{
+    struct wm_reader *reader = impl_from_IUnknown(iface);
+    ULONG refcount = InterlockedDecrement(&reader->refcount);
+
+    TRACE("%p decreasing refcount to %lu.\n", reader, refcount);
+
+    if (!refcount)
+    {
+        IWMSyncReader2_Close(&reader->IWMSyncReader2_iface);
+
+        reader->cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&reader->cs);
+
+        free(reader);
+    }
+
+    return refcount;
+}
+
+static const IUnknownVtbl unknown_inner_vtbl =
+{
+    unknown_inner_QueryInterface,
+    unknown_inner_AddRef,
+    unknown_inner_Release,
+};
+
+static struct wm_reader *impl_from_IWMSyncReader2(IWMSyncReader2 *iface)
+{
+    return CONTAINING_RECORD(iface, struct wm_reader, IWMSyncReader2_iface);
+}
+
+static HRESULT WINAPI reader_QueryInterface(IWMSyncReader2 *iface, REFIID iid, void **out)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    return IUnknown_QueryInterface(reader->outer, iid, out);
+}
+
+static ULONG WINAPI reader_AddRef(IWMSyncReader2 *iface)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    return IUnknown_AddRef(reader->outer);
+}
+
+static ULONG WINAPI reader_Release(IWMSyncReader2 *iface)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    return IUnknown_Release(reader->outer);
+}
+
+static HRESULT WINAPI reader_Close(IWMSyncReader2 *iface)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p.\n", reader);
+
+    EnterCriticalSection(&reader->cs);
+
+    if (!reader->wg_parser)
+    {
+        LeaveCriticalSection(&reader->cs);
+        return NS_E_INVALID_REQUEST;
+    }
+
+    wg_parser_disconnect(reader->wg_parser);
+
+    reader->read_thread_shutdown = true;
+    WaitForSingleObject(reader->read_thread, INFINITE);
+    CloseHandle(reader->read_thread);
+    reader->read_thread = NULL;
+
+    wg_parser_destroy(reader->wg_parser);
+    reader->wg_parser = NULL;
+
+    if (reader->source_stream)
+        IStream_Release(reader->source_stream);
+    reader->source_stream = NULL;
+    if (reader->file)
+        CloseHandle(reader->file);
+    reader->file = NULL;
+
+    LeaveCriticalSection(&reader->cs);
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_GetMaxOutputSampleSize(IWMSyncReader2 *iface, DWORD output, DWORD *max)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%lu %p): stub!\n", This, output, max);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_GetMaxStreamSampleSize(IWMSyncReader2 *iface, WORD stream, DWORD *max)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%d %p): stub!\n", This, stream, max);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_GetNextSample(IWMSyncReader2 *iface,
+        WORD stream_number, INSSBuffer **sample, QWORD *pts, QWORD *duration,
+        DWORD *flags, DWORD *output_number, WORD *ret_stream_number)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    HRESULT hr = NS_E_NO_MORE_SAMPLES;
+
+    TRACE("reader %p, stream_number %u, sample %p, pts %p, duration %p,"
+            " flags %p, output_number %p, ret_stream_number %p.\n",
+            reader, stream_number, sample, pts, duration, flags, output_number, ret_stream_number);
+
+    if (!stream_number && !output_number && !ret_stream_number)
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&reader->cs);
+
+    hr = wm_reader_get_stream_sample(reader, NULL, stream_number, sample, pts, duration, flags, &stream_number);
+    if (output_number && hr == S_OK)
+        *output_number = stream_number - 1;
+    if (ret_stream_number && (hr == S_OK || stream_number))
+        *ret_stream_number = stream_number;
+
+    LeaveCriticalSection(&reader->cs);
+    return hr;
+}
+
+static HRESULT WINAPI reader_GetOutputCount(IWMSyncReader2 *iface, DWORD *count)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, count %p.\n", reader, count);
+
+    EnterCriticalSection(&reader->cs);
+    *count = reader->stream_count;
+    LeaveCriticalSection(&reader->cs);
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_GetOutputFormat(IWMSyncReader2 *iface,
+        DWORD output, DWORD index, IWMOutputMediaProps **props)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, output %lu, index %lu, props %p.\n", reader, output, index, props);
+
+    return wm_reader_get_output_format(reader, output, index, props);
+}
+
+static HRESULT WINAPI reader_GetOutputFormatCount(IWMSyncReader2 *iface, DWORD output, DWORD *count)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, output %lu, count %p.\n", reader, output, count);
+
+    return wm_reader_get_output_format_count(reader, output, count);
+}
+
+static HRESULT WINAPI reader_GetOutputNumberForStream(IWMSyncReader2 *iface,
+        WORD stream_number, DWORD *output)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, stream_number %u, output %p.\n", reader, stream_number, output);
+
+    *output = stream_number - 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_GetOutputProps(IWMSyncReader2 *iface,
+        DWORD output, IWMOutputMediaProps **props)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, output %lu, props %p.\n", reader, output, props);
+
+    return wm_reader_get_output_props(reader, output, props);
+}
+
+static HRESULT WINAPI reader_GetOutputSetting(IWMSyncReader2 *iface, DWORD output_num, const WCHAR *name,
+        WMT_ATTR_DATATYPE *type, BYTE *value, WORD *length)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%lu %s %p %p %p): stub!\n", This, output_num, debugstr_w(name), type, value, length);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_GetReadStreamSamples(IWMSyncReader2 *iface, WORD stream_number, BOOL *compressed)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    struct wm_stream *stream;
+
+    TRACE("reader %p, stream_number %u, compressed %p.\n", reader, stream_number, compressed);
+
+    EnterCriticalSection(&reader->cs);
+
+    if (!(stream = wm_reader_get_stream_by_stream_number(reader, stream_number)))
+    {
+        LeaveCriticalSection(&reader->cs);
+        return E_INVALIDARG;
+    }
+
+    *compressed = stream->read_compressed;
+
+    LeaveCriticalSection(&reader->cs);
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_GetStreamNumberForOutput(IWMSyncReader2 *iface,
+        DWORD output, WORD *stream_number)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, output %lu, stream_number %p.\n", reader, output, stream_number);
+
+    *stream_number = output + 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_GetStreamSelected(IWMSyncReader2 *iface,
+        WORD stream_number, WMT_STREAM_SELECTION *selection)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, stream_number %u, selection %p.\n", reader, stream_number, selection);
+
+    return wm_reader_get_stream_selection(reader, stream_number, selection);
+}
+
+static HRESULT WINAPI reader_Open(IWMSyncReader2 *iface, const WCHAR *filename)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    LARGE_INTEGER size;
+    HANDLE file;
+    HRESULT hr;
+
+    TRACE("reader %p, filename %s.\n", reader, debugstr_w(filename));
+
+    if ((file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+            OPEN_EXISTING, 0, NULL)) == INVALID_HANDLE_VALUE)
+    {
+        ERR("Failed to open %s, error %lu.\n", debugstr_w(filename), GetLastError());
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    if (!GetFileSizeEx(file, &size))
+    {
+        ERR("Failed to get the size of %s, error %lu.\n", debugstr_w(filename), GetLastError());
+        CloseHandle(file);
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    EnterCriticalSection(&reader->cs);
+
+    if (reader->wg_parser)
+    {
+        LeaveCriticalSection(&reader->cs);
+        WARN("Stream is already open; returning E_UNEXPECTED.\n");
+        CloseHandle(file);
+        return E_UNEXPECTED;
+    }
+
+    reader->file = file;
+
+    if (FAILED(hr = init_stream(reader, size.QuadPart)))
+        reader->file = NULL;
+
+    LeaveCriticalSection(&reader->cs);
+    return hr;
+}
+
+static HRESULT WINAPI reader_OpenStream(IWMSyncReader2 *iface, IStream *stream)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    STATSTG stat;
+    HRESULT hr;
+
+    TRACE("reader %p, stream %p.\n", reader, stream);
+
+    if (FAILED(hr = IStream_Stat(stream, &stat, STATFLAG_NONAME)))
+    {
+        ERR("Failed to stat stream, hr %#lx.\n", hr);
+        return hr;
+    }
+
+    EnterCriticalSection(&reader->cs);
+
+    if (reader->wg_parser)
+    {
+        LeaveCriticalSection(&reader->cs);
+        WARN("Stream is already open; returning E_UNEXPECTED.\n");
+        return E_UNEXPECTED;
+    }
+
+    IStream_AddRef(reader->source_stream = stream);
+    if (FAILED(hr = init_stream(reader, stat.cbSize.QuadPart)))
+    {
+        IStream_Release(stream);
+        reader->source_stream = NULL;
+    }
+
+    LeaveCriticalSection(&reader->cs);
+    return hr;
+}
+
+static HRESULT WINAPI reader_SetOutputProps(IWMSyncReader2 *iface, DWORD output, IWMOutputMediaProps *props)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, output %lu, props %p.\n", reader, output, props);
+
+    return wm_reader_set_output_props(reader, output, props);
+}
+
+static HRESULT WINAPI reader_SetOutputSetting(IWMSyncReader2 *iface, DWORD output,
+        const WCHAR *name, WMT_ATTR_DATATYPE type, const BYTE *value, WORD size)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, output %lu, name %s, type %#x, value %p, size %u.\n",
+            reader, output, debugstr_w(name), type, value, size);
+
+    if (!wcscmp(name, L"VideoSampleDurations"))
+    {
+        FIXME("Ignoring VideoSampleDurations setting.\n");
+        return S_OK;
+    }
+    if (!wcscmp(name, L"EnableDiscreteOutput"))
+    {
+        FIXME("Ignoring EnableDiscreteOutput setting.\n");
+        return S_OK;
+    }
+    if (!wcscmp(name, L"SpeakerConfig"))
+    {
+        FIXME("Ignoring SpeakerConfig setting.\n");
+        return S_OK;
+    }
+    else
+    {
+        FIXME("Unknown setting %s; returning E_NOTIMPL.\n", debugstr_w(name));
+        return E_NOTIMPL;
+    }
+}
+
+static HRESULT WINAPI reader_SetRange(IWMSyncReader2 *iface, QWORD start, LONGLONG duration)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    WORD i;
+
+    TRACE("reader %p, start %I64u, duration %I64d.\n", reader, start, duration);
+
+    EnterCriticalSection(&reader->cs);
+
+    reader->start_time = start;
+
+    wg_parser_stream_seek(reader->streams[0].wg_stream, 1.0, start, start + duration,
+            AM_SEEKING_AbsolutePositioning, duration ? AM_SEEKING_AbsolutePositioning : AM_SEEKING_NoPositioning);
+
+    for (i = 0; i < reader->stream_count; ++i)
+        reader->streams[i].eos = false;
+
+    LeaveCriticalSection(&reader->cs);
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_SetRangeByFrame(IWMSyncReader2 *iface, WORD stream_num, QWORD frame_num,
+        LONGLONG frames)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%d %s %s): stub!\n", This, stream_num, wine_dbgstr_longlong(frame_num), wine_dbgstr_longlong(frames));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_SetReadStreamSamples(IWMSyncReader2 *iface, WORD stream_number, BOOL compressed)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+    struct wm_stream *stream;
+
+    TRACE("reader %p, stream_index %u, compressed %d.\n", reader, stream_number, compressed);
+
+    EnterCriticalSection(&reader->cs);
+
+    if (!(stream = wm_reader_get_stream_by_stream_number(reader, stream_number)))
+    {
+        LeaveCriticalSection(&reader->cs);
+        return E_INVALIDARG;
+    }
+
+    stream->read_compressed = compressed;
+
+    LeaveCriticalSection(&reader->cs);
+    return S_OK;
+}
+
+static HRESULT WINAPI reader_SetStreamsSelected(IWMSyncReader2 *iface,
+        WORD count, WORD *stream_numbers, WMT_STREAM_SELECTION *selections)
+{
+    struct wm_reader *reader = impl_from_IWMSyncReader2(iface);
+
+    TRACE("reader %p, count %u, stream_numbers %p, selections %p.\n",
+            reader, count, stream_numbers, selections);
+
+    return wm_reader_set_streams_selected(reader, count, stream_numbers, selections);
+}
+
+static HRESULT WINAPI reader_SetRangeByTimecode(IWMSyncReader2 *iface, WORD stream_num,
+        WMT_TIMECODE_EXTENSION_DATA *start, WMT_TIMECODE_EXTENSION_DATA *end)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%u %p %p): stub!\n", This, stream_num, start, end);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_SetRangeByFrameEx(IWMSyncReader2 *iface, WORD stream_num, QWORD frame_num,
+        LONGLONG frames_to_read, QWORD *starttime)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%u %s %s %p): stub!\n", This, stream_num, wine_dbgstr_longlong(frame_num),
+          wine_dbgstr_longlong(frames_to_read), starttime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_SetAllocateForOutput(IWMSyncReader2 *iface, DWORD output_num, IWMReaderAllocatorEx *allocator)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%lu %p): stub!\n", This, output_num, allocator);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_GetAllocateForOutput(IWMSyncReader2 *iface, DWORD output_num, IWMReaderAllocatorEx **allocator)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%lu %p): stub!\n", This, output_num, allocator);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_SetAllocateForStream(IWMSyncReader2 *iface, DWORD stream_num, IWMReaderAllocatorEx *allocator)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%lu %p): stub!\n", This, stream_num, allocator);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_GetAllocateForStream(IWMSyncReader2 *iface, DWORD stream_num, IWMReaderAllocatorEx **allocator)
+{
+    struct wm_reader *This = impl_from_IWMSyncReader2(iface);
+    FIXME("(%p)->(%lu %p): stub!\n", This, stream_num, allocator);
+    return E_NOTIMPL;
+}
+
+static const IWMSyncReader2Vtbl reader_vtbl =
+{
+    reader_QueryInterface,
+    reader_AddRef,
+    reader_Release,
+    reader_Open,
+    reader_Close,
+    reader_SetRange,
+    reader_SetRangeByFrame,
+    reader_GetNextSample,
+    reader_SetStreamsSelected,
+    reader_GetStreamSelected,
+    reader_SetReadStreamSamples,
+    reader_GetReadStreamSamples,
+    reader_GetOutputSetting,
+    reader_SetOutputSetting,
+    reader_GetOutputCount,
+    reader_GetOutputProps,
+    reader_SetOutputProps,
+    reader_GetOutputFormatCount,
+    reader_GetOutputFormat,
+    reader_GetOutputNumberForStream,
+    reader_GetStreamNumberForOutput,
+    reader_GetMaxOutputSampleSize,
+    reader_GetMaxStreamSampleSize,
+    reader_OpenStream,
+    reader_SetRangeByTimecode,
+    reader_SetRangeByFrameEx,
+    reader_SetAllocateForOutput,
+    reader_GetAllocateForOutput,
+    reader_SetAllocateForStream,
+    reader_GetAllocateForStream
+};
+
+struct wm_reader *wm_reader_from_sync_reader_inner(IUnknown *iface)
+{
+    return impl_from_IUnknown(iface);
+}
+
+HRESULT WINAPI winegstreamer_create_wm_sync_reader(IUnknown *outer, void **out)
+{
+    struct wm_reader *object;
+
+    TRACE("out %p.\n", out);
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    object->IUnknown_inner.lpVtbl = &unknown_inner_vtbl;
+    object->IWMSyncReader2_iface.lpVtbl = &reader_vtbl;
+    object->IWMHeaderInfo3_iface.lpVtbl = &header_info_vtbl;
+    object->IWMLanguageList_iface.lpVtbl = &language_list_vtbl;
+    object->IWMPacketSize2_iface.lpVtbl = &packet_size_vtbl;
+    object->IWMProfile3_iface.lpVtbl = &profile_vtbl;
+    object->IWMReaderPlaylistBurn_iface.lpVtbl = &playlist_vtbl;
+    object->IWMReaderTimecode_iface.lpVtbl = &timecode_vtbl;
+    object->outer = outer ? outer : &object->IUnknown_inner;
+    object->refcount = 1;
+
+    InitializeCriticalSection(&object->cs);
+    object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": reader.cs");
+
+    TRACE("Created reader %p.\n", object);
+    *out = outer ? (void *)&object->IUnknown_inner : (void *)&object->IWMSyncReader2_iface;
+    return S_OK;
 }

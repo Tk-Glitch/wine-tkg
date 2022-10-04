@@ -2423,7 +2423,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
                 "Content-Length: 10\r\n\r\n0123456789";
             send(c, nocontentmsg, sizeof(nocontentmsg)-1, 0);
         }
-        if (strstr(buffer, "GET /test_no_content"))
+        else if (strstr(buffer, "GET /test_no_content"))
         {
             static const char nocontentmsg[] = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
                 "0123456789";
@@ -7674,8 +7674,8 @@ static const struct notification async_send_request_ex_test2[] =
     { http_send_request_ex,  INTERNET_STATUS_COOKIE_SENT, TRUE, FALSE, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_RESOLVING_NAME, TRUE, FALSE, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_NAME_RESOLVED, TRUE, FALSE, TRUE },
-    { http_send_request_ex,  INTERNET_STATUS_CONNECTING_TO_SERVER, TRUE, TRUE },
-    { http_send_request_ex,  INTERNET_STATUS_CONNECTED_TO_SERVER, TRUE, TRUE },
+    { http_send_request_ex,  INTERNET_STATUS_CONNECTING_TO_SERVER, TRUE },
+    { http_send_request_ex,  INTERNET_STATUS_CONNECTED_TO_SERVER, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_SENDING_REQUEST, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_REQUEST_SENT, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_REQUEST_COMPLETE, TRUE },
@@ -7719,8 +7719,8 @@ static const struct notification async_send_request_ex_chunked_test[] =
     { http_end_request,      INTERNET_STATUS_RECEIVING_RESPONSE, TRUE },
     { http_end_request,      INTERNET_STATUS_RESPONSE_RECEIVED, TRUE },
     { http_end_request,      INTERNET_STATUS_REQUEST_COMPLETE, TRUE },
-    { internet_close_handle, INTERNET_STATUS_CLOSING_CONNECTION },
-    { internet_close_handle, INTERNET_STATUS_CONNECTION_CLOSED },
+    { internet_close_handle, INTERNET_STATUS_CLOSING_CONNECTION, FALSE, FALSE, TRUE },
+    { internet_close_handle, INTERNET_STATUS_CONNECTION_CLOSED, FALSE, FALSE, TRUE },
     { internet_close_handle, INTERNET_STATUS_HANDLE_CLOSING },
     { internet_close_handle, INTERNET_STATUS_HANDLE_CLOSING }
 };
@@ -7770,6 +7770,10 @@ static void test_async_HttpSendRequestEx(const struct notification_data *nd)
     char buffer[32];
 
     trace("Async HttpSendRequestEx test (%s %s)\n", nd->method, nd->host);
+
+    /* Collect all existing persistent connections */
+    ret = InternetSetOptionA(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
+    ok(ret, "InternetSetOption(INTERNET_OPTION_END_BROWSER_SESSION) failed: %lu\n", GetLastError());
 
     InitializeCriticalSection( &notification_cs );
 

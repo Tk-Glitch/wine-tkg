@@ -3423,30 +3423,38 @@ static HRESULT WINAPI HTMLDocument6_get_onstorage(IHTMLDocument6 *iface,
         VARIANT *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument6(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_doc_event(This, EVENTID_STORAGE, p);
 }
 
 static HRESULT WINAPI HTMLDocument6_put_onstorage(IHTMLDocument6 *iface, VARIANT v)
 {
     HTMLDocument *This = impl_from_IHTMLDocument6(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
+
+    return set_doc_event(This, EVENTID_STORAGE, &v);
 }
 
 static HRESULT WINAPI HTMLDocument6_get_onstoragecommit(IHTMLDocument6 *iface,
         VARIANT *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument6(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_doc_event(This, EVENTID_STORAGECOMMIT, p);
 }
 
 static HRESULT WINAPI HTMLDocument6_put_onstoragecommit(IHTMLDocument6 *iface, VARIANT v)
 {
     HTMLDocument *This = impl_from_IHTMLDocument6(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
+
+    return set_doc_event(This, EVENTID_STORAGECOMMIT, &v);
 }
 
 static HRESULT WINAPI HTMLDocument6_getElementById(IHTMLDocument6 *iface,
@@ -5970,6 +5978,10 @@ static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t
         {DISPID_IHTMLDOCUMENT2_LOCATION, HTMLDocumentNode_location_hook},
         {DISPID_UNKNOWN}
     };
+    static const dispex_hook_t document6_ie9_hooks[] = {
+        {DISPID_IHTMLDOCUMENT6_ONSTORAGE},
+        {DISPID_UNKNOWN}
+    };
 
     HTMLDOMNode_init_dispex_info(info, mode);
 
@@ -5984,7 +5996,7 @@ static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t
         dispex_info_add_interface(info, IHTMLDocument3_tid, NULL);
         dispex_info_add_interface(info, IHTMLDocument6_tid, NULL);
     }else {
-        dispex_info_add_interface(info, IHTMLDocument6_tid, NULL);
+        dispex_info_add_interface(info, IHTMLDocument6_tid, mode >= COMPAT_MODE_IE9 ? document6_ie9_hooks : NULL);
         dispex_info_add_interface(info, IHTMLDocument3_tid, NULL);
     }
     dispex_info_add_interface(info, IHTMLDocument2_tid, document2_hooks);

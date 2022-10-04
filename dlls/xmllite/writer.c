@@ -168,6 +168,11 @@ static inline void writer_free(const xmlwriter *writer, void *mem)
     m_free(writer->imalloc, mem);
 }
 
+static BOOL is_empty_string(const WCHAR *str)
+{
+    return !str || !*str;
+}
+
 static struct element *alloc_element(xmlwriter *writer, const WCHAR *prefix, const WCHAR *local)
 {
     struct element *ret;
@@ -176,7 +181,7 @@ static struct element *alloc_element(xmlwriter *writer, const WCHAR *prefix, con
     ret = writer_alloc(writer, sizeof(*ret));
     if (!ret) return ret;
 
-    len = prefix ? lstrlenW(prefix) + 1 /* ':' */ : 0;
+    len = is_empty_string(prefix) ? 0 : lstrlenW(prefix) + 1 /* ':' */;
     len += lstrlenW(local);
 
     ret->qname = writer_alloc(writer, (len + 1)*sizeof(WCHAR));
@@ -188,13 +193,13 @@ static struct element *alloc_element(xmlwriter *writer, const WCHAR *prefix, con
     }
 
     ret->len = len;
-    if (prefix)
+    if (is_empty_string(prefix))
+        ret->qname[0] = 0;
+    else
     {
         lstrcpyW(ret->qname, prefix);
         lstrcatW(ret->qname, L":");
     }
-    else
-        ret->qname[0] = 0;
     lstrcatW(ret->qname, local);
     list_init(&ret->ns);
 
@@ -286,11 +291,6 @@ static struct ns *writer_push_ns(xmlwriter *writer, const WCHAR *prefix, int pre
     }
 
     return ns;
-}
-
-static BOOL is_empty_string(const WCHAR *str)
-{
-    return !str || !*str;
 }
 
 static struct ns *writer_find_ns_current(const xmlwriter *writer, const WCHAR *prefix, const WCHAR *uri)
@@ -845,14 +845,54 @@ static HRESULT WINAPI xmlwriter_SetProperty(IXmlWriter *iface, UINT property, LO
     return S_OK;
 }
 
-static HRESULT WINAPI xmlwriter_WriteAttributes(IXmlWriter *iface, IXmlReader *pReader,
-                                  BOOL fWriteDefaultAttributes)
+static HRESULT writer_write_attribute(IXmlWriter *writer, IXmlReader *reader, BOOL write_default_attributes)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
+    const WCHAR *prefix, *local, *uri, *value;
+    HRESULT hr;
 
-    FIXME("%p %p %d\n", This, pReader, fWriteDefaultAttributes);
+    if (IXmlReader_IsDefault(reader) && !write_default_attributes)
+        return S_OK;
 
-    return E_NOTIMPL;
+    if (FAILED(hr = IXmlReader_GetPrefix(reader, &prefix, NULL))) return hr;
+    if (FAILED(hr = IXmlReader_GetLocalName(reader, &local, NULL))) return hr;
+    if (FAILED(hr = IXmlReader_GetNamespaceUri(reader, &uri, NULL))) return hr;
+    if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+    return IXmlWriter_WriteAttributeString(writer, prefix, local, uri, value);
+}
+
+static HRESULT WINAPI xmlwriter_WriteAttributes(IXmlWriter *iface, IXmlReader *reader, BOOL write_default_attributes)
+{
+    XmlNodeType node_type;
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %p, %d.\n", iface, reader, write_default_attributes);
+
+    if (FAILED(hr = IXmlReader_GetNodeType(reader, &node_type))) return hr;
+
+    switch (node_type)
+    {
+        case XmlNodeType_Element:
+        case XmlNodeType_XmlDeclaration:
+        case XmlNodeType_Attribute:
+            if (node_type != XmlNodeType_Attribute)
+            {
+                if (FAILED(hr = IXmlReader_MoveToFirstAttribute(reader))) return hr;
+                if (hr == S_FALSE) return S_OK;
+            }
+            if (FAILED(hr = writer_write_attribute(iface, reader, write_default_attributes))) return hr;
+            while (IXmlReader_MoveToNextAttribute(reader) == S_OK)
+            {
+                if (FAILED(hr = writer_write_attribute(iface, reader, write_default_attributes))) break;
+            }
+            if (node_type != XmlNodeType_Attribute && SUCCEEDED(hr))
+                hr = IXmlReader_MoveToElement(reader);
+            break;
+        default:
+            WARN("Unexpected node type %d.\n", node_type);
+            return E_UNEXPECTED;
+    }
+
+    return hr;
 }
 
 static void write_output_attribute(xmlwriter *writer, const WCHAR *prefix, int prefix_len,
@@ -872,21 +912,21 @@ static BOOL is_valid_xml_space_value(const WCHAR *value)
 static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR prefix,
     LPCWSTR local, LPCWSTR uri, LPCWSTR value)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
+    xmlwriter *writer = impl_from_IXmlWriter(iface);
     BOOL is_xmlns_prefix, is_xmlns_local;
     int prefix_len, local_len;
     struct ns *ns;
     HRESULT hr;
 
-    TRACE("%p %s %s %s %s\n", This, debugstr_w(prefix), debugstr_w(local), debugstr_w(uri), debugstr_w(value));
+    TRACE("%p, %s, %s, %s, %s.\n", iface, debugstr_w(prefix), debugstr_w(local), debugstr_w(uri), debugstr_w(value));
 
-    switch (This->state)
+    switch (writer->state)
     {
     case XmlWriterState_Initial:
         return E_UNEXPECTED;
     case XmlWriterState_Ready:
     case XmlWriterState_DocClosed:
-        This->state = XmlWriterState_DocClosed;
+        writer->state = XmlWriterState_DocClosed;
         return WR_E_INVALIDACTION;
     case XmlWriterState_InvalidEncoding:
         return MX_E_ENCODING;
@@ -899,7 +939,7 @@ static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR 
     if (is_xmlns_prefix && is_empty_string(uri) && is_empty_string(local))
         return WR_E_NSPREFIXDECLARED;
 
-    if (!local)
+    if (is_empty_string(local))
         return E_INVALIDARG;
 
     /* Validate prefix and local name */
@@ -914,7 +954,7 @@ static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR 
     /* Trivial case, no prefix. */
     if (prefix_len == 0 && is_empty_string(uri))
     {
-        write_output_attribute(This, prefix, prefix_len, local, local_len, value);
+        write_output_attribute(writer, prefix, prefix_len, local, local_len, value);
         return S_OK;
     }
 
@@ -929,7 +969,7 @@ static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR 
         if (!is_empty_string(uri))
             return WR_E_XMLPREFIXDECLARATION;
 
-        write_output_attribute(This, prefix, prefix_len, local, local_len, value);
+        write_output_attribute(writer, prefix, prefix_len, local, local_len, value);
 
         return S_OK;
     }
@@ -940,11 +980,11 @@ static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR 
             return WR_E_XMLNSPREFIXDECLARATION;
 
         /* Look for exact match defined in current element, and write it out. */
-        if (!(ns = writer_find_ns_current(This, prefix, value)))
-            ns = writer_push_ns(This, local, local_len, value);
+        if (!(ns = writer_find_ns_current(writer, prefix, value)))
+            ns = writer_push_ns(writer, local, local_len, value);
         ns->emitted = TRUE;
 
-        write_output_attribute(This, L"xmlns", 5, local, local_len, value);
+        write_output_attribute(writer, L"xmlns", 5, local, local_len, value);
 
         return S_OK;
     }
@@ -952,11 +992,11 @@ static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR 
     /* Ignore prefix if URI wasn't specified. */
     if (is_xmlns_local && is_empty_string(uri))
     {
-        write_output_attribute(This, NULL, 0, L"xmlns", 5, value);
+        write_output_attribute(writer, NULL, 0, L"xmlns", 5, value);
         return S_OK;
     }
 
-    if (!(ns = writer_find_ns(This, prefix, uri)))
+    if (!(ns = writer_find_ns(writer, prefix, uri)))
     {
         if (is_empty_string(prefix) && !is_empty_string(uri))
         {
@@ -964,13 +1004,13 @@ static HRESULT WINAPI xmlwriter_WriteAttributeString(IXmlWriter *iface, LPCWSTR 
             return E_NOTIMPL;
         }
         if (!is_empty_string(uri))
-            ns = writer_push_ns(This, prefix, prefix_len, uri);
+            ns = writer_push_ns(writer, prefix, prefix_len, uri);
     }
 
     if (ns)
-        write_output_attribute(This, ns->prefix, ns->prefix_len, local, local_len, value);
+        write_output_attribute(writer, ns->prefix, ns->prefix_len, local, local_len, value);
     else
-        write_output_attribute(This, prefix, prefix_len, local, local_len, value);
+        write_output_attribute(writer, prefix, prefix_len, local, local_len, value);
 
     return S_OK;
 }
@@ -1462,24 +1502,121 @@ static HRESULT WINAPI xmlwriter_WriteNmToken(IXmlWriter *iface, LPCWSTR pwszNmTo
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI xmlwriter_WriteNode(IXmlWriter *iface, IXmlReader *pReader,
-                            BOOL fWriteDefaultAttributes)
+static HRESULT writer_write_node(IXmlWriter *writer, IXmlReader *reader, BOOL shallow, BOOL write_default_attributes)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
+    XmlStandalone standalone = XmlStandalone_Omit;
+    const WCHAR *name, *value, *prefix, *uri;
+    unsigned int start_depth = 0, depth;
+    XmlNodeType node_type;
+    HRESULT hr;
 
-    FIXME("%p %p %d\n", This, pReader, fWriteDefaultAttributes);
+    if (FAILED(hr = IXmlReader_GetNodeType(reader, &node_type))) return hr;
 
-    return E_NOTIMPL;
+    switch (node_type)
+    {
+        case XmlNodeType_None:
+            if (shallow) return S_OK;
+            while ((hr = IXmlReader_Read(reader, NULL)) == S_OK)
+            {
+                if (FAILED(hr = writer_write_node(writer, reader, FALSE, write_default_attributes))) return hr;
+            }
+            break;
+        case XmlNodeType_Element:
+            if (FAILED(hr = IXmlReader_GetPrefix(reader, &prefix, NULL))) return hr;
+            if (FAILED(hr = IXmlReader_GetLocalName(reader, &name, NULL))) return hr;
+            if (FAILED(hr = IXmlReader_GetNamespaceUri(reader, &uri, NULL))) return hr;
+            if (FAILED(hr = IXmlWriter_WriteStartElement(writer, prefix, name, uri))) return hr;
+            if (FAILED(hr = IXmlWriter_WriteAttributes(writer, reader, write_default_attributes))) return hr;
+            if (IXmlReader_IsEmptyElement(reader))
+            {
+                hr = IXmlWriter_WriteEndElement(writer);
+            }
+            else
+            {
+                if (shallow) return S_OK;
+                if (FAILED(hr = IXmlReader_MoveToElement(reader))) return hr;
+                if (FAILED(hr = IXmlReader_GetDepth(reader, &start_depth))) return hr;
+                while ((hr = IXmlReader_Read(reader, &node_type)) == S_OK)
+                {
+                    if (FAILED(hr = writer_write_node(writer, reader, FALSE, write_default_attributes))) return hr;
+                    if (FAILED(hr = IXmlReader_MoveToElement(reader))) return hr;
+
+                    depth = 0;
+                    if (FAILED(hr = IXmlReader_GetDepth(reader, &depth))) return hr;
+                    if (node_type == XmlNodeType_EndElement && (start_depth == depth - 1)) break;
+                }
+            }
+            break;
+        case XmlNodeType_Attribute:
+            break;
+        case XmlNodeType_Text:
+            if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+            hr = IXmlWriter_WriteRaw(writer, value);
+            break;
+        case XmlNodeType_CDATA:
+            if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+            hr = IXmlWriter_WriteCData(writer, value);
+            break;
+        case XmlNodeType_ProcessingInstruction:
+            if (FAILED(hr = IXmlReader_GetLocalName(reader, &name, NULL))) return hr;
+            if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+            hr = IXmlWriter_WriteProcessingInstruction(writer, name, value);
+            break;
+        case XmlNodeType_Comment:
+            if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+            hr = IXmlWriter_WriteComment(writer, value);
+            break;
+        case XmlNodeType_Whitespace:
+            if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+            hr = IXmlWriter_WriteWhitespace(writer, value);
+            break;
+        case XmlNodeType_EndElement:
+            hr = IXmlWriter_WriteFullEndElement(writer);
+            break;
+        case XmlNodeType_XmlDeclaration:
+            while ((hr = IXmlReader_MoveToNextAttribute(reader)) == S_OK)
+            {
+                if (FAILED(hr = IXmlReader_GetLocalName(reader, &name, NULL))) return hr;
+                if (!wcscmp(name, L"standalone"))
+                {
+                    if (FAILED(hr = IXmlReader_GetValue(reader, &value, NULL))) return hr;
+                    standalone = !wcscmp(value, L"yes") ? XmlStandalone_Yes : XmlStandalone_No;
+                }
+            }
+            if (SUCCEEDED(hr))
+                hr = IXmlWriter_WriteStartDocument(writer, standalone);
+            break;
+        default:
+            WARN("Unknown node type %d.\n", node_type);
+            return E_UNEXPECTED;
+    }
+
+    return hr;
 }
 
-static HRESULT WINAPI xmlwriter_WriteNodeShallow(IXmlWriter *iface, IXmlReader *pReader,
-                                   BOOL fWriteDefaultAttributes)
+static HRESULT WINAPI xmlwriter_WriteNode(IXmlWriter *iface, IXmlReader *reader, BOOL write_default_attributes)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
+    HRESULT hr;
 
-    FIXME("%p %p %d\n", This, pReader, fWriteDefaultAttributes);
+    TRACE("%p, %p, %d.\n", iface, reader, write_default_attributes);
 
-    return E_NOTIMPL;
+    if (!reader)
+        return E_INVALIDARG;
+
+    if (SUCCEEDED(hr = writer_write_node(iface, reader, FALSE, write_default_attributes)))
+        hr = IXmlReader_Read(reader, NULL);
+
+    return hr;
+}
+
+static HRESULT WINAPI xmlwriter_WriteNodeShallow(IXmlWriter *iface, IXmlReader *reader, BOOL write_default_attributes)
+{
+    TRACE("%p, %p, %d.\n", iface, reader, write_default_attributes);
+
+    if (!reader)
+        return E_INVALIDARG;
+
+    return writer_write_node(iface, reader, TRUE, write_default_attributes);
 }
 
 static HRESULT WINAPI xmlwriter_WriteProcessingInstruction(IXmlWriter *iface, LPCWSTR name,
@@ -1500,6 +1637,8 @@ static HRESULT WINAPI xmlwriter_WriteProcessingInstruction(IXmlWriter *iface, LP
             return WR_E_INVALIDACTION;
         break;
     case XmlWriterState_ElemStarted:
+        writer_close_starttag(This);
+        break;
     case XmlWriterState_DocClosed:
         return WR_E_INVALIDACTION;
     default:
@@ -1563,6 +1702,9 @@ static HRESULT WINAPI xmlwriter_WriteRaw(IXmlWriter *iface, LPCWSTR data)
         break;
     case XmlWriterState_InvalidEncoding:
         return MX_E_ENCODING;
+    case XmlWriterState_ElemStarted:
+        writer_close_starttag(This);
+        break;
     default:
         This->state = XmlWriterState_DocClosed;
         return WR_E_INVALIDACTION;
@@ -1676,7 +1818,7 @@ static HRESULT WINAPI xmlwriter_WriteStartElement(IXmlWriter *iface, LPCWSTR pre
 
     writer_push_element(This, element);
 
-    if (!ns && uri)
+    if (!ns && !is_empty_string(uri))
         writer_push_ns(This, prefix, prefix_len, uri);
 
     write_output_buffer_char(This->output, '<');
@@ -1752,13 +1894,36 @@ static HRESULT WINAPI xmlwriter_WriteSurrogateCharEntity(IXmlWriter *iface, WCHA
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI xmlwriter_WriteWhitespace(IXmlWriter *iface, LPCWSTR pwszWhitespace)
+static HRESULT WINAPI xmlwriter_WriteWhitespace(IXmlWriter *iface, LPCWSTR text)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
+    xmlwriter *writer = impl_from_IXmlWriter(iface);
+    size_t length = 0;
 
-    FIXME("%p %s\n", This, wine_dbgstr_w(pwszWhitespace));
+    TRACE("%p, %s.\n", iface, wine_dbgstr_w(text));
 
-    return E_NOTIMPL;
+    switch (writer->state)
+    {
+    case XmlWriterState_Initial:
+        return E_UNEXPECTED;
+    case XmlWriterState_ElemStarted:
+        writer_close_starttag(writer);
+        break;
+    case XmlWriterState_InvalidEncoding:
+        return MX_E_ENCODING;
+    case XmlWriterState_Ready:
+        break;
+    default:
+        return WR_E_INVALIDACTION;
+    }
+
+    while (text[length])
+    {
+        if (!is_wchar_space(text[length])) return WR_E_NONWHITESPACE;
+        length++;
+    }
+
+    write_output_buffer(writer->output, text, length);
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlwriter_Flush(IXmlWriter *iface)

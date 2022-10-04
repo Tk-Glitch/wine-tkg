@@ -1116,7 +1116,7 @@ done:
 /*************************************************************************
  *	CreateSymbolicLinkW   (kernelbase.@)
  */
-BOOLEAN WINAPI DECLSPEC_HOTPATCH CreateSymbolicLinkW( const WCHAR *link, const WCHAR *target, DWORD flags )
+BOOLEAN WINAPI /* DECLSPEC_HOTPATCH */ CreateSymbolicLinkW( LPCWSTR link, LPCWSTR target, DWORD flags )
 {
     static INT struct_size = offsetof(REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer.PathBuffer[0]);
     static INT header_size = offsetof(REPARSE_DATA_BUFFER, GenericReparseBuffer);
@@ -1132,7 +1132,7 @@ BOOLEAN WINAPI DECLSPEC_HOTPATCH CreateSymbolicLinkW( const WCHAR *link, const W
     HANDLE hlink;
     DWORD dwret;
 
-    TRACE( "(%s %s %#lx)\n", debugstr_w(link), debugstr_w(target), flags );
+    TRACE( "(%s %s %ld): stub\n", debugstr_w(link), debugstr_w(target), flags );
 
     is_relative = (RtlDetermineDosPathNameType_U( target ) == RELATIVE_PATH);
     is_dir = (flags & SYMBOLIC_LINK_FLAG_DIRECTORY);
@@ -3594,7 +3594,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH ReOpenFile( HANDLE handle, DWORD access, DWORD s
 static void WINAPI invoke_completion( void *context, IO_STATUS_BLOCK *io, ULONG res )
 {
     LPOVERLAPPED_COMPLETION_ROUTINE completion = context;
-    completion( io->u.Status, io->Information, (LPOVERLAPPED)io );
+    completion( RtlNtStatusToDosError( io->u.Status ), io->Information, (LPOVERLAPPED)io );
 }
 
 /****************************************************************************

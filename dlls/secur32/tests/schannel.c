@@ -1506,7 +1506,7 @@ static void test_communication(void)
             ISC_REQ_USE_SUPPLIED_CREDS, 0, 0, &buffers[1], 0, &context2, &buffers[0], &attrs, NULL);
         buffers[1].pBuffers[0].cbBuffer = buf_size;
     }
-    todo_wine ok (status == SEC_E_OK, "got %08lx\n", status);
+    ok (status == SEC_E_CERT_EXPIRED, "got %08lx\n", status);
 
     buf = &buffers[0].pBuffers[0];
     buf->cbBuffer = buf_size;

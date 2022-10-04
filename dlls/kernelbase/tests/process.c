@@ -30,12 +30,17 @@
 
 #include "wine/test.h"
 
+static NTSTATUS (WINAPI *pNtQueryObject)(HANDLE,OBJECT_INFORMATION_CLASS,PVOID,ULONG,PULONG);
+
 static BOOL (WINAPI *pCompareObjectHandles)(HANDLE, HANDLE);
 static LPVOID (WINAPI *pMapViewOfFile3)(HANDLE, HANDLE, PVOID, ULONG64 offset, SIZE_T size,
         ULONG, ULONG, MEM_EXTENDED_PARAMETER *, ULONG);
 static LPVOID (WINAPI *pVirtualAlloc2)(HANDLE, void *, SIZE_T, DWORD, DWORD, MEM_EXTENDED_PARAMETER *, ULONG);
 static LPVOID (WINAPI *pVirtualAlloc2FromApp)(HANDLE, void *, SIZE_T, DWORD, DWORD, MEM_EXTENDED_PARAMETER *, ULONG);
 static PVOID (WINAPI *pVirtualAllocFromApp)(PVOID, SIZE_T, DWORD, DWORD);
+static HANDLE (WINAPI *pOpenFileMappingFromApp)( ULONG, BOOL, LPCWSTR);
+static HANDLE (WINAPI *pCreateFileMappingFromApp)(HANDLE, PSECURITY_ATTRIBUTES, ULONG, ULONG64, PCWSTR);
+static LPVOID (WINAPI *pMapViewOfFileFromApp)(HANDLE, ULONG, ULONG64, SIZE_T);
 
 static void test_CompareObjectHandles(void)
 {
@@ -324,16 +329,115 @@ static void test_VirtualAlloc2FromApp(void)
     }
 }
 
+static void test_OpenFileMappingFromApp(void)
+{
+    OBJECT_BASIC_INFORMATION info;
+    HANDLE file, mapping;
+    NTSTATUS status;
+    ULONG length;
+
+    if (!pOpenFileMappingFromApp)
+    {
+        win_skip("OpenFileMappingFromApp is not available.\n");
+        return;
+    }
+
+    file = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_EXECUTE_READ, 0, 4090, "foo");
+    ok(!!file, "Failed to create a mapping.\n");
+
+    mapping = pOpenFileMappingFromApp(FILE_MAP_READ, FALSE, L"foo");
+    ok(!!mapping, "Failed to open a mapping.\n");
+    status = pNtQueryObject(mapping, ObjectBasicInformation, &info, sizeof(info), &length);
+    ok(!status, "Failed to get object information.\n");
+    ok(info.GrantedAccess == SECTION_MAP_READ, "Unexpected access mask %#lx.\n", info.GrantedAccess);
+    CloseHandle(mapping);
+
+    mapping = pOpenFileMappingFromApp(FILE_MAP_EXECUTE, FALSE, L"foo");
+    ok(!!mapping, "Failed to open a mapping.\n");
+    status = pNtQueryObject(mapping, ObjectBasicInformation, &info, sizeof(info), &length);
+    ok(!status, "Failed to get object information.\n");
+    todo_wine
+    ok(info.GrantedAccess == SECTION_MAP_EXECUTE, "Unexpected access mask %#lx.\n", info.GrantedAccess);
+    CloseHandle(mapping);
+
+    CloseHandle(file);
+}
+
+static void test_CreateFileMappingFromApp(void)
+{
+    OBJECT_BASIC_INFORMATION info;
+    NTSTATUS status;
+    ULONG length;
+    HANDLE file;
+
+    if (!pCreateFileMappingFromApp)
+    {
+        win_skip("CreateFileMappingFromApp is not available.\n");
+        return;
+    }
+
+    file = pCreateFileMappingFromApp(INVALID_HANDLE_VALUE, NULL, PAGE_EXECUTE_READWRITE, 1024, L"foo");
+    ok(!!file || broken(!file) /* Win8 */, "Failed to create a mapping, error %lu.\n", GetLastError());
+    if (!file) return;
+
+    status = pNtQueryObject(file, ObjectBasicInformation, &info, sizeof(info), &length);
+    ok(!status, "Failed to get object information.\n");
+    ok(info.GrantedAccess & SECTION_MAP_EXECUTE, "Unexpected access mask %#lx.\n", info.GrantedAccess);
+
+    CloseHandle(file);
+}
+
+static void test_MapViewOfFileFromApp(void)
+{
+    static const char testfile[] = "testfile.xxx";
+    HANDLE file, mapping;
+    void *ptr;
+    BOOL ret;
+
+    if (!pMapViewOfFileFromApp)
+    {
+        win_skip("MapViewOfFileFromApp() is not supported.\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    file = CreateFileA( testfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "Failed to create a file, error %lu.\n", GetLastError() );
+    SetFilePointer( file, 12288, NULL, FILE_BEGIN );
+    SetEndOfFile( file );
+
+    SetLastError(0xdeadbeef);
+    mapping = CreateFileMappingA( file, NULL, PAGE_READWRITE, 0, 4096, NULL );
+    ok( mapping != 0, "Failed to create file mapping, error %lu.\n", GetLastError() );
+
+    SetLastError(0xdeadbeef);
+    ptr = pMapViewOfFileFromApp( mapping, PAGE_EXECUTE_READWRITE, 0, 4096 );
+    ok( ptr != NULL, "Mapping failed, error %lu.\n", GetLastError() );
+    UnmapViewOfFile( ptr );
+
+    CloseHandle( mapping );
+    CloseHandle( file );
+    ret = DeleteFileA( testfile );
+    ok(ret, "Failed to delete a test file.\n");
+}
+
 static void init_funcs(void)
 {
     HMODULE hmod = GetModuleHandleA("kernelbase.dll");
 
 #define X(f) { p##f = (void*)GetProcAddress(hmod, #f); }
     X(CompareObjectHandles);
+    X(CreateFileMappingFromApp);
     X(MapViewOfFile3);
+    X(MapViewOfFileFromApp);
+    X(OpenFileMappingFromApp);
     X(VirtualAlloc2);
     X(VirtualAlloc2FromApp);
     X(VirtualAllocFromApp);
+
+    hmod = GetModuleHandleA("ntdll.dll");
+
+    X(NtQueryObject);
 #undef X
 }
 
@@ -346,4 +450,7 @@ START_TEST(process)
     test_VirtualAlloc2();
     test_VirtualAllocFromApp();
     test_VirtualAlloc2FromApp();
+    test_OpenFileMappingFromApp();
+    test_CreateFileMappingFromApp();
+    test_MapViewOfFileFromApp();
 }

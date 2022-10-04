@@ -3372,11 +3372,38 @@ VOID WINAPI KeSetImportanceDpc(PRKDPC dpc, KDPC_IMPORTANCE importance)
 }
 
 /***********************************************************************
+ *          KeSetTargetProcessorDpcEx   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI KeSetTargetProcessorDpcEx(PRKDPC dpc, PPROCESSOR_NUMBER process_number)
+{
+    FIXME("%p, %p stub\n", dpc, process_number);
+}
+
+/***********************************************************************
  *          KeSetTargetProcessorDpc   (NTOSKRNL.EXE.@)
  */
 VOID WINAPI KeSetTargetProcessorDpc(PRKDPC dpc, CCHAR number)
 {
     FIXME("%p, %d stub\n", dpc, number);
+}
+
+/***********************************************************************
+ *          KeGetCurrentProcessorNumberEx   (NTOSKRNL.EXE.@)
+ */
+ULONG WINAPI KeGetCurrentProcessorNumberEx(PPROCESSOR_NUMBER process_number)
+{
+    ULONG cur_number = NtGetCurrentProcessorNumber();
+
+    FIXME("%p semi-stub\n", process_number);
+
+    if (process_number)
+    {
+        process_number->Group = 0;
+        process_number->Reserved = 0;
+        process_number->Number = cur_number;
+    }
+
+    return cur_number;
 }
 
 /***********************************************************************

@@ -95,8 +95,7 @@ struct cv_module_snarf
     const struct codeview_type_parse*           ipi_ctp;
     const struct CV_DebugSSubsectionHeader_t*   dbgsubsect;
     unsigned                                    dbgsubsect_size;
-    const char*                                 strimage;
-    unsigned                                    strsize;
+    const PDB_STRING_TABLE*                     strimage;
 };
 
 /*========================================================================
@@ -1633,6 +1632,8 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
     }
 }
 
+static const char* pdb_get_string_table_entry(const PDB_STRING_TABLE* table, unsigned offset);
+
 static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const struct cv_module_snarf* cvmod)
 {
     unsigned    i;
@@ -1684,8 +1685,7 @@ static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const 
                     WARN("Corrupt PDB file: offset in CHKSMS subsection is invalid\n");
                     break;
                 }
-                source = source_new(msc_dbg->module, NULL,
-                                    (chksms->strOffset < cvmod->strsize) ? cvmod->strimage + chksms->strOffset : "<<stroutofbounds>>");
+                source = source_new(msc_dbg->module, NULL, pdb_get_string_table_entry(cvmod->strimage, chksms->strOffset));
                 lineblk_base = codeview_get_address(msc_dbg, lines_hdr->segCon, lines_hdr->offCon);
                 lines = CV_RECORD_AFTER(files_hdr);
                 for (i = 0; i < files_hdr->nLines; i++)
@@ -2013,8 +2013,7 @@ static BOOL cv_dbgsubsect_find_inlinee(const struct msc_debug_info* msc_dbg,
                 {
                     chksms = CV_RECORD_GAP(hdr_files, inlsrc->fileId);
                     if (!CV_IS_INSIDE(chksms, CV_RECORD_GAP(hdr_files, hdr_files->cbLen))) return FALSE;
-                    *srcfile = source_new(msc_dbg->module, NULL,
-                          (chksms->strOffset < cvmod->strsize) ? cvmod->strimage + chksms->strOffset : "<<str-out-of-bounds>>");
+                    *srcfile = source_new(msc_dbg->module, NULL, pdb_get_string_table_entry(cvmod->strimage, chksms->strOffset));
                     *srcline = inlsrc->sourceLineNum;
                     return TRUE;
                 }
@@ -2029,8 +2028,7 @@ static BOOL cv_dbgsubsect_find_inlinee(const struct msc_debug_info* msc_dbg,
                 {
                     chksms = CV_RECORD_GAP(hdr_files, inlsrcex->fileId);
                     if (!CV_IS_INSIDE(chksms, CV_RECORD_GAP(hdr_files, hdr_files->cbLen))) return FALSE;
-                    *srcfile = source_new(msc_dbg->module, NULL,
-                          (chksms->strOffset < cvmod->strsize) ? cvmod->strimage + chksms->strOffset : "<<str-out-of-bounds>>");
+                    *srcfile = source_new(msc_dbg->module, NULL, pdb_get_string_table_entry(cvmod->strimage, chksms->strOffset));
                     *srcline = inlsrcex->sourceLineNum;
                     return TRUE;
                 }
@@ -2045,6 +2043,18 @@ static BOOL cv_dbgsubsect_find_inlinee(const struct msc_debug_info* msc_dbg,
     return FALSE;
 }
 
+static inline void inline_site_update_last_range(struct symt_inlinesite* inlined, ULONG_PTR hi)
+{
+    unsigned num = inlined->vranges.num_elts;
+    if (num)
+    {
+        struct addr_range* range = vector_at(&inlined->vranges, num - 1);
+        /* only change range if it has no span (code start without code end) */
+        if (range->low == range->high)
+            range->high = hi;
+    }
+}
+
 static struct symt_inlinesite* codeview_create_inline_site(const struct msc_debug_info* msc_dbg,
                                                            const struct cv_module_snarf* cvmod,
                                                            struct symt_function* top_func,
@@ -2055,11 +2065,10 @@ static struct symt_inlinesite* codeview_create_inline_site(const struct msc_debu
 {
     const struct CV_DebugSSubsectionHeader_t* hdr_files = NULL;
     const union codeview_type* cvt;
-    DWORD64 addr;
     struct symt_inlinesite* inlined;
     struct cv_binannot cvba;
     BOOL srcok, found = FALSE;
-    unsigned first, offset, length, line, srcfile;
+    unsigned offset, line, srcfile;
     const struct CV_Checksum_t* chksms;
 
     if (!cvmod->ipi_ctp || !(cvt = codeview_jump_to_type(cvmod->ipi_ctp, inlinee)))
@@ -2068,7 +2077,6 @@ static struct symt_inlinesite* codeview_create_inline_site(const struct msc_debu
         return NULL;
     }
 
-    addr = top_func->address;
     /* grasp first code offset in binary annotation to compute inline site start address */
     cvba.annot = annot;
     cvba.last_annot = last_annot;
@@ -2077,19 +2085,16 @@ static struct symt_inlinesite* codeview_create_inline_site(const struct msc_debu
             cvba.opcode == BA_OP_ChangeCodeOffset ||
             cvba.opcode == BA_OP_ChangeCodeOffsetAndLineOffset)
         {
-            addr += first = cvba.arg1;
-            length = 0;
+            offset = cvba.arg1;
             found = TRUE;
             break;
         }
         else if (cvba.opcode == BA_OP_ChangeCodeLengthAndCodeOffset)
         {
-            addr += first = cvba.arg2;
-            length = cvba.arg1;
+            offset = cvba.arg2;
             found = TRUE;
             break;
         }
-    offset = first;
 
     if (!found)
     {
@@ -2101,13 +2106,13 @@ static struct symt_inlinesite* codeview_create_inline_site(const struct msc_debu
     {
     case LF_FUNC_ID:
         inlined = symt_new_inlinesite(msc_dbg->module, top_func, container,
-                                      cvt->func_id_v3.name, addr,
+                                      cvt->func_id_v3.name, top_func->address + offset,
                                       codeview_get_type(cvt->func_id_v3.type, FALSE));
         break;
     case LF_MFUNC_ID:
         /* FIXME we just declare a function, not a method */
         inlined = symt_new_inlinesite(msc_dbg->module, top_func, container,
-                                      cvt->mfunc_id_v3.name, addr,
+                                      cvt->mfunc_id_v3.name, top_func->address + offset,
                                       codeview_get_type(cvt->mfunc_id_v3.type, FALSE));
         break;
     default:
@@ -2125,56 +2130,71 @@ static struct symt_inlinesite* codeview_create_inline_site(const struct msc_debu
     if (!hdr_files) return FALSE;
     srcok = cv_dbgsubsect_find_inlinee(msc_dbg, inlinee, cvmod, hdr_files, &srcfile, &line);
 
-    if (srcok)
-        symt_add_func_line(msc_dbg->module, &inlined->func, srcfile, line, top_func->address + offset);
-    else
+    if (!srcok)
         srcfile = line = 0;
-    for (;;)
+
+    /* rescan all annotations and store ranges & line information */
+    offset = 0;
+    cvba.annot = annot;
+    cvba.last_annot = last_annot;
+
+    while (codeview_advance_binannot(&cvba))
     {
-        if (!codeview_advance_binannot(&cvba)) break;
         switch (cvba.opcode)
         {
         case BA_OP_CodeOffset:
-            first = offset = cvba.arg1;
-            length = 1;
+            offset = cvba.arg1;
             break;
         case BA_OP_ChangeCodeOffset:
             offset += cvba.arg1;
-            length = 1;
+            inline_site_update_last_range(inlined, top_func->address + offset);
             if (srcok)
                 symt_add_func_line(msc_dbg->module, &inlined->func, srcfile, line, top_func->address + offset);
+            symt_add_inlinesite_range(msc_dbg->module, inlined, top_func->address + offset, top_func->address + offset);
             break;
         case BA_OP_ChangeCodeLength:
-            length = cvba.arg1;
+            /* this op doesn't seem widely used... */
+            if (inlined->vranges.num_elts)
+            {
+                struct addr_range* range = vector_at(&inlined->vranges, inlined->vranges.num_elts - 1);
+                inline_site_update_last_range(inlined, range->low + cvba.arg1);
+            }
             break;
         case BA_OP_ChangeFile:
             chksms = CV_RECORD_GAP(hdr_files, cvba.arg1);
             if (CV_IS_INSIDE(chksms, CV_RECORD_GAP(hdr_files, hdr_files->cbLen)))
-                srcfile = source_new(msc_dbg->module, NULL,
-                                     (chksms->strOffset < cvmod->strsize) ? cvmod->strimage + chksms->strOffset : "<<str-out-of-bounds>>");
+                srcfile = source_new(msc_dbg->module, NULL, pdb_get_string_table_entry(cvmod->strimage, chksms->strOffset));
             break;
         case BA_OP_ChangeLineOffset:
             line += binannot_getsigned(cvba.arg1);
             break;
         case BA_OP_ChangeCodeOffsetAndLineOffset:
-            if (srcok)
-                symt_add_func_line(msc_dbg->module, &inlined->func, srcfile, line, top_func->address + offset);
             line += binannot_getsigned(cvba.arg2);
             offset += cvba.arg1;
-            length = 1;
+            inline_site_update_last_range(inlined, top_func->address + offset);
+            if (srcok)
+                symt_add_func_line(msc_dbg->module, &inlined->func, srcfile, line, top_func->address + offset);
+            symt_add_inlinesite_range(msc_dbg->module, inlined, top_func->address + offset, top_func->address + offset);
             break;
         case BA_OP_ChangeCodeLengthAndCodeOffset:
             offset += cvba.arg2;
-            length = cvba.arg1;
+            inline_site_update_last_range(inlined, top_func->address + offset);
             if (srcok)
                 symt_add_func_line(msc_dbg->module, &inlined->func, srcfile, line, top_func->address + offset);
+            symt_add_inlinesite_range(msc_dbg->module, inlined, top_func->address + offset, top_func->address + offset + cvba.arg1);
             break;
         default:
             WARN("Unsupported op %d\n", cvba.opcode);
             break;
         }
     }
-    symt_add_inlinesite_range(msc_dbg->module, inlined, top_func->address + first, top_func->address + offset + length);
+    if (inlined->vranges.num_elts)
+    {
+        struct addr_range* range = vector_at(&inlined->vranges, inlined->vranges.num_elts - 1);
+        if (range->low == range->high) WARN("pending empty range at end of %s inside %s\n",
+                                             inlined->func.hash_elt.name,
+                                             top_func->hash_elt.name);
+    }
     return inlined;
 }
 
@@ -3085,20 +3105,26 @@ static unsigned pdb_get_stream_by_name(const struct pdb_file_info* pdb_file, con
     return -1;
 }
 
-static void* pdb_read_strings(const struct pdb_file_info* pdb_file)
+static PDB_STRING_TABLE* pdb_read_strings(const struct pdb_file_info* pdb_file)
 {
     unsigned idx;
-    void *ret;
+    PDB_STRING_TABLE *ret;
 
     idx = pdb_get_stream_by_name(pdb_file, "/names");
     if (idx != -1)
     {
         ret = pdb_read_file( pdb_file, idx );
-        if (ret && *(const DWORD *)ret == 0xeffeeffe) return ret;
+        if (ret && ret->magic == 0xeffeeffe &&
+            sizeof(*ret) + ret->length <= pdb_get_file_size(pdb_file, idx)) return ret;
         pdb_free( ret );
     }
     WARN("string table not found\n");
     return NULL;
+}
+
+static const char* pdb_get_string_table_entry(const PDB_STRING_TABLE* table, unsigned offset)
+{
+    return (!table || offset >= table->length) ? NULL : (const char*)(table + 1) + offset;
 }
 
 static void pdb_module_remove(struct process* pcsn, struct module_format* modfmt)
@@ -3116,15 +3142,15 @@ static void pdb_module_remove(struct process* pcsn, struct module_format* modfmt
     HeapFree(GetProcessHeap(), 0, modfmt);
 }
 
-static void pdb_convert_types_header(PDB_TYPES* types, const BYTE* image)
+static BOOL pdb_convert_types_header(PDB_TYPES* types, const BYTE* image)
 {
-    memset(types, 0, sizeof(PDB_TYPES));
-    if (!image) return;
+    if (!image) return FALSE;
 
     if (*(const DWORD*)image < 19960000)   /* FIXME: correct version? */
     {
         /* Old version of the types record header */
         const PDB_TYPES_OLD*    old = (const PDB_TYPES_OLD*)image;
+        memset(types, 0, sizeof(PDB_TYPES));
         types->version     = old->version;
         types->type_offset = sizeof(PDB_TYPES_OLD);
         types->type_size   = old->type_size;
@@ -3137,6 +3163,7 @@ static void pdb_convert_types_header(PDB_TYPES* types, const BYTE* image)
         /* New version of the types record header */
         *types = *(const PDB_TYPES*)image;
     }
+    return TRUE;
 }
 
 static void pdb_convert_symbols_header(PDB_SYMBOLS* symbols,
@@ -3252,7 +3279,8 @@ static BOOL pdb_init_type_parse(const struct msc_debug_info* msc_dbg,
     ctp->offset = NULL;
     ctp->hash = NULL;
     ctp->alloc_hash = NULL;
-    pdb_convert_types_header(&ctp->header, image);
+    if (!pdb_convert_types_header(&ctp->header, image))
+        return FALSE;
 
     /* Check for unknown versions */
     switch (ctp->header.version)
@@ -3564,13 +3592,12 @@ static BOOL pdb_process_internal(const struct process* pcs,
                                  struct pdb_module_info* pdb_module_info,
                                  unsigned module_index)
 {
-    HANDLE      hMap = NULL;
-    char*       image = NULL;
-    BYTE*       symbols_image = NULL;
-    char*       files_image = NULL;
-    DWORD       files_size = 0;
-    unsigned    matched;
-    struct pdb_file_info* pdb_file;
+    HANDLE                      hMap = NULL;
+    char*                       image = NULL;
+    BYTE*                       symbols_image = NULL;
+    PDB_STRING_TABLE*           files_image = NULL;
+    unsigned                    matched;
+    struct pdb_file_info*       pdb_file;
 
     TRACE("Processing PDB file %s\n", pdb_lookup->filename);
 
@@ -3637,7 +3664,6 @@ static BOOL pdb_process_internal(const struct process* pcs,
             return FALSE;
         }
         files_image = pdb_read_strings(pdb_file);
-        if (files_image) files_size = *(const DWORD*)(files_image + 8);
 
         pdb_process_symbol_imports(pcs, msc_dbg, &symbols, symbols_image, image,
                                    pdb_lookup, pdb_module_info, module_index);
@@ -3669,7 +3695,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
             if (modimage)
             {
                 struct cv_module_snarf cvmod = {ipi_ok ? &ipi_ctp : NULL, (const void*)(modimage + sfile.symbol_size), sfile.lineno2_size,
-                    files_image + 12, files_size};
+                    files_image};
                 codeview_snarf(msc_dbg, modimage, sizeof(DWORD), sfile.symbol_size,
                                &cvmod, TRUE);
 
@@ -4001,6 +4027,7 @@ static BOOL  pdb_parse_cmd_string(struct cpu_stack_walk* csw, PDB_FPO_DATA* fpoe
     BOOL                over = FALSE;
     struct pevaluator   pev;
 
+    if (!cmd) return FALSE;
     pev_init(&pev, csw, fpoext, cpair);
     for (ptr = cmd; !over; ptr++)
     {
@@ -4051,8 +4078,8 @@ BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
     struct module_pair          pair;
     struct pdb_module_info*     pdb_info;
     PDB_FPO_DATA*               fpoext;
-    unsigned                    i, size, strsize;
-    char*                       strbase;
+    unsigned                    i, size;
+    PDB_STRING_TABLE*           strbase;
     BOOL                        ret = TRUE;
 
     if (!module_init_pair(&pair, csw->hProcess, ip)) return FALSE;
@@ -4063,7 +4090,6 @@ BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
 
     strbase = pdb_read_strings(&pdb_info->pdb_files[0]);
     if (!strbase) return FALSE;
-    strsize = *(const DWORD*)(strbase + 8);
     fpoext = pdb_read_file(&pdb_info->pdb_files[0], pdb_info->pdb_files[0].fpoext_stream);
     size = pdb_get_file_size(&pdb_info->pdb_files[0], pdb_info->pdb_files[0].fpoext_stream);
     if (fpoext && (size % sizeof(*fpoext)) == 0)
@@ -4077,12 +4103,10 @@ BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
                       fpoext[i].start, fpoext[i].func_size, fpoext[i].locals_size,
                       fpoext[i].params_size, fpoext[i].maxstack_size, fpoext[i].prolog_size,
                       fpoext[i].savedregs_size, fpoext[i].flags,
-                      fpoext[i].str_offset < strsize ?
-                          wine_dbgstr_a(strbase + 12 + fpoext[i].str_offset) : "<out of bounds>");
-                if (fpoext[i].str_offset < strsize)
-                    ret = pdb_parse_cmd_string(csw, &fpoext[i], strbase + 12 + fpoext[i].str_offset, cpair);
-                else
-                    ret = FALSE;
+                      wine_dbgstr_a(pdb_get_string_table_entry(strbase, fpoext[i].str_offset)));
+                ret = pdb_parse_cmd_string(csw, &fpoext[i],
+                                           pdb_get_string_table_entry(strbase, fpoext[i].str_offset),
+                                           cpair);
                 break;
             }
         }

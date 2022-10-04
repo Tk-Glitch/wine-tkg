@@ -7154,36 +7154,36 @@ static void test_draw_geometry(BOOL d3d11)
     hr = ID2D1PathGeometry_Open(geometry, &sink);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    set_point(&point, 20.0f, 80.0f);
+    set_point(&point, 20.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 40.0f,  80.0f, 60.0f,  80.0f);
-    quadratic_to(sink, 60.0f, 160.0f, 60.0f, 240.0f);
-    quadratic_to(sink, 40.0f, 240.0f, 20.0f, 240.0f);
-    quadratic_to(sink, 20.0f, 160.0f, 20.0f,  80.0f);
+    quadratic_to(sink, 40.0f,  79.5f, 60.0f,  79.5f);
+    quadratic_to(sink, 60.0f, 159.5f, 60.0f, 239.5f);
+    quadratic_to(sink, 40.0f, 239.5f, 20.0f, 239.5f);
+    quadratic_to(sink, 20.0f, 159.5f, 20.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
-    set_point(&point, 100.0f, 80.0f);
+    set_point(&point, 100.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 105.0f,  80.0f, 140.0f,  80.0f);
-    quadratic_to(sink, 140.0f, 100.0f, 140.0f, 240.0f);
-    quadratic_to(sink, 135.0f, 240.0f, 100.0f, 240.0f);
-    quadratic_to(sink, 100.0f, 220.0f, 100.0f,  80.0f);
+    quadratic_to(sink, 105.0f,  79.5f, 140.0f,  79.5f);
+    quadratic_to(sink, 140.0f,  99.5f, 140.0f, 239.5f);
+    quadratic_to(sink, 135.0f, 239.5f, 100.0f, 239.5f);
+    quadratic_to(sink, 100.0f, 219.5f, 100.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
-    set_point(&point, 180.0f, 80.0f);
+    set_point(&point, 180.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 215.0f,  80.0f, 220.0f,  80.0f);
-    quadratic_to(sink, 220.0f, 220.0f, 220.0f, 240.0f);
-    quadratic_to(sink, 185.0f, 240.0f, 180.0f, 240.0f);
-    quadratic_to(sink, 180.0f, 100.0f, 180.0f,  80.0f);
+    quadratic_to(sink, 215.0f,  79.5f, 220.0f,  79.5f);
+    quadratic_to(sink, 220.0f, 219.5f, 220.0f, 239.5f);
+    quadratic_to(sink, 185.0f, 239.5f, 180.0f, 239.5f);
+    quadratic_to(sink, 180.0f,  99.5f, 180.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
-    set_point(&point, 260.0f, 80.0f);
+    set_point(&point, 260.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 280.0f,  80.0f, 300.0f,  80.0f);
-    quadratic_to(sink, 300.0f, 160.0f, 300.0f, 240.0f);
-    quadratic_to(sink, 280.0f, 240.0f, 260.0f, 240.0f);
-    quadratic_to(sink, 260.0f, 160.0f, 260.0f,  80.0f);
+    quadratic_to(sink, 280.0f,  79.5f, 300.0f,  79.5f);
+    quadratic_to(sink, 300.0f, 159.5f, 300.0f, 239.5f);
+    quadratic_to(sink, 280.0f, 239.5f, 260.0f, 239.5f);
+    quadratic_to(sink, 260.0f, 159.5f, 260.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
 
     set_point(&point, 20.0f, 400.0f);
@@ -10416,13 +10416,15 @@ static void check_system_properties_(unsigned int line, ID2D1Effect *effect, BOO
         name[0] = 0;
         hr = ID2D1Effect_GetPropertyName(effect, test->index, name, sizeof(name));
         todo_wine_if((is_builtin && (test->type == D2D1_PROPERTY_TYPE_ARRAY || test->type == D2D1_PROPERTY_TYPE_STRING)))
-        {
         ok_(__FILE__, line)(hr == S_OK, "Failed to get property name, hr %#lx\n", hr);
+        if (hr == D2DERR_INVALID_PROPERTY)
+        {
+            winetest_pop_context();
+            continue;
+        }
         ok_(__FILE__, line)(!wcscmp(name, test->name), "Got unexpected property name %s, expected %s.\n",
                 debugstr_w(name), debugstr_w(test->name));
-        }
 
-        type = D2D1_PROPERTY_TYPE_UNKNOWN;
         type = ID2D1Effect_GetType(effect, test->index);
         todo_wine_if((is_builtin && (test->type == D2D1_PROPERTY_TYPE_ARRAY || test->type == D2D1_PROPERTY_TYPE_STRING)))
         ok_(__FILE__, line)(type == test->type, "Got unexpected property type %#x, expected %#x.\n",
@@ -11743,6 +11745,12 @@ static void test_effect_2d_affine(BOOL d3d11)
                 D2D1_PROPERTY_TYPE_MATRIX_3X2, (const BYTE *)test->matrix, sizeof(*test->matrix));
         todo_wine
         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        if (hr == D2DERR_INVALID_PROPERTY)
+        {
+            ID2D1Bitmap1_Release(bitmap);
+            winetest_pop_context();
+            continue;
+        }
         ID2D1Effect_GetOutput(effect, &output);
 
         ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -11858,6 +11866,12 @@ static void test_effect_crop(BOOL d3d11)
                 (const BYTE *)&test->crop_rect, sizeof(test->crop_rect));
         todo_wine
         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        if (hr == D2DERR_INVALID_PROPERTY)
+        {
+            ID2D1Bitmap1_Release(bitmap);
+            winetest_pop_context();
+            continue;
+        }
         ID2D1Effect_GetOutput(effect, &output);
 
         set_rect(&output_bounds, -1.0f, -1.0f, -1.0f, -1.0f);

@@ -3385,7 +3385,8 @@ static void test_Input_mouse(void)
             100, 100, 100, 100, 0, NULL, NULL, NULL);
     ok(button_win != 0, "CreateWindow failed\n");
 
-    pt.x = pt.y = 150;
+    pt.x = pt.y = 50;
+    ClientToScreen(button_win, &pt);
     hwnd = WindowFromPoint(pt);
     if (hwnd != button_win)
     {
@@ -3395,7 +3396,7 @@ static void test_Input_mouse(void)
     }
 
     /* simple button click test */
-    simulate_click(TRUE, 150, 150);
+    simulate_click(TRUE, pt.x, pt.y);
     got_button_down = got_button_up = FALSE;
     while (wait_for_message(&msg))
     {
@@ -3420,7 +3421,7 @@ static void test_Input_mouse(void)
     ok(static_win != 0, "CreateWindow failed\n");
     def_static_proc = (void*)SetWindowLongPtrA(static_win,
             GWLP_WNDPROC, (LONG_PTR)static_hook_proc);
-    simulate_click(FALSE, 150, 150);
+    simulate_click(FALSE, pt.x, pt.y);
     hittest_no = 0;
     got_button_down = got_button_up = FALSE;
     while (wait_for_message(&msg))
@@ -3450,7 +3451,9 @@ static void test_Input_mouse(void)
     ok(static_win != 0, "CreateWindow failed\n");
     def_static_proc = (void*)SetWindowLongPtrA(static_win,
             GWLP_WNDPROC, (LONG_PTR)static_hook_proc);
-    simulate_click(TRUE, 150, 150);
+    pt.x = pt.y = 50;
+    ClientToScreen(static_win, &pt);
+    simulate_click(TRUE, pt.x, pt.y);
     hittest_no = 0;
     got_button_down = got_button_up = FALSE;
     while (wait_for_message(&msg))
@@ -3484,7 +3487,9 @@ static void test_Input_mouse(void)
     hittest_no = 0;
     got_button_down = got_button_up = FALSE;
     WaitForSingleObject(thread_data.start_event, INFINITE);
-    simulate_click(FALSE, 150, 150);
+    pt.x = pt.y = 50;
+    ClientToScreen(thread_data.win, &pt);
+    simulate_click(FALSE, pt.x, pt.y);
     while (wait_for_message(&msg))
     {
         DispatchMessageA(&msg);
@@ -3512,7 +3517,9 @@ static void test_Input_mouse(void)
             "AttachThreadInput failed\n");
     while (wait_for_message(&msg)) DispatchMessageA(&msg);
     SetWindowPos(thread_data.win, button_win, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
-    simulate_click(TRUE, 150, 150);
+    pt.x = pt.y = 50;
+    ClientToScreen(thread_data.win, &pt);
+    simulate_click(TRUE, pt.x, pt.y);
     while (wait_for_message(&msg))
     {
         DispatchMessageA(&msg);
@@ -3534,7 +3541,9 @@ static void test_Input_mouse(void)
     ok(hwnd != 0, "CreateWindow failed\n");
     SetCapture(button_win);
     got_button_down = got_button_up = FALSE;
-    simulate_click(FALSE, 50, 50);
+    pt.x = pt.y = 50;
+    ClientToScreen(hwnd, &pt);
+    simulate_click(FALSE, pt.x, pt.y);
     while (wait_for_message(&msg))
     {
         DispatchMessageA(&msg);
@@ -3560,7 +3569,9 @@ static void test_Input_mouse(void)
             0, 0, 100, 100, button_win, NULL, NULL, NULL);
     ok(hwnd != 0, "CreateWindow failed\n");
     got_button_down = got_button_up = FALSE;
-    simulate_click(TRUE, 150, 150);
+    pt.x = pt.y = 50;
+    ClientToScreen(hwnd, &pt);
+    simulate_click(TRUE, pt.x, pt.y);
     while (wait_for_message(&msg))
     {
         DispatchMessageA(&msg);

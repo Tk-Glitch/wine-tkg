@@ -45,6 +45,15 @@ struct wined3d_rect_f
     float b;
 };
 
+bool wined3d_texture_validate_sub_resource_idx(const struct wined3d_texture *texture, unsigned int sub_resource_idx)
+{
+    if (sub_resource_idx < texture->level_count * texture->layer_count)
+        return true;
+
+    WARN("Invalid sub-resource index %u.\n", sub_resource_idx);
+    return false;
+}
+
 BOOL wined3d_texture_can_use_pbo(const struct wined3d_texture *texture, const struct wined3d_d3d_info *d3d_info)
 {
     if (!d3d_info->pbo || texture->resource.format->conv_byte_count || texture->resource.pin_sysmem
@@ -1676,7 +1685,6 @@ void wined3d_texture_load(struct wined3d_texture *texture,
             || (texture->async.flags & WINED3D_TEXTURE_ASYNC_COLOR_KEY
             && !color_key_equal(&texture->async.gl_color_key, &texture->async.src_blt_color_key))))
     {
-        unsigned int sub_count = texture->level_count * texture->layer_count;
         unsigned int i;
 
         TRACE("Reloading because of color key value change.\n");
@@ -2219,16 +2227,10 @@ BOOL wined3d_texture_prepare_location(struct wined3d_texture *texture,
 static struct wined3d_texture_sub_resource *wined3d_texture_get_sub_resource(struct wined3d_texture *texture,
         unsigned int sub_resource_idx)
 {
-    UINT sub_count = texture->level_count * texture->layer_count;
-
     TRACE("texture %p, sub_resource_idx %u.\n", texture, sub_resource_idx);
 
-    if (sub_resource_idx >= sub_count)
-    {
-        WARN("sub_resource_idx %u >= sub_count %u.\n", sub_resource_idx, sub_count);
+    if (!wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return NULL;
-    }
-
     return &texture->sub_resources[sub_resource_idx];
 }
 
@@ -4153,11 +4155,11 @@ HRESULT CDECL wined3d_device_context_blt(struct wined3d_device_context *context,
             context, dst_texture, dst_sub_resource_idx, wine_dbgstr_rect(dst_rect), src_texture,
             src_sub_resource_idx, wine_dbgstr_rect(src_rect), flags, fx, debug_d3dtexturefiltertype(filter));
 
-    if (dst_sub_resource_idx >= dst_texture->level_count * dst_texture->layer_count
+    if (!wined3d_texture_validate_sub_resource_idx(dst_texture, dst_sub_resource_idx)
             || dst_texture->resource.type != WINED3D_RTYPE_TEXTURE_2D)
         return WINED3DERR_INVALIDCALL;
 
-    if (src_sub_resource_idx >= src_texture->level_count * src_texture->layer_count
+    if (!wined3d_texture_validate_sub_resource_idx(src_texture, src_sub_resource_idx)
             || src_texture->resource.type != WINED3D_RTYPE_TEXTURE_2D)
         return WINED3DERR_INVALIDCALL;
 
@@ -4194,6 +4196,9 @@ HRESULT CDECL wined3d_device_context_blt(struct wined3d_device_context *context,
     wined3d_device_context_emit_blt_sub_resource(&dst_texture->resource.device->cs->c, &dst_texture->resource,
             dst_sub_resource_idx, &dst_box, &src_texture->resource, src_sub_resource_idx, &src_box, flags, fx, filter);
 
+    if (dst_texture->dirty_regions)
+        wined3d_texture_add_dirty_region(dst_texture, dst_sub_resource_idx, &dst_box);
+
     return WINED3D_OK;
 }
 
@@ -4205,11 +4210,8 @@ HRESULT CDECL wined3d_texture_get_overlay_position(const struct wined3d_texture 
     TRACE("texture %p, sub_resource_idx %u, x %p, y %p.\n", texture, sub_resource_idx, x, y);
 
     if (!(texture->resource.usage & WINED3DUSAGE_OVERLAY)
-            || sub_resource_idx >= texture->level_count * texture->layer_count)
-    {
-        WARN("Invalid sub-resource specified.\n");
+            || !wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return WINEDDERR_NOTAOVERLAYSURFACE;
-    }
 
     overlay = &texture->overlay_info[sub_resource_idx];
     if (!overlay->dst_texture)
@@ -4237,11 +4239,8 @@ HRESULT CDECL wined3d_texture_set_overlay_position(struct wined3d_texture *textu
     TRACE("texture %p, sub_resource_idx %u, x %d, y %d.\n", texture, sub_resource_idx, x, y);
 
     if (!(texture->resource.usage & WINED3DUSAGE_OVERLAY)
-            || sub_resource_idx >= texture->level_count * texture->layer_count)
-    {
-        WARN("Invalid sub-resource specified.\n");
+            || !wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return WINEDDERR_NOTAOVERLAYSURFACE;
-    }
 
     overlay = &texture->overlay_info[sub_resource_idx];
     w = overlay->dst_rect.right - overlay->dst_rect.left;
@@ -4264,18 +4263,12 @@ HRESULT CDECL wined3d_texture_update_overlay(struct wined3d_texture *texture, un
             dst_sub_resource_idx, wine_dbgstr_rect(dst_rect), flags);
 
     if (!(texture->resource.usage & WINED3DUSAGE_OVERLAY) || texture->resource.type != WINED3D_RTYPE_TEXTURE_2D
-            || sub_resource_idx >= texture->level_count * texture->layer_count)
-    {
-        WARN("Invalid sub-resource specified.\n");
+            || !wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return WINEDDERR_NOTAOVERLAYSURFACE;
-    }
 
     if (!dst_texture || dst_texture->resource.type != WINED3D_RTYPE_TEXTURE_2D
-            || dst_sub_resource_idx >= dst_texture->level_count * dst_texture->layer_count)
-    {
-        WARN("Invalid destination sub-resource specified.\n");
+            || !wined3d_texture_validate_sub_resource_idx(dst_texture, dst_sub_resource_idx))
         return WINED3DERR_INVALIDCALL;
-    }
 
     overlay = &texture->overlay_info[sub_resource_idx];
 
@@ -4324,15 +4317,10 @@ HRESULT CDECL wined3d_texture_update_overlay(struct wined3d_texture *texture, un
 
 void * CDECL wined3d_texture_get_sub_resource_parent(struct wined3d_texture *texture, unsigned int sub_resource_idx)
 {
-    unsigned int sub_count = texture->level_count * texture->layer_count;
-
     TRACE("texture %p, sub_resource_idx %u.\n", texture, sub_resource_idx);
 
-    if (sub_resource_idx >= sub_count)
-    {
-        WARN("sub_resource_idx %u >= sub_count %u.\n", sub_resource_idx, sub_count);
+    if (!wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return NULL;
-    }
 
     return texture->sub_resources[sub_resource_idx].parent;
 }
@@ -4340,15 +4328,10 @@ void * CDECL wined3d_texture_get_sub_resource_parent(struct wined3d_texture *tex
 void CDECL wined3d_texture_set_sub_resource_parent(struct wined3d_texture *texture,
         unsigned int sub_resource_idx, void *parent)
 {
-    unsigned int sub_count = texture->level_count * texture->layer_count;
-
     TRACE("texture %p, sub_resource_idx %u, parent %p.\n", texture, sub_resource_idx, parent);
 
-    if (sub_resource_idx >= sub_count)
-    {
-        WARN("sub_resource_idx %u >= sub_count %u.\n", sub_resource_idx, sub_count);
+    if (!wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return;
-    }
 
     texture->sub_resources[sub_resource_idx].parent = parent;
 }
@@ -4356,17 +4339,13 @@ void CDECL wined3d_texture_set_sub_resource_parent(struct wined3d_texture *textu
 HRESULT CDECL wined3d_texture_get_sub_resource_desc(const struct wined3d_texture *texture,
         unsigned int sub_resource_idx, struct wined3d_sub_resource_desc *desc)
 {
-    unsigned int sub_count = texture->level_count * texture->layer_count;
     const struct wined3d_resource *resource;
     unsigned int level_idx;
 
     TRACE("texture %p, sub_resource_idx %u, desc %p.\n", texture, sub_resource_idx, desc);
 
-    if (sub_resource_idx >= sub_count)
-    {
-        WARN("sub_resource_idx %u >= sub_count %u.\n", sub_resource_idx, sub_count);
+    if (!wined3d_texture_validate_sub_resource_idx(texture, sub_resource_idx))
         return WINED3DERR_INVALIDCALL;
-    }
 
     resource = &texture->resource;
     desc->format = resource->format->id;

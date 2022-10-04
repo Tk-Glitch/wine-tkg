@@ -1897,7 +1897,7 @@ static BOOL get_line_from_function(struct module_pair* pair, struct symt_functio
                 ret = internal_line_set_nameW(pair->pcs, intl, dospath, TRUE);
                 HeapFree( GetProcessHeap(), 0, dospath );
             }
-            if (ret) *pdwDisplacement = addr - found_dli->u.address;
+            if (ret && pdwDisplacement) *pdwDisplacement = addr - found_dli->u.address;
             return ret;
         }
     }
@@ -2675,19 +2675,19 @@ BOOL WINAPI SymFromInlineContext(HANDLE hProcess, DWORD64 addr, ULONG inline_ctx
 
     switch (IFC_MODE(inline_ctx))
     {
-    case IFC_MODE_IGNORE:
-    case IFC_MODE_REGULAR:
-        return SymFromAddr(hProcess, addr, disp, si);
     case IFC_MODE_INLINE:
         if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
         inlined = symt_find_inlined_site(pair.effective, addr, inline_ctx);
         if (inlined)
         {
             symt_fill_sym_info(&pair, NULL, &inlined->func.symt, si);
-            *disp = addr - inlined->func.address;
+            if (disp) *disp = addr - inlined->func.address;
             return TRUE;
         }
         /* fall through */
+    case IFC_MODE_IGNORE:
+    case IFC_MODE_REGULAR:
+        return SymFromAddr(hProcess, addr, disp, si);
     default:
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
@@ -2777,4 +2777,15 @@ BOOL WINAPI SymGetLineFromInlineContextW(HANDLE hProcess, DWORD64 addr, ULONG in
 
     if (!get_line_from_inline_context(hProcess, addr, inline_ctx, mod_addr, disp, &intl)) return FALSE;
     return internal_line_copy_toW64(&intl, line);
+}
+
+/******************************************************************
+ *      SymSrvGetFileIndexInfo (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymSrvGetFileIndexInfo(const char *file, SYMSRV_INDEX_INFO* info, DWORD flags)
+{
+    FIXME("(%s, %p, 0x%08lx): stub!\n", debugstr_a(file), info, flags);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

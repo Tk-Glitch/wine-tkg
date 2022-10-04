@@ -1019,6 +1019,27 @@ todo_wine {
     TEST_READER_STATE(reader, XmlReadState_Error);
 
     IStream_Release(stream);
+
+    /* No encoding attribute. */
+    set_input_string(reader, "<?xml version=\"1.0\" standalone=\"yes\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_XmlDeclaration, "got %d\n", type);
+
+    /* Just version attribute, no spaces. */
+    set_input_string(reader, "<?xml version=\"1.0\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_XmlDeclaration, "got %d\n", type);
+
+    set_input_string(reader, "<?xml version=\"1.0\"encoding=\"UTF-8\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == WC_E_XMLDECL, "Unexpected hr %#lx.\n", hr);
+
+    set_input_string(reader, "<?xml version=\"1.0\"standalone=\"yes\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == WC_E_XMLDECL, "Unexpected hr %#lx.\n", hr);
+
     IXmlReader_Release(reader);
 }
 
@@ -1812,16 +1833,15 @@ static void test_isemptyelement(void)
 {
     struct test_entry_empty *test = empty_element_tests;
     IXmlReader *reader;
+    XmlNodeType type;
     HRESULT hr;
+    BOOL ret;
 
     hr = CreateXmlReader(&IID_IXmlReader, (void**)&reader, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     while (test->xml)
     {
-        XmlNodeType type;
-        BOOL ret;
-
         set_input_string(reader, test->xml);
 
         type = XmlNodeType_None;
@@ -1834,6 +1854,23 @@ static void test_isemptyelement(void)
 
         test++;
     }
+
+    /* Move to an attribute of an empty element. */
+    set_input_string(reader, "<a attr1=\'b\' />");
+
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_Element, "Unexpected node type %d.\n", type);
+    ret = IXmlReader_IsEmptyElement(reader);
+    ok(ret, "Unexpected empty flag %d.\n", ret);
+
+    hr = IXmlReader_MoveToFirstAttribute(reader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_Attribute, "Unexpected node type %d.\n", type);
+    ret = IXmlReader_IsEmptyElement(reader);
+    ok(!ret, "Unexpected empty flag %d.\n", ret);
 
     IXmlReader_Release(reader);
 }

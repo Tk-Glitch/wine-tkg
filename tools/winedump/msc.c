@@ -30,7 +30,6 @@
 #include "winbase.h"
 #include "winedump.h"
 #include "cvconst.h"
-#include "wine/mscvpdb.h"
 
 #define PSTRING(adr, ofs) \
     ((const struct p_string*)((const char*)(adr) + (ofs)))
@@ -1285,7 +1284,7 @@ static void dump_binannot(const unsigned char* ba, const char* last, unsigned in
         case BA_OP_ChangeCodeOffsetAndLineOffset:
             {
                 unsigned p1 = binannot_uncompress(&ba);
-                printf("%*s  | ChangeCodeOffsetAndLineOffset %u %u (0x%x)\n", indent, "", p1 & 0xf, binannot_getsigned(p1 >> 4), p1);
+                printf("%*s  | ChangeCodeOffsetAndLineOffset %u %d (0x%x)\n", indent, "", p1 & 0xf, binannot_getsigned(p1 >> 4), p1);
             }
             break;
         case BA_OP_ChangeCodeLengthAndCodeOffset:
@@ -2017,7 +2016,7 @@ void codeview_dump_linetab(const char* linetab, BOOL pascal_str, const char* pfx
     }
 }
 
-void codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimage, DWORD strsize, const char* pfx)
+void codeview_dump_linetab2(const char* linetab, DWORD size, const PDB_STRING_TABLE* strimage, const char* pfx)
 {
     unsigned    i;
     const struct CV_DebugSSubsectionHeader_t*     hdr;
@@ -2094,7 +2093,7 @@ void codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimag
                 const char* meth[] = {"None", "MD5", "SHA1", "SHA256"};
                 printf("%s  %d] name=%s size=%u method=%s checksum=[",
                        pfx, (unsigned)((const char*)chksms - (const char*)(hdr + 1)),
-                       strimage ? strimage + chksms->strOffset : "--none--",
+                       pdb_get_string_table_entry(strimage, chksms->strOffset),
                        chksms->size, chksms->method < ARRAY_SIZE(meth) ? meth[chksms->method] : "<<unknown>>");
                 for (i = 0; i < chksms->size; ++i) printf("%02x", chksms->checksum[i]);
                 printf("]\n");

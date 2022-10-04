@@ -130,12 +130,12 @@ HRESULT wg_sample_create_mf(IMFSample *sample, struct wg_sample **out);
 HRESULT wg_sample_create_quartz(IMediaSample *sample, struct wg_sample **out);
 void wg_sample_release(struct wg_sample *wg_sample);
 
-HRESULT wg_transform_push_mf(struct wg_transform *transform, struct wg_sample *sample,
+HRESULT wg_transform_push_mf(struct wg_transform *transform, IMFSample *sample,
         struct wg_sample_queue *queue);
 HRESULT wg_transform_push_quartz(struct wg_transform *transform, struct wg_sample *sample,
         struct wg_sample_queue *queue);
 HRESULT wg_transform_read_mf(struct wg_transform *transform, struct wg_sample *sample,
-        struct wg_format *format);
+        struct wg_format *format, DWORD *flags);
 HRESULT wg_transform_read_quartz(struct wg_transform *transform, struct wg_sample *sample);
 
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj);
@@ -162,15 +162,18 @@ struct wm_stream
 
 struct wm_reader
 {
+    IUnknown IUnknown_inner;
+    IWMSyncReader2 IWMSyncReader2_iface;
     IWMHeaderInfo3 IWMHeaderInfo3_iface;
     IWMLanguageList IWMLanguageList_iface;
     IWMPacketSize2 IWMPacketSize2_iface;
     IWMProfile3 IWMProfile3_iface;
     IWMReaderPlaylistBurn IWMReaderPlaylistBurn_iface;
     IWMReaderTimecode IWMReaderTimecode_iface;
+    IUnknown *outer;
     LONG refcount;
-    CRITICAL_SECTION cs;
 
+    CRITICAL_SECTION cs;
     QWORD start_time;
 
     IStream *source_stream;
@@ -181,40 +184,25 @@ struct wm_reader
 
     struct wm_stream *streams;
     WORD stream_count;
-
-    const struct wm_reader_ops *ops;
 };
 
-struct wm_reader_ops
-{
-    void *(*query_interface)(struct wm_reader *reader, REFIID iid);
-    void (*destroy)(struct wm_reader *reader);
-};
+HRESULT WINAPI winegstreamer_create_wm_sync_reader(IUnknown *outer, void **out);
+struct wm_reader *wm_reader_from_sync_reader_inner(IUnknown *inner);
 
-void wm_reader_cleanup(struct wm_reader *reader);
-HRESULT wm_reader_close(struct wm_reader *reader);
 HRESULT wm_reader_get_max_stream_size(struct wm_reader *reader, WORD stream_number, DWORD *size);
 HRESULT wm_reader_get_output_format(struct wm_reader *reader, DWORD output,
         DWORD index, IWMOutputMediaProps **props);
 HRESULT wm_reader_get_output_format_count(struct wm_reader *reader, DWORD output, DWORD *count);
 HRESULT wm_reader_get_output_props(struct wm_reader *reader, DWORD output,
         IWMOutputMediaProps **props);
-struct wm_stream *wm_reader_get_stream_by_stream_number(struct wm_reader *reader,
-        WORD stream_number);
 HRESULT wm_reader_get_stream_sample(struct wm_reader *reader, IWMReaderCallbackAdvanced *callback_advanced, WORD stream_number,
         INSSBuffer **ret_sample, QWORD *pts, QWORD *duration, DWORD *flags, WORD *ret_stream_number);
 HRESULT wm_reader_get_stream_selection(struct wm_reader *reader,
         WORD stream_number, WMT_STREAM_SELECTION *selection);
-void wm_reader_init(struct wm_reader *reader, const struct wm_reader_ops *ops);
-HRESULT wm_reader_open_file(struct wm_reader *reader, const WCHAR *filename);
-HRESULT wm_reader_open_stream(struct wm_reader *reader, IStream *stream);
-void wm_reader_seek(struct wm_reader *reader, QWORD start, LONGLONG duration);
 HRESULT wm_reader_set_allocate_for_output(struct wm_reader *reader, DWORD output, BOOL allocate);
 HRESULT wm_reader_set_allocate_for_stream(struct wm_reader *reader, WORD stream_number, BOOL allocate);
 HRESULT wm_reader_set_output_props(struct wm_reader *reader, DWORD output,
         IWMOutputMediaProps *props);
-HRESULT wm_reader_set_read_compressed(struct wm_reader *reader,
-        WORD stream_number, BOOL compressed);
 HRESULT wm_reader_set_streams_selected(struct wm_reader *reader, WORD count,
         const WORD *stream_numbers, const WMT_STREAM_SELECTION *selections);
 

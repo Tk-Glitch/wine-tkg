@@ -190,7 +190,7 @@
 @ stdcall CreateFiberEx(long long long ptr ptr)
 @ stdcall CreateFile2(wstr long long long ptr)
 @ stdcall CreateFileA(str long long ptr long long long)
-# @ stub CreateFileMappingFromApp
+@ stdcall CreateFileMappingFromApp(long ptr long int64 wstr)
 @ stdcall CreateFileMappingNumaW(long ptr long long long wstr long)
 @ stdcall CreateFileMappingW(long ptr long long long wstr)
 @ stdcall CreateFileW(wstr long long ptr long long long)
@@ -985,7 +985,7 @@
 @ stdcall MapViewOfFile3(long long ptr int64 long long long ptr long)
 @ stdcall MapViewOfFileEx(long long long long long ptr)
 @ stdcall MapViewOfFileExNuma(long long long long long ptr long)
-# @ stub MapViewOfFileFromApp
+@ stdcall MapViewOfFileFromApp(long long int64 long)
 @ stdcall MoveFileExW(wstr wstr long)
 # @ stub MoveFileWithProgressTransactedW
 @ stdcall MoveFileWithProgressW(wstr wstr ptr ptr long)
@@ -1016,7 +1016,7 @@
 @ stdcall OpenEventA(long long str)
 @ stdcall OpenEventW(long long wstr)
 @ stdcall OpenFileById(long ptr long long ptr long)
-# @ stub OpenFileMappingFromApp
+@ stdcall OpenFileMappingFromApp(long long wstr)
 @ stdcall OpenFileMappingW(long long wstr)
 # @ stub OpenGlobalizationUserSettingsKey
 @ stdcall OpenMutexW(long long wstr)

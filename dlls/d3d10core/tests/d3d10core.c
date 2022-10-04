@@ -1406,6 +1406,13 @@ static void release_test_context_(unsigned int line, struct d3d10core_test_conte
     ok_(__FILE__, line)(!ref, "Device has %lu references left.\n", ref);
 }
 
+static void clear_backbuffer_rtv(struct d3d10core_test_context *test_context, const struct vec4 *v)
+{
+    /* Cast to (const float *) instead of passing &v->x, since gcc warns about
+     * overreading a float[4] from a float otherwise. */
+    ID3D10Device_ClearRenderTargetView(test_context->device, test_context->backbuffer_rtv, (const float *)v);
+}
+
 #define draw_quad(context) draw_quad_vs_(__LINE__, context, NULL, 0)
 #define draw_quad_vs(a, b, c) draw_quad_vs_(__LINE__, a, b, c)
 static void draw_quad_vs_(unsigned int line, struct d3d10core_test_context *context,
@@ -4743,7 +4750,7 @@ static void test_occlusion_query(void)
 
 static void test_pipeline_statistics_query(void)
 {
-    static const struct vec4 red = {1.0f, 0.0f, 0.0f, 1.0f};
+    static const D3D10_QUERY_DATA_PIPELINE_STATISTICS zero_data;
     static const float white[] = {1.0f, 1.0f, 1.0f, 1.0f};
 
     struct d3d10core_test_context test_context;
@@ -4751,8 +4758,26 @@ static void test_pipeline_statistics_query(void)
     D3D10_QUERY_DESC query_desc;
     ID3D10Asynchronous *query;
     unsigned int data_size;
+    ID3D10PixelShader *ps;
     ID3D10Device *device;
     HRESULT hr;
+
+    static const DWORD ps_code[] =
+    {
+#if 0
+        float4 main(float4 pos : sv_position) : sv_target
+        {
+            return pos;
+        }
+#endif
+        0x43425844, 0xac408178, 0x2ca4213f, 0x4f2551e1, 0x1626b422, 0x00000001, 0x000000d8, 0x00000003,
+        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x00000f0f, 0x705f7673, 0x7469736f, 0x006e6f69,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
+        0x00000000, 0x0000000f, 0x745f7673, 0x65677261, 0xabab0074, 0x52444853, 0x0000003c, 0x00000040,
+        0x0000000f, 0x04002064, 0x001010f2, 0x00000000, 0x00000001, 0x03000065, 0x001020f2, 0x00000000,
+        0x05000036, 0x001020f2, 0x00000000, 0x00101e46, 0x00000000, 0x0100003e,
+    };
 
     if (!init_test_context(&test_context))
         return;
@@ -4786,18 +4811,33 @@ static void test_pipeline_statistics_query(void)
 
     ID3D10Asynchronous_End(query);
     get_query_data(query, &data, sizeof(data));
-    ok(data.IAVertices == 4, "Got unexpected IAVertices count: %u.\n", (unsigned int)data.IAVertices);
-    ok(data.IAPrimitives == 2, "Got unexpected IAPrimitives count: %u.\n", (unsigned int)data.IAPrimitives);
-    ok(data.VSInvocations == 4, "Got unexpected VSInvocations count: %u.\n", (unsigned int)data.VSInvocations);
-    ok(!data.GSInvocations, "Got unexpected GSInvocations count: %u.\n", (unsigned int)data.GSInvocations);
-    ok(!data.GSPrimitives, "Got unexpected GSPrimitives count: %u.\n", (unsigned int)data.GSPrimitives);
-    ok(data.CInvocations == 2, "Got unexpected CInvocations count: %u.\n", (unsigned int)data.CInvocations);
-    ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
-    todo_wine
-    ok(!data.PSInvocations, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
+
+    /* WARP devices randomly return all-zeroed structures as if the draw did not happen. Flushing and
+     * sleeping a second before ending the query reduces the likelyhood of hitting the bug a lot, but
+     * does not eliminate it entirely. To make things work reliably ignore such broken results. */
+    if (is_warp_device(device) && !memcmp(&data, &zero_data, sizeof(data)))
+    {
+        win_skip("WARP device randomly returns zeroed query results.\n");
+    }
+    else
+    {
+        ok(data.IAVertices == 4, "Got unexpected IAVertices count: %u.\n", (unsigned int)data.IAVertices);
+        ok(data.IAPrimitives == 2, "Got unexpected IAPrimitives count: %u.\n", (unsigned int)data.IAPrimitives);
+        ok(data.VSInvocations == 4, "Got unexpected VSInvocations count: %u.\n", (unsigned int)data.VSInvocations);
+        ok(!data.GSInvocations, "Got unexpected GSInvocations count: %u.\n", (unsigned int)data.GSInvocations);
+        ok(!data.GSPrimitives, "Got unexpected GSPrimitives count: %u.\n", (unsigned int)data.GSPrimitives);
+        ok(data.CInvocations == 2, "Got unexpected CInvocations count: %u.\n", (unsigned int)data.CInvocations);
+        ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
+        todo_wine
+        ok(!data.PSInvocations, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
+    }
+
+    hr = ID3D10Device_CreatePixelShader(device, ps_code, sizeof(ps_code), &ps);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ID3D10Device_PSSetShader(device, ps);
 
     ID3D10Asynchronous_Begin(query);
-    draw_color_quad(&test_context, &red);
+    draw_quad(&test_context);
     ID3D10Asynchronous_End(query);
     get_query_data(query, &data, sizeof(data));
     ok(data.IAVertices == 4, "Got unexpected IAVertices count: %u.\n", (unsigned int)data.IAVertices);
@@ -4809,6 +4849,7 @@ static void test_pipeline_statistics_query(void)
     ok(data.CPrimitives == 2, "Got unexpected CPrimitives count: %u.\n", (unsigned int)data.CPrimitives);
     ok(data.PSInvocations >= 640 * 480, "Got unexpected PSInvocations count: %u.\n", (unsigned int)data.PSInvocations);
 
+    ID3D10PixelShader_Release(ps);
     ID3D10Asynchronous_Release(query);
     release_test_context(&test_context);
 }
@@ -13443,7 +13484,7 @@ static void test_face_culling(void)
 
     device = test_context.device;
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0xff00ff00, 0);
 
@@ -13451,7 +13492,7 @@ static void test_face_culling(void)
     ccw_vb = create_buffer(device, D3D10_BIND_VERTEX_BUFFER, sizeof(ccw_quad), ccw_quad);
 
     test_context.vb = ccw_vb;
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0xff0000ff, 0);
 
@@ -13476,12 +13517,12 @@ static void test_face_culling(void)
         ID3D10Device_RSSetState(device, state);
 
         test_context.vb = cw_vb;
-        ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+        clear_backbuffer_rtv(&test_context, &red);
         draw_color_quad(&test_context, &green);
         check_texture_color(test_context.backbuffer, tests[i].expected_cw ? 0xff00ff00 : 0xff0000ff, 0);
 
         test_context.vb = ccw_vb;
-        ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+        clear_backbuffer_rtv(&test_context, &red);
         draw_color_quad(&test_context, &green);
         check_texture_color(test_context.backbuffer, tests[i].expected_ccw ? 0xff00ff00 : 0xff0000ff, 0);
 
@@ -13502,11 +13543,11 @@ static void test_face_culling(void)
     ID3D10Device_RSSetState(device, state);
 
     test_context.vb = cw_vb;
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0xff00ff00, 0);
     test_context.vb = ccw_vb;
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     if (!broken_warp)
         check_texture_color(test_context.backbuffer, 0xffff0000, 0);
@@ -13522,14 +13563,14 @@ static void test_face_culling(void)
     ID3D10Device_RSSetState(device, state);
 
     test_context.vb = cw_vb;
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     if (!broken_warp)
         check_texture_color(test_context.backbuffer, 0xffff0000 , 0);
     else
         win_skip("Broken WARP.\n");
     test_context.vb = ccw_vb;
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0xff00ff00, 0);
 
@@ -13573,22 +13614,22 @@ static void test_line_antialiasing_blending(void)
     ok(SUCCEEDED(hr), "Failed to create blend state, hr %#lx.\n", hr);
     ID3D10Device_OMSetBlendState(device, blend_state, NULL, D3D10_DEFAULT_SAMPLE_MASK);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0xe2007fcc, 1);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &green.x);
+    clear_backbuffer_rtv(&test_context, &green);
     draw_color_quad(&test_context, &red);
     check_texture_color(test_context.backbuffer, 0xe2007fcc, 1);
 
     ID3D10Device_OMSetBlendState(device, NULL, NULL, D3D10_DEFAULT_SAMPLE_MASK);
     ID3D10BlendState_Release(blend_state);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0x7f00ff00, 1);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &green.x);
+    clear_backbuffer_rtv(&test_context, &green);
     draw_color_quad(&test_context, &red);
     check_texture_color(test_context.backbuffer, 0xcc0000ff, 1);
 
@@ -13607,11 +13648,11 @@ static void test_line_antialiasing_blending(void)
     ok(SUCCEEDED(hr), "Failed to create rasterizer state, hr %#lx.\n", hr);
     ID3D10Device_RSSetState(device, rasterizer_state);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
     draw_color_quad(&test_context, &green);
     check_texture_color(test_context.backbuffer, 0x7f00ff00, 1);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &green.x);
+    clear_backbuffer_rtv(&test_context, &green);
     draw_color_quad(&test_context, &red);
     check_texture_color(test_context.backbuffer, 0xcc0000ff, 1);
 
@@ -15636,7 +15677,7 @@ static void test_stream_output_resume(void)
     ID3D10Device_GSSetShader(device, gs);
     ID3D10Device_GSSetConstantBuffers(device, 0, 1, &cb);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &white.x);
+    clear_backbuffer_rtv(&test_context, &white);
     check_texture_color(test_context.backbuffer, 0xffffffff, 0);
 
     /* Draw into a SO buffer and then immediately destroy it, to make sure that
@@ -17384,7 +17425,7 @@ static void test_generate_mips(void)
 
             ID3D10Device_GenerateMips(device, srv);
 
-            ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &white.x);
+            clear_backbuffer_rtv(&test_context, &white);
 
             srv_desc.Format = tests[j].texture_format == DXGI_FORMAT_R8G8B8A8_UINT
                     ? DXGI_FORMAT_R8G8B8A8_UINT : DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -17466,7 +17507,7 @@ static void test_generate_mips(void)
 
     ID3D10Device_GenerateMips(device, srv);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &white.w);
+    clear_backbuffer_rtv(&test_context, &white);
 
     srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
@@ -17498,7 +17539,7 @@ static void test_generate_mips(void)
 
     ID3D10Device_GenerateMips(device, srv);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &white.w);
+    clear_backbuffer_rtv(&test_context, &white);
 
     srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
@@ -19183,7 +19224,7 @@ static void test_dynamic_map_synchronization(void)
     hr = ID3D10Device_CreateBuffer(device, &buffer_desc, NULL, &test_context.vb);
     ok(hr == S_OK, "Failed to create vertex buffer, hr %#lx.\n", hr);
 
-    ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &red.x);
+    clear_backbuffer_rtv(&test_context, &red);
 
     for (y = 0; y < 200; ++y)
     {
