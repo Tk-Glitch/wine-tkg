@@ -66,6 +66,7 @@ static HRESULT (WINAPI *pUiaProviderFromIAccessible)(IAccessible *, long, DWORD,
 #define NAVDIR_INTERNAL_HWND 10
 
 DEFINE_EXPECT(winproc_GETOBJECT_CLIENT);
+DEFINE_EXPECT(winproc_GETOBJECT_UiaRoot);
 DEFINE_EXPECT(Accessible_accNavigate);
 DEFINE_EXPECT(Accessible_get_accParent);
 DEFINE_EXPECT(Accessible_get_accChildCount);
@@ -1089,7 +1090,728 @@ static struct Accessible Accessible_child2 =
     FALSE, 0,
 };
 
+static struct Provider
+{
+    IRawElementProviderSimple IRawElementProviderSimple_iface;
+    IRawElementProviderFragment IRawElementProviderFragment_iface;
+    LONG ref;
+
+    const char *prov_name;
+    IRawElementProviderFragment *parent;
+    enum ProviderOptions prov_opts;
+    HWND hwnd;
+    BOOL ret_invalid_prop_type;
+    DWORD expected_tid;
+} Provider, Provider2, Provider_child, Provider_child2;
+
+static const WCHAR *uia_bstr_prop_str = L"uia-string";
+static const ULONG uia_i4_prop_val = 0xdeadbeef;
+static const ULONG uia_i4_arr_prop_val[] = { 0xfeedbeef, 0xdeadcafe, 0xfefedede };
+static const double uia_r8_prop_val = 128.256f;
+static const double uia_r8_arr_prop_val[] = { 2.4, 8.16, 32.64 };
+static const IRawElementProviderSimple *uia_unk_arr_prop_val[] = { &Provider_child.IRawElementProviderSimple_iface,
+                                                                   &Provider_child2.IRawElementProviderSimple_iface };
+static SAFEARRAY *create_i4_safearray(void)
+{
+    SAFEARRAY *sa;
+    LONG idx;
+
+    if (!(sa = SafeArrayCreateVector(VT_I4, 0, ARRAY_SIZE(uia_i4_arr_prop_val))))
+        return NULL;
+
+    for (idx = 0; idx < ARRAY_SIZE(uia_i4_arr_prop_val); idx++)
+        SafeArrayPutElement(sa, &idx, (void *)&uia_i4_arr_prop_val[idx]);
+
+    return sa;
+}
+
+static SAFEARRAY *create_r8_safearray(void)
+{
+    SAFEARRAY *sa;
+    LONG idx;
+
+    if (!(sa = SafeArrayCreateVector(VT_R8, 0, ARRAY_SIZE(uia_r8_arr_prop_val))))
+        return NULL;
+
+    for (idx = 0; idx < ARRAY_SIZE(uia_r8_arr_prop_val); idx++)
+        SafeArrayPutElement(sa, &idx, (void *)&uia_r8_arr_prop_val[idx]);
+
+    return sa;
+}
+
+static SAFEARRAY *create_unk_safearray(void)
+{
+    SAFEARRAY *sa;
+    LONG idx;
+
+    if (!(sa = SafeArrayCreateVector(VT_UNKNOWN, 0, ARRAY_SIZE(uia_unk_arr_prop_val))))
+        return NULL;
+
+    for (idx = 0; idx < ARRAY_SIZE(uia_unk_arr_prop_val); idx++)
+        SafeArrayPutElement(sa, &idx, (void *)uia_unk_arr_prop_val[idx]);
+
+    return sa;
+}
+
+enum {
+    PROV_GET_PROVIDER_OPTIONS,
+    PROV_GET_PROPERTY_VALUE,
+    PROV_GET_HOST_RAW_ELEMENT_PROVIDER,
+    FRAG_NAVIGATE,
+};
+
+static const char *prov_method_str[] = {
+    "get_ProviderOptions",
+    "GetPropertyValue",
+    "get_HostRawElementProvider",
+    "Navigate",
+};
+
+static const char *get_prov_method_str(int method)
+{
+    if (method >= ARRAY_SIZE(prov_method_str))
+        return NULL;
+    else
+        return prov_method_str[method];
+}
+
+enum {
+    METHOD_OPTIONAL = 0x01,
+    METHOD_TODO = 0x02,
+};
+
+struct prov_method_sequence {
+    struct Provider *prov;
+    int method;
+    int flags;
+};
+
+static int sequence_cnt, sequence_size;
+static struct prov_method_sequence *sequence;
+
+static void flush_method_sequence(void)
+{
+    HeapFree(GetProcessHeap(), 0, sequence);
+    sequence = NULL;
+    sequence_cnt = sequence_size = 0;
+}
+
+static void add_method_call(struct Provider *prov, int method)
+{
+    struct prov_method_sequence prov_method = {0};
+
+    if (!sequence)
+    {
+	sequence_size = 10;
+	sequence = HeapAlloc(GetProcessHeap(), 0, sequence_size * sizeof(*sequence));
+    }
+    if (sequence_cnt == sequence_size)
+    {
+	sequence_size *= 2;
+	sequence = HeapReAlloc(GetProcessHeap(), 0, sequence, sequence_size * sizeof(*sequence));
+    }
+
+    prov_method.prov = prov;
+    prov_method.method = method;
+    prov_method.flags = 0;
+    sequence[sequence_cnt++] = prov_method;
+}
+
+#define ok_method_sequence( exp, context ) \
+        ok_method_sequence_( (exp), (context), __FILE__, __LINE__)
+static void ok_method_sequence_(const struct prov_method_sequence *expected_list, const char *context,
+        const char *file, int line)
+{
+    const struct prov_method_sequence *expected = expected_list;
+    const struct prov_method_sequence *actual;
+    unsigned int count = 0;
+
+    add_method_call(NULL, 0);
+    actual = sequence;
+
+    if (context)
+        winetest_push_context("%s", context);
+
+    while (expected->prov && actual->prov)
+    {
+	if (expected->prov == actual->prov && expected->method == actual->method)
+	{
+            if (expected->flags & METHOD_TODO)
+                todo_wine ok_(file, line)(1, "%d: expected %s_%s, got %s_%s\n", count, expected->prov->prov_name,
+                        get_prov_method_str(expected->method), actual->prov->prov_name, get_prov_method_str(actual->method));
+            expected++;
+            actual++;
+        }
+        else if (expected->flags & METHOD_TODO)
+        {
+            todo_wine ok_(file, line)(0, "%d: expected %s_%s, got %s_%s\n", count, expected->prov->prov_name,
+                    get_prov_method_str(expected->method), actual->prov->prov_name, get_prov_method_str(actual->method));
+	    expected++;
+        }
+        else if (expected->flags & METHOD_OPTIONAL)
+	    expected++;
+        else
+        {
+            ok_(file, line)(0, "%d: expected %s_%s, got %s_%s\n", count, expected->prov->prov_name,
+                    get_prov_method_str(expected->method), actual->prov->prov_name, get_prov_method_str(actual->method));
+            expected++;
+            actual++;
+        }
+        count++;
+    }
+
+    /* Handle trailing optional/todo_wine methods. */
+    while (expected->prov && ((expected->flags & METHOD_OPTIONAL) ||
+                ((expected->flags & METHOD_TODO) && !strcmp(winetest_platform, "wine"))))
+    {
+        if (expected->flags & METHOD_TODO)
+            todo_wine ok_(file, line)(0, "%d: expected %s_%s\n", count, expected->prov->prov_name,
+                    get_prov_method_str(expected->method));
+        count++;
+	expected++;
+    }
+
+    if (expected->prov || actual->prov)
+    {
+        if (expected->prov)
+            ok_( file, line)(0, "incomplete sequence: expected %s_%s, got nothing\n", expected->prov->prov_name,
+                    get_prov_method_str(expected->method));
+        else
+            ok_( file, line)(0, "incomplete sequence: expected nothing, got %s_%s\n", actual->prov->prov_name,
+                    get_prov_method_str(actual->method));
+    }
+
+    if (context)
+        winetest_pop_context();
+
+    flush_method_sequence();
+}
+
+/*
+ * Parsing the string returned by UIA_ProviderDescriptionPropertyId is
+ * the only way to know what an HUIANODE represents internally. It
+ * returns a formatted string which always starts with:
+ * "[pid:<process-id>,providerId:0x<hwnd-ptr> "
+ * On Windows versions 10v1507 and below, "providerId:" is "hwnd:"
+ *
+ * This is followed by strings for each provider it represents. These are
+ * formatted as:
+ * "<prov-type>:<prov-desc> (<origin>)"
+ * and are terminated with ";", the final provider has no ";" terminator,
+ * instead it has "]".
+ *
+ * If the given provider is the one used for navigation towards a parent, it has
+ * "(parent link)" as a suffix on "<prov-type>".
+ *
+ * <prov-type> is one of "Annotation", "Main", "Override", "Hwnd", or
+ * "Nonclient".
+ *
+ * <prov-desc> is the string returned from calling GetPropertyValue on the
+ * IRawElementProviderSimple being represented with a property ID of
+ * UIA_ProviderDescriptionPropertyId.
+ *
+ * <origin> is the name of the module that the
+ * IRawElementProviderSimple comes from. For unmanaged code, it's:
+ * "unmanaged:<executable>"
+ * and for managed code, it's:
+ * "managed:<assembly-qualified-name>"
+ *
+ * An example:
+ * [pid:1500,providerId:0x2F054C Main:Provider (unmanaged:uiautomation_test.exe); Hwnd(parent link):HWND Proxy (unmanaged:uiautomationcore.dll)]
+ */
+static BOOL get_provider_desc(BSTR prov_desc, const WCHAR *prov_type, WCHAR *out_name)
+{
+    const WCHAR *str, *str2;
+
+    str = wcsstr(prov_desc, prov_type);
+    if (!str)
+        return FALSE;
+
+    if (!out_name)
+        return TRUE;
+
+    str += wcslen(prov_type);
+    str2 = wcschr(str, L'(');
+    lstrcpynW(out_name, str, ((str2 - str)));
+
+    return TRUE;
+}
+
+#define check_node_provider_desc( prov_desc, prov_type, prov_name, parent_link ) \
+        check_node_provider_desc_( (prov_desc), (prov_type), (prov_name), (parent_link), __FILE__, __LINE__)
+static void check_node_provider_desc_(BSTR prov_desc, const WCHAR *prov_type, const WCHAR *prov_name,
+        BOOL parent_link, const char *file, int line)
+{
+    WCHAR buf[2048];
+
+    if (parent_link)
+        wsprintfW(buf, L"%s(parent link):", prov_type);
+    else
+        wsprintfW(buf, L"%s:", prov_type);
+
+    if (!get_provider_desc(prov_desc, buf, buf))
+    {
+        if (parent_link)
+            wsprintfW(buf, L"%s:", prov_type);
+        else
+            wsprintfW(buf, L"%s(parent link):", prov_type);
+
+        if (!get_provider_desc(prov_desc, buf, buf))
+        {
+            ok_(file, line)(0, "failed to get provider string for %s\n", debugstr_w(prov_type));
+            return;
+        }
+        else
+        {
+            if (parent_link)
+                ok_(file, line)(0, "expected parent link provider %s\n", debugstr_w(prov_type));
+            else
+                ok_(file, line)(0, "unexpected parent link provider %s\n", debugstr_w(prov_type));
+        }
+    }
+
+    if (prov_name)
+        ok_(file, line)(!wcscmp(prov_name, buf), "unexpected provider name %s\n", debugstr_w(buf));
+}
+
+#define check_node_provider_desc_prefix( prov_desc, pid, prov_id ) \
+        check_node_provider_desc_prefix_( (prov_desc), (pid), (prov_id), __FILE__, __LINE__)
+static void check_node_provider_desc_prefix_(BSTR prov_desc, DWORD pid, HWND prov_id, const char *file, int line)
+{
+    const WCHAR *str, *str2;
+    WCHAR buf[128];
+    DWORD prov_pid;
+    HWND prov_hwnd;
+    WCHAR *end;
+
+    str = wcsstr(prov_desc, L"pid:");
+    str += wcslen(L"pid:");
+    str2 = wcschr(str, L',');
+    lstrcpynW(buf, str, (str2 - str) + 1);
+    prov_pid = wcstoul(buf, &end, 10);
+    ok_(file, line)(prov_pid == pid, "Unexpected pid %lu\n", prov_pid);
+
+    str = wcsstr(prov_desc, L"providerId:");
+    if (str)
+        str += wcslen(L"providerId:");
+    else
+    {
+        str = wcsstr(prov_desc, L"hwnd:");
+        str += wcslen(L"hwnd:");
+    }
+    str2 = wcschr(str, L' ');
+    lstrcpynW(buf, str, (str2 - str) + 1);
+    prov_hwnd = ULongToHandle(wcstoul(buf, &end, 16));
+    ok_(file, line)(prov_hwnd == prov_id, "Unexpected hwnd %p\n", prov_hwnd);
+}
+
+static inline struct Provider *impl_from_ProviderSimple(IRawElementProviderSimple *iface)
+{
+    return CONTAINING_RECORD(iface, struct Provider, IRawElementProviderSimple_iface);
+}
+
+HRESULT WINAPI ProviderSimple_QueryInterface(IRawElementProviderSimple *iface, REFIID riid, void **ppv)
+{
+    struct Provider *This = impl_from_ProviderSimple(iface);
+
+    *ppv = NULL;
+    if (IsEqualIID(riid, &IID_IRawElementProviderSimple) || IsEqualIID(riid, &IID_IUnknown))
+        *ppv = iface;
+    else if (IsEqualIID(riid, &IID_IRawElementProviderFragment))
+        *ppv = &This->IRawElementProviderFragment_iface;
+    else
+        return E_NOINTERFACE;
+
+    IRawElementProviderSimple_AddRef(iface);
+    return S_OK;
+}
+
+ULONG WINAPI ProviderSimple_AddRef(IRawElementProviderSimple *iface)
+{
+    struct Provider *This = impl_from_ProviderSimple(iface);
+    return InterlockedIncrement(&This->ref);
+}
+
+ULONG WINAPI ProviderSimple_Release(IRawElementProviderSimple *iface)
+{
+    struct Provider *This = impl_from_ProviderSimple(iface);
+    return InterlockedDecrement(&This->ref);
+}
+
+HRESULT WINAPI ProviderSimple_get_ProviderOptions(IRawElementProviderSimple *iface,
+        enum ProviderOptions *ret_val)
+{
+    struct Provider *This = impl_from_ProviderSimple(iface);
+
+    add_method_call(This, PROV_GET_PROVIDER_OPTIONS);
+    if (This->expected_tid)
+        ok(This->expected_tid == GetCurrentThreadId(), "Unexpected tid %ld\n", GetCurrentThreadId());
+
+    *ret_val = 0;
+    if (This->prov_opts)
+    {
+        *ret_val = This->prov_opts;
+        return S_OK;
+    }
+
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI ProviderSimple_GetPatternProvider(IRawElementProviderSimple *iface,
+        PATTERNID pattern_id, IUnknown **ret_val)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI ProviderSimple_GetPropertyValue(IRawElementProviderSimple *iface,
+        PROPERTYID prop_id, VARIANT *ret_val)
+{
+    struct Provider *This = impl_from_ProviderSimple(iface);
+
+    add_method_call(This, PROV_GET_PROPERTY_VALUE);
+    if (This->expected_tid)
+        ok(This->expected_tid == GetCurrentThreadId(), "Unexpected tid %ld\n", GetCurrentThreadId());
+
+    VariantInit(ret_val);
+    switch (prop_id)
+    {
+    case UIA_NativeWindowHandlePropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_R8;
+            V_R8(ret_val) = uia_r8_prop_val;
+        }
+        else
+        {
+            V_VT(ret_val) = VT_I4;
+            V_I4(ret_val) = HandleToULong(This->hwnd);
+        }
+        break;
+
+    case UIA_ProcessIdPropertyId:
+    case UIA_ControlTypePropertyId:
+    case UIA_CulturePropertyId:
+    case UIA_OrientationPropertyId:
+    case UIA_LiveSettingPropertyId:
+    case UIA_PositionInSetPropertyId:
+    case UIA_SizeOfSetPropertyId:
+    case UIA_LevelPropertyId:
+    case UIA_LandmarkTypePropertyId:
+    case UIA_FillColorPropertyId:
+    case UIA_FillTypePropertyId:
+    case UIA_VisualEffectsPropertyId:
+    case UIA_HeadingLevelPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_R8;
+            V_R8(ret_val) = uia_r8_prop_val;
+        }
+        else
+        {
+            V_VT(ret_val) = VT_I4;
+            V_I4(ret_val) = uia_i4_prop_val;
+        }
+        break;
+
+    case UIA_RotationPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_I4;
+            V_I4(ret_val) = uia_i4_prop_val;
+        }
+        else
+        {
+            V_VT(ret_val) = VT_R8;
+            V_R8(ret_val) = uia_r8_prop_val;
+        }
+        break;
+
+    case UIA_LocalizedControlTypePropertyId:
+    case UIA_NamePropertyId:
+    case UIA_AcceleratorKeyPropertyId:
+    case UIA_AccessKeyPropertyId:
+    case UIA_AutomationIdPropertyId:
+    case UIA_ClassNamePropertyId:
+    case UIA_HelpTextPropertyId:
+    case UIA_ItemTypePropertyId:
+    case UIA_FrameworkIdPropertyId:
+    case UIA_ItemStatusPropertyId:
+    case UIA_AriaRolePropertyId:
+    case UIA_AriaPropertiesPropertyId:
+    case UIA_LocalizedLandmarkTypePropertyId:
+    case UIA_FullDescriptionPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_I4;
+            V_I4(ret_val) = uia_i4_prop_val;
+        }
+        else
+        {
+            V_VT(ret_val) = VT_BSTR;
+            V_BSTR(ret_val) = SysAllocString(uia_bstr_prop_str);
+        }
+        break;
+
+    case UIA_HasKeyboardFocusPropertyId:
+    case UIA_IsKeyboardFocusablePropertyId:
+    case UIA_IsEnabledPropertyId:
+    case UIA_IsControlElementPropertyId:
+    case UIA_IsContentElementPropertyId:
+    case UIA_IsPasswordPropertyId:
+    case UIA_IsOffscreenPropertyId:
+    case UIA_IsRequiredForFormPropertyId:
+    case UIA_IsDataValidForFormPropertyId:
+    case UIA_OptimizeForVisualContentPropertyId:
+    case UIA_IsPeripheralPropertyId:
+    case UIA_IsDialogPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_R8;
+            V_R8(ret_val) = uia_r8_prop_val;
+        }
+        else
+        {
+            V_VT(ret_val) = VT_BOOL;
+            V_BOOL(ret_val) = VARIANT_TRUE;
+        }
+        break;
+
+    case UIA_AnnotationTypesPropertyId:
+    case UIA_OutlineColorPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_ARRAY | VT_R8;
+            V_ARRAY(ret_val) = create_r8_safearray();
+        }
+        else
+        {
+            V_VT(ret_val) = VT_ARRAY | VT_I4;
+            V_ARRAY(ret_val) = create_i4_safearray();
+        }
+        break;
+
+    case UIA_OutlineThicknessPropertyId:
+    case UIA_SizePropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_ARRAY | VT_I4;
+            V_ARRAY(ret_val) = create_i4_safearray();
+        }
+        else
+        {
+            V_VT(ret_val) = VT_ARRAY | VT_R8;
+            V_ARRAY(ret_val) = create_r8_safearray();
+        }
+        break;
+
+    case UIA_LabeledByPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_I4;
+            V_I4(ret_val) = uia_i4_prop_val;
+        }
+        else
+        {
+            V_VT(ret_val) = VT_UNKNOWN;
+            V_UNKNOWN(ret_val) = (IUnknown *)&Provider_child.IRawElementProviderSimple_iface;
+            IUnknown_AddRef(V_UNKNOWN(ret_val));
+        }
+        break;
+
+    case UIA_AnnotationObjectsPropertyId:
+    case UIA_DescribedByPropertyId:
+    case UIA_FlowsFromPropertyId:
+    case UIA_FlowsToPropertyId:
+    case UIA_ControllerForPropertyId:
+        if (This->ret_invalid_prop_type)
+        {
+            V_VT(ret_val) = VT_ARRAY | VT_I4;
+            V_ARRAY(ret_val) = create_i4_safearray();
+        }
+        else
+        {
+            V_VT(ret_val) = VT_UNKNOWN | VT_ARRAY;
+            V_ARRAY(ret_val) = create_unk_safearray();
+        }
+        break;
+
+    case UIA_ProviderDescriptionPropertyId:
+    {
+        WCHAR buf[1024] = {};
+
+        mbstowcs(buf, This->prov_name, strlen(This->prov_name));
+        V_VT(ret_val) = VT_BSTR;
+        V_BSTR(ret_val) = SysAllocString(buf);
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    return S_OK;
+}
+
+HRESULT WINAPI ProviderSimple_get_HostRawElementProvider(IRawElementProviderSimple *iface,
+        IRawElementProviderSimple **ret_val)
+{
+    struct Provider *This = impl_from_ProviderSimple(iface);
+
+    add_method_call(This, PROV_GET_HOST_RAW_ELEMENT_PROVIDER);
+    if (This->expected_tid)
+        ok(This->expected_tid == GetCurrentThreadId(), "Unexpected tid %ld\n", GetCurrentThreadId());
+
+    *ret_val = NULL;
+    if (This->hwnd)
+        return UiaHostProviderFromHwnd(This->hwnd, ret_val);
+
+    return S_OK;
+}
+
+IRawElementProviderSimpleVtbl ProviderSimpleVtbl = {
+    ProviderSimple_QueryInterface,
+    ProviderSimple_AddRef,
+    ProviderSimple_Release,
+    ProviderSimple_get_ProviderOptions,
+    ProviderSimple_GetPatternProvider,
+    ProviderSimple_GetPropertyValue,
+    ProviderSimple_get_HostRawElementProvider,
+};
+
+static inline struct Provider *impl_from_ProviderFragment(IRawElementProviderFragment *iface)
+{
+    return CONTAINING_RECORD(iface, struct Provider, IRawElementProviderFragment_iface);
+}
+
+static HRESULT WINAPI ProviderFragment_QueryInterface(IRawElementProviderFragment *iface, REFIID riid,
+        void **ppv)
+{
+    struct Provider *Provider = impl_from_ProviderFragment(iface);
+    return IRawElementProviderSimple_QueryInterface(&Provider->IRawElementProviderSimple_iface, riid, ppv);
+}
+
+static ULONG WINAPI ProviderFragment_AddRef(IRawElementProviderFragment *iface)
+{
+    struct Provider *Provider = impl_from_ProviderFragment(iface);
+    return IRawElementProviderSimple_AddRef(&Provider->IRawElementProviderSimple_iface);
+}
+
+static ULONG WINAPI ProviderFragment_Release(IRawElementProviderFragment *iface)
+{
+    struct Provider *Provider = impl_from_ProviderFragment(iface);
+    return IRawElementProviderSimple_Release(&Provider->IRawElementProviderSimple_iface);
+}
+
+static HRESULT WINAPI ProviderFragment_Navigate(IRawElementProviderFragment *iface,
+        enum NavigateDirection direction, IRawElementProviderFragment **ret_val)
+{
+    struct Provider *This = impl_from_ProviderFragment(iface);
+
+    add_method_call(This, FRAG_NAVIGATE);
+    if (This->expected_tid)
+        ok(This->expected_tid == GetCurrentThreadId(), "Unexpected tid %ld\n", GetCurrentThreadId());
+
+    *ret_val = NULL;
+    if ((direction == NavigateDirection_Parent) && This->parent)
+    {
+        *ret_val = This->parent;
+        IRawElementProviderFragment_AddRef(This->parent);
+    }
+    return S_OK;
+}
+
+static HRESULT WINAPI ProviderFragment_GetRuntimeId(IRawElementProviderFragment *iface,
+        SAFEARRAY **ret_val)
+{
+    ok(0, "unexpected call\n");
+    *ret_val = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ProviderFragment_get_BoundingRectangle(IRawElementProviderFragment *iface,
+        struct UiaRect *ret_val)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ProviderFragment_GetEmbeddedFragmentRoots(IRawElementProviderFragment *iface,
+        SAFEARRAY **ret_val)
+{
+    ok(0, "unexpected call\n");
+    *ret_val = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ProviderFragment_SetFocus(IRawElementProviderFragment *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ProviderFragment_get_FragmentRoot(IRawElementProviderFragment *iface,
+        IRawElementProviderFragmentRoot **ret_val)
+{
+    ok(0, "unexpected call\n");
+    *ret_val = NULL;
+    return E_NOTIMPL;
+}
+
+static const IRawElementProviderFragmentVtbl ProviderFragmentVtbl = {
+    ProviderFragment_QueryInterface,
+    ProviderFragment_AddRef,
+    ProviderFragment_Release,
+    ProviderFragment_Navigate,
+    ProviderFragment_GetRuntimeId,
+    ProviderFragment_get_BoundingRectangle,
+    ProviderFragment_GetEmbeddedFragmentRoots,
+    ProviderFragment_SetFocus,
+    ProviderFragment_get_FragmentRoot,
+};
+
+static struct Provider Provider =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    1,
+    "Provider",
+    NULL,
+    0, 0, 0,
+};
+
+static struct Provider Provider2 =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    1,
+    "Provider2",
+    NULL,
+    0, 0, 0,
+};
+
+static struct Provider Provider_child =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    1,
+    "Provider_child",
+    &Provider.IRawElementProviderFragment_iface,
+    ProviderOptions_ServerSideProvider, 0, 0,
+};
+
+static struct Provider Provider_child2 =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    1,
+    "Provider_child2",
+    &Provider.IRawElementProviderFragment_iface,
+    ProviderOptions_ServerSideProvider, 0, 0,
+};
+
 static IAccessible *acc_client;
+static IRawElementProviderSimple *prov_root;
 static LRESULT WINAPI test_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -1100,6 +1822,14 @@ static LRESULT WINAPI test_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPAR
             CHECK_EXPECT(winproc_GETOBJECT_CLIENT);
             if (acc_client)
                 return LresultFromObject(&IID_IAccessible, wParam, (IUnknown *)acc_client);
+
+            break;
+        }
+        else if (lParam == UiaRootObjectId)
+        {
+            CHECK_EXPECT(winproc_GETOBJECT_UiaRoot);
+            if (prov_root)
+                return UiaReturnRawElementProvider(hwnd, wParam, lParam, prov_root);
 
             break;
         }
@@ -2703,12 +3433,1043 @@ static void test_UiaProviderFromIAccessible(void)
     Accessible.ow_hwnd = NULL;
 }
 
+struct uia_lookup_id {
+    const GUID *guid;
+    int id;
+};
+
+static const struct uia_lookup_id uia_property_lookup_ids[] = {
+    { &RuntimeId_Property_GUID,                           UIA_RuntimeIdPropertyId },
+    { &BoundingRectangle_Property_GUID,                   UIA_BoundingRectanglePropertyId },
+    { &ProcessId_Property_GUID,                           UIA_ProcessIdPropertyId },
+    { &ControlType_Property_GUID,                         UIA_ControlTypePropertyId },
+    { &LocalizedControlType_Property_GUID,                UIA_LocalizedControlTypePropertyId },
+    { &Name_Property_GUID,                                UIA_NamePropertyId },
+    { &AcceleratorKey_Property_GUID,                      UIA_AcceleratorKeyPropertyId },
+    { &AccessKey_Property_GUID,                           UIA_AccessKeyPropertyId },
+    { &HasKeyboardFocus_Property_GUID,                    UIA_HasKeyboardFocusPropertyId },
+    { &IsKeyboardFocusable_Property_GUID,                 UIA_IsKeyboardFocusablePropertyId },
+    { &IsEnabled_Property_GUID,                           UIA_IsEnabledPropertyId },
+    { &AutomationId_Property_GUID,                        UIA_AutomationIdPropertyId },
+    { &ClassName_Property_GUID,                           UIA_ClassNamePropertyId },
+    { &HelpText_Property_GUID,                            UIA_HelpTextPropertyId },
+    { &ClickablePoint_Property_GUID,                      UIA_ClickablePointPropertyId },
+    { &Culture_Property_GUID,                             UIA_CulturePropertyId },
+    { &IsControlElement_Property_GUID,                    UIA_IsControlElementPropertyId },
+    { &IsContentElement_Property_GUID,                    UIA_IsContentElementPropertyId },
+    { &LabeledBy_Property_GUID,                           UIA_LabeledByPropertyId },
+    { &IsPassword_Property_GUID,                          UIA_IsPasswordPropertyId },
+    { &NewNativeWindowHandle_Property_GUID,               UIA_NativeWindowHandlePropertyId },
+    { &ItemType_Property_GUID,                            UIA_ItemTypePropertyId },
+    { &IsOffscreen_Property_GUID,                         UIA_IsOffscreenPropertyId },
+    { &Orientation_Property_GUID,                         UIA_OrientationPropertyId },
+    { &FrameworkId_Property_GUID,                         UIA_FrameworkIdPropertyId },
+    { &IsRequiredForForm_Property_GUID,                   UIA_IsRequiredForFormPropertyId },
+    { &ItemStatus_Property_GUID,                          UIA_ItemStatusPropertyId },
+    { &IsDockPatternAvailable_Property_GUID,              UIA_IsDockPatternAvailablePropertyId },
+    { &IsExpandCollapsePatternAvailable_Property_GUID,    UIA_IsExpandCollapsePatternAvailablePropertyId },
+    { &IsGridItemPatternAvailable_Property_GUID,          UIA_IsGridItemPatternAvailablePropertyId },
+    { &IsGridPatternAvailable_Property_GUID,              UIA_IsGridPatternAvailablePropertyId },
+    { &IsInvokePatternAvailable_Property_GUID,            UIA_IsInvokePatternAvailablePropertyId },
+    { &IsMultipleViewPatternAvailable_Property_GUID,      UIA_IsMultipleViewPatternAvailablePropertyId },
+    { &IsRangeValuePatternAvailable_Property_GUID,        UIA_IsRangeValuePatternAvailablePropertyId },
+    { &IsScrollPatternAvailable_Property_GUID,            UIA_IsScrollPatternAvailablePropertyId },
+    { &IsScrollItemPatternAvailable_Property_GUID,        UIA_IsScrollItemPatternAvailablePropertyId },
+    { &IsSelectionItemPatternAvailable_Property_GUID,     UIA_IsSelectionItemPatternAvailablePropertyId },
+    { &IsSelectionPatternAvailable_Property_GUID,         UIA_IsSelectionPatternAvailablePropertyId },
+    { &IsTablePatternAvailable_Property_GUID,             UIA_IsTablePatternAvailablePropertyId },
+    { &IsTableItemPatternAvailable_Property_GUID,         UIA_IsTableItemPatternAvailablePropertyId },
+    { &IsTextPatternAvailable_Property_GUID,              UIA_IsTextPatternAvailablePropertyId },
+    { &IsTogglePatternAvailable_Property_GUID,            UIA_IsTogglePatternAvailablePropertyId },
+    { &IsTransformPatternAvailable_Property_GUID,         UIA_IsTransformPatternAvailablePropertyId },
+    { &IsValuePatternAvailable_Property_GUID,             UIA_IsValuePatternAvailablePropertyId },
+    { &IsWindowPatternAvailable_Property_GUID,            UIA_IsWindowPatternAvailablePropertyId },
+    { &Value_Value_Property_GUID,                         UIA_ValueValuePropertyId },
+    { &Value_IsReadOnly_Property_GUID,                    UIA_ValueIsReadOnlyPropertyId },
+    { &RangeValue_Value_Property_GUID,                    UIA_RangeValueValuePropertyId },
+    { &RangeValue_IsReadOnly_Property_GUID,               UIA_RangeValueIsReadOnlyPropertyId },
+    { &RangeValue_Minimum_Property_GUID,                  UIA_RangeValueMinimumPropertyId },
+    { &RangeValue_Maximum_Property_GUID,                  UIA_RangeValueMaximumPropertyId },
+    { &RangeValue_LargeChange_Property_GUID,              UIA_RangeValueLargeChangePropertyId },
+    { &RangeValue_SmallChange_Property_GUID,              UIA_RangeValueSmallChangePropertyId },
+    { &Scroll_HorizontalScrollPercent_Property_GUID,      UIA_ScrollHorizontalScrollPercentPropertyId },
+    { &Scroll_HorizontalViewSize_Property_GUID,           UIA_ScrollHorizontalViewSizePropertyId },
+    { &Scroll_VerticalScrollPercent_Property_GUID,        UIA_ScrollVerticalScrollPercentPropertyId },
+    { &Scroll_VerticalViewSize_Property_GUID,             UIA_ScrollVerticalViewSizePropertyId },
+    { &Scroll_HorizontallyScrollable_Property_GUID,       UIA_ScrollHorizontallyScrollablePropertyId },
+    { &Scroll_VerticallyScrollable_Property_GUID,         UIA_ScrollVerticallyScrollablePropertyId },
+    { &Selection_Selection_Property_GUID,                 UIA_SelectionSelectionPropertyId },
+    { &Selection_CanSelectMultiple_Property_GUID,         UIA_SelectionCanSelectMultiplePropertyId },
+    { &Selection_IsSelectionRequired_Property_GUID,       UIA_SelectionIsSelectionRequiredPropertyId },
+    { &Grid_RowCount_Property_GUID,                       UIA_GridRowCountPropertyId },
+    { &Grid_ColumnCount_Property_GUID,                    UIA_GridColumnCountPropertyId },
+    { &GridItem_Row_Property_GUID,                        UIA_GridItemRowPropertyId },
+    { &GridItem_Column_Property_GUID,                     UIA_GridItemColumnPropertyId },
+    { &GridItem_RowSpan_Property_GUID,                    UIA_GridItemRowSpanPropertyId },
+    { &GridItem_ColumnSpan_Property_GUID,                 UIA_GridItemColumnSpanPropertyId },
+    { &GridItem_Parent_Property_GUID,                     UIA_GridItemContainingGridPropertyId },
+    { &Dock_DockPosition_Property_GUID,                   UIA_DockDockPositionPropertyId },
+    { &ExpandCollapse_ExpandCollapseState_Property_GUID,  UIA_ExpandCollapseExpandCollapseStatePropertyId },
+    { &MultipleView_CurrentView_Property_GUID,            UIA_MultipleViewCurrentViewPropertyId },
+    { &MultipleView_SupportedViews_Property_GUID,         UIA_MultipleViewSupportedViewsPropertyId },
+    { &Window_CanMaximize_Property_GUID,                  UIA_WindowCanMaximizePropertyId },
+    { &Window_CanMinimize_Property_GUID,                  UIA_WindowCanMinimizePropertyId },
+    { &Window_WindowVisualState_Property_GUID,            UIA_WindowWindowVisualStatePropertyId },
+    { &Window_WindowInteractionState_Property_GUID,       UIA_WindowWindowInteractionStatePropertyId },
+    { &Window_IsModal_Property_GUID,                      UIA_WindowIsModalPropertyId },
+    { &Window_IsTopmost_Property_GUID,                    UIA_WindowIsTopmostPropertyId },
+    { &SelectionItem_IsSelected_Property_GUID,            UIA_SelectionItemIsSelectedPropertyId },
+    { &SelectionItem_SelectionContainer_Property_GUID,    UIA_SelectionItemSelectionContainerPropertyId },
+    { &Table_RowHeaders_Property_GUID,                    UIA_TableRowHeadersPropertyId },
+    { &Table_ColumnHeaders_Property_GUID,                 UIA_TableColumnHeadersPropertyId },
+    { &Table_RowOrColumnMajor_Property_GUID,              UIA_TableRowOrColumnMajorPropertyId },
+    { &TableItem_RowHeaderItems_Property_GUID,            UIA_TableItemRowHeaderItemsPropertyId },
+    { &TableItem_ColumnHeaderItems_Property_GUID,         UIA_TableItemColumnHeaderItemsPropertyId },
+    { &Toggle_ToggleState_Property_GUID,                  UIA_ToggleToggleStatePropertyId },
+    { &Transform_CanMove_Property_GUID,                   UIA_TransformCanMovePropertyId },
+    { &Transform_CanResize_Property_GUID,                 UIA_TransformCanResizePropertyId },
+    { &Transform_CanRotate_Property_GUID,                 UIA_TransformCanRotatePropertyId },
+    { &IsLegacyIAccessiblePatternAvailable_Property_GUID, UIA_IsLegacyIAccessiblePatternAvailablePropertyId },
+    { &LegacyIAccessible_ChildId_Property_GUID,           UIA_LegacyIAccessibleChildIdPropertyId },
+    { &LegacyIAccessible_Name_Property_GUID,              UIA_LegacyIAccessibleNamePropertyId },
+    { &LegacyIAccessible_Value_Property_GUID,             UIA_LegacyIAccessibleValuePropertyId },
+    { &LegacyIAccessible_Description_Property_GUID,       UIA_LegacyIAccessibleDescriptionPropertyId },
+    { &LegacyIAccessible_Role_Property_GUID,              UIA_LegacyIAccessibleRolePropertyId },
+    { &LegacyIAccessible_State_Property_GUID,             UIA_LegacyIAccessibleStatePropertyId },
+    { &LegacyIAccessible_Help_Property_GUID,              UIA_LegacyIAccessibleHelpPropertyId },
+    { &LegacyIAccessible_KeyboardShortcut_Property_GUID,  UIA_LegacyIAccessibleKeyboardShortcutPropertyId },
+    { &LegacyIAccessible_Selection_Property_GUID,         UIA_LegacyIAccessibleSelectionPropertyId },
+    { &LegacyIAccessible_DefaultAction_Property_GUID,     UIA_LegacyIAccessibleDefaultActionPropertyId },
+    { &AriaRole_Property_GUID,                            UIA_AriaRolePropertyId },
+    { &AriaProperties_Property_GUID,                      UIA_AriaPropertiesPropertyId },
+    { &IsDataValidForForm_Property_GUID,                  UIA_IsDataValidForFormPropertyId },
+    { &ControllerFor_Property_GUID,                       UIA_ControllerForPropertyId },
+    { &DescribedBy_Property_GUID,                         UIA_DescribedByPropertyId },
+    { &FlowsTo_Property_GUID,                             UIA_FlowsToPropertyId },
+    { &ProviderDescription_Property_GUID,                 UIA_ProviderDescriptionPropertyId },
+    { &IsItemContainerPatternAvailable_Property_GUID,     UIA_IsItemContainerPatternAvailablePropertyId },
+    { &IsVirtualizedItemPatternAvailable_Property_GUID,   UIA_IsVirtualizedItemPatternAvailablePropertyId },
+    { &IsSynchronizedInputPatternAvailable_Property_GUID, UIA_IsSynchronizedInputPatternAvailablePropertyId },
+    /* Implemented on Win8+ */
+    { &OptimizeForVisualContent_Property_GUID,            UIA_OptimizeForVisualContentPropertyId },
+    { &IsObjectModelPatternAvailable_Property_GUID,       UIA_IsObjectModelPatternAvailablePropertyId },
+    { &Annotation_AnnotationTypeId_Property_GUID,         UIA_AnnotationAnnotationTypeIdPropertyId },
+    { &Annotation_AnnotationTypeName_Property_GUID,       UIA_AnnotationAnnotationTypeNamePropertyId },
+    { &Annotation_Author_Property_GUID,                   UIA_AnnotationAuthorPropertyId },
+    { &Annotation_DateTime_Property_GUID,                 UIA_AnnotationDateTimePropertyId },
+    { &Annotation_Target_Property_GUID,                   UIA_AnnotationTargetPropertyId },
+    { &IsAnnotationPatternAvailable_Property_GUID,        UIA_IsAnnotationPatternAvailablePropertyId },
+    { &IsTextPattern2Available_Property_GUID,             UIA_IsTextPattern2AvailablePropertyId },
+    { &Styles_StyleId_Property_GUID,                      UIA_StylesStyleIdPropertyId },
+    { &Styles_StyleName_Property_GUID,                    UIA_StylesStyleNamePropertyId },
+    { &Styles_FillColor_Property_GUID,                    UIA_StylesFillColorPropertyId },
+    { &Styles_FillPatternStyle_Property_GUID,             UIA_StylesFillPatternStylePropertyId },
+    { &Styles_Shape_Property_GUID,                        UIA_StylesShapePropertyId },
+    { &Styles_FillPatternColor_Property_GUID,             UIA_StylesFillPatternColorPropertyId },
+    { &Styles_ExtendedProperties_Property_GUID,           UIA_StylesExtendedPropertiesPropertyId },
+    { &IsStylesPatternAvailable_Property_GUID,            UIA_IsStylesPatternAvailablePropertyId },
+    { &IsSpreadsheetPatternAvailable_Property_GUID,       UIA_IsSpreadsheetPatternAvailablePropertyId },
+    { &SpreadsheetItem_Formula_Property_GUID,             UIA_SpreadsheetItemFormulaPropertyId },
+    { &SpreadsheetItem_AnnotationObjects_Property_GUID,   UIA_SpreadsheetItemAnnotationObjectsPropertyId },
+    { &SpreadsheetItem_AnnotationTypes_Property_GUID,     UIA_SpreadsheetItemAnnotationTypesPropertyId },
+    { &IsSpreadsheetItemPatternAvailable_Property_GUID,   UIA_IsSpreadsheetItemPatternAvailablePropertyId },
+    { &Transform2_CanZoom_Property_GUID,                  UIA_Transform2CanZoomPropertyId },
+    { &IsTransformPattern2Available_Property_GUID,        UIA_IsTransformPattern2AvailablePropertyId },
+    { &LiveSetting_Property_GUID,                         UIA_LiveSettingPropertyId },
+    { &IsTextChildPatternAvailable_Property_GUID,         UIA_IsTextChildPatternAvailablePropertyId },
+    { &IsDragPatternAvailable_Property_GUID,              UIA_IsDragPatternAvailablePropertyId },
+    { &Drag_IsGrabbed_Property_GUID,                      UIA_DragIsGrabbedPropertyId },
+    { &Drag_DropEffect_Property_GUID,                     UIA_DragDropEffectPropertyId },
+    { &Drag_DropEffects_Property_GUID,                    UIA_DragDropEffectsPropertyId },
+    { &IsDropTargetPatternAvailable_Property_GUID,        UIA_IsDropTargetPatternAvailablePropertyId },
+    { &DropTarget_DropTargetEffect_Property_GUID,         UIA_DropTargetDropTargetEffectPropertyId },
+    { &DropTarget_DropTargetEffects_Property_GUID,        UIA_DropTargetDropTargetEffectsPropertyId },
+    { &Drag_GrabbedItems_Property_GUID,                   UIA_DragGrabbedItemsPropertyId },
+    { &Transform2_ZoomLevel_Property_GUID,                UIA_Transform2ZoomLevelPropertyId },
+    { &Transform2_ZoomMinimum_Property_GUID,              UIA_Transform2ZoomMinimumPropertyId },
+    { &Transform2_ZoomMaximum_Property_GUID,              UIA_Transform2ZoomMaximumPropertyId },
+    { &FlowsFrom_Property_GUID,                           UIA_FlowsFromPropertyId },
+    { &IsTextEditPatternAvailable_Property_GUID,          UIA_IsTextEditPatternAvailablePropertyId },
+    { &IsPeripheral_Property_GUID,                        UIA_IsPeripheralPropertyId },
+    /* Implemented on Win10v1507+. */
+    { &IsCustomNavigationPatternAvailable_Property_GUID,  UIA_IsCustomNavigationPatternAvailablePropertyId },
+    { &PositionInSet_Property_GUID,                       UIA_PositionInSetPropertyId },
+    { &SizeOfSet_Property_GUID,                           UIA_SizeOfSetPropertyId },
+    { &Level_Property_GUID,                               UIA_LevelPropertyId },
+    { &AnnotationTypes_Property_GUID,                     UIA_AnnotationTypesPropertyId },
+    { &AnnotationObjects_Property_GUID,                   UIA_AnnotationObjectsPropertyId },
+    /* Implemented on Win10v1809+. */
+    { &LandmarkType_Property_GUID,                        UIA_LandmarkTypePropertyId },
+    { &LocalizedLandmarkType_Property_GUID,               UIA_LocalizedLandmarkTypePropertyId },
+    { &FullDescription_Property_GUID,                     UIA_FullDescriptionPropertyId },
+    { &FillColor_Property_GUID,                           UIA_FillColorPropertyId },
+    { &OutlineColor_Property_GUID,                        UIA_OutlineColorPropertyId },
+    { &FillType_Property_GUID,                            UIA_FillTypePropertyId },
+    { &VisualEffects_Property_GUID,                       UIA_VisualEffectsPropertyId },
+    { &OutlineThickness_Property_GUID,                    UIA_OutlineThicknessPropertyId },
+    { &CenterPoint_Property_GUID,                         UIA_CenterPointPropertyId },
+    { &Rotation_Property_GUID,                            UIA_RotationPropertyId },
+    { &Size_Property_GUID,                                UIA_SizePropertyId },
+    { &IsSelectionPattern2Available_Property_GUID,        UIA_IsSelectionPattern2AvailablePropertyId },
+    { &Selection2_FirstSelectedItem_Property_GUID,        UIA_Selection2FirstSelectedItemPropertyId },
+    { &Selection2_LastSelectedItem_Property_GUID,         UIA_Selection2LastSelectedItemPropertyId },
+    { &Selection2_CurrentSelectedItem_Property_GUID,      UIA_Selection2CurrentSelectedItemPropertyId },
+    { &Selection2_ItemCount_Property_GUID,                UIA_Selection2ItemCountPropertyId },
+    { &HeadingLevel_Property_GUID,                        UIA_HeadingLevelPropertyId },
+    { &IsDialog_Property_GUID,                            UIA_IsDialogPropertyId },
+};
+
+static void test_UiaLookupId(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(uia_property_lookup_ids); i++)
+    {
+        int prop_id = UiaLookupId(AutomationIdentifierType_Property, uia_property_lookup_ids[i].guid);
+
+        if (!prop_id)
+        {
+            win_skip("No propertyId for GUID %s, skipping further tests.\n", debugstr_guid(uia_property_lookup_ids[i].guid));
+            break;
+        }
+
+        ok(prop_id == uia_property_lookup_ids[i].id, "Unexpected Property id, expected %d, got %d\n",
+                uia_property_lookup_ids[i].id, prop_id);
+    }
+}
+
+static const struct prov_method_sequence node_from_prov1[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov2[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov3[] = {
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov4[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov5[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Win10v1507 and below call this. */
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* These three are only done on Win10v1507 and below. */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider2, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* This is only done on Win10v1507. */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    /* Win10v1507 and below call this. */
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov6[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Win10v1507 and below call this. */
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider2, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* This is only done on Win10v1507. */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov7[] = {
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Win10v1507 and below call this. */
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider2, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* This is only done on Win10v1507. */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence node_from_prov8[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { 0 }
+};
+
+static void check_uia_prop_val(PROPERTYID prop_id, enum UIAutomationType type, VARIANT *v);
+static DWORD WINAPI uia_node_from_provider_test_com_thread(LPVOID param)
+{
+    HUIANODE node = param;
+    HRESULT hr;
+    VARIANT v;
+
+    /*
+     * Since this is a node representing an IRawElementProviderSimple with
+     * ProviderOptions_UseComThreading set, it is only usable in threads that
+     * have initialized COM.
+     */
+    hr = UiaGetPropertyValue(node, UIA_ProcessIdPropertyId, &v);
+    ok(hr == CO_E_NOTINITIALIZED, "Unexpected hr %#lx\n", hr);
+
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+    hr = UiaGetPropertyValue(node, UIA_ProcessIdPropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    check_uia_prop_val(UIA_ProcessIdPropertyId, UIAutomationType_Int, &v);
+
+    /*
+     * When retrieving a UIAutomationType_Element property, if UseComThreading
+     * is set, we'll get an HUIANODE that will make calls inside of the
+     * apartment of the node it is retrieved from. I.e, if we received a node
+     * with UseComThreading set from another node with UseComThreading set
+     * inside of an STA, the returned node will have all of its methods called
+     * from the STA thread.
+     */
+    Provider_child.prov_opts = ProviderOptions_UseComThreading | ProviderOptions_ServerSideProvider;
+    Provider_child.expected_tid = Provider.expected_tid;
+    hr = UiaGetPropertyValue(node, UIA_LabeledByPropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    check_uia_prop_val(UIA_LabeledByPropertyId, UIAutomationType_Element, &v);
+
+    /* Unset ProviderOptions_UseComThreading. */
+    Provider_child.prov_opts = ProviderOptions_ServerSideProvider;
+    hr = UiaGetPropertyValue(node, UIA_LabeledByPropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+
+    /*
+     * ProviderOptions_UseComThreading not set, GetPropertyValue will be
+     * called on the current thread.
+     */
+    Provider_child.expected_tid = GetCurrentThreadId();
+    check_uia_prop_val(UIA_LabeledByPropertyId, UIAutomationType_Element, &v);
+
+    CoUninitialize();
+
+    return 0;
+}
+
+static void test_uia_node_from_prov_com_threading(void)
+{
+    HANDLE thread;
+    HUIANODE node;
+    HRESULT hr;
+
+    /* Test ProviderOptions_UseComThreading. */
+    Provider.hwnd = NULL;
+    prov_root = NULL;
+    Provider.prov_opts = ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading;
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok_method_sequence(node_from_prov8, "node_from_prov8");
+
+    /*
+     * On Windows versions prior to Windows 10, UiaNodeFromProvider ignores the
+     * ProviderOptions_UseComThreading flag.
+     */
+    if (hr == S_OK)
+    {
+        win_skip("Skipping ProviderOptions_UseComThreading tests for UiaNodeFromProvider.\n");
+        UiaNodeRelease(node);
+        return;
+    }
+    ok(hr == CO_E_NOTINITIALIZED, "Unexpected hr %#lx.\n", hr);
+
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    ok_method_sequence(node_from_prov8, "node_from_prov8");
+
+    Provider.expected_tid = GetCurrentThreadId();
+    thread = CreateThread(NULL, 0, uia_node_from_provider_test_com_thread, (void *)node, 0, NULL);
+    while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_ALLINPUT) != WAIT_OBJECT_0)
+    {
+        MSG msg;
+        while(PeekMessageW(&msg, 0, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    CloseHandle(thread);
+
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+    Provider_child.expected_tid = Provider.expected_tid = 0;
+
+    CoUninitialize();
+}
+static void test_UiaNodeFromProvider(void)
+{
+    WNDCLASSA cls;
+    HUIANODE node;
+    HRESULT hr;
+    ULONG ref;
+    HWND hwnd;
+    VARIANT v;
+
+    cls.style = 0;
+    cls.lpfnWndProc = test_wnd_proc;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandleA(NULL);
+    cls.hIcon = 0;
+    cls.hCursor = NULL;
+    cls.hbrBackground = NULL;
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = "UiaNodeFromProvider class";
+
+    RegisterClassA(&cls);
+
+    hwnd = CreateWindowA("UiaNodeFromProvider class", "Test window", WS_OVERLAPPEDWINDOW,
+            0, 0, 100, 100, NULL, NULL, NULL, NULL);
+
+    /* Run these tests early, we end up in an implicit MTA later. */
+    test_uia_node_from_prov_com_threading();
+
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+    hr = UiaNodeFromProvider(NULL, &node);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    /* Must have a successful call to get_ProviderOptions. */
+    Provider.prov_opts = 0;
+    node = (void *)0xdeadbeef;
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == E_NOTIMPL, "Unexpected hr %#lx.\n", hr);
+    ok(!node, "node != NULL\n");
+    ok_method_sequence(node_from_prov1, "node_from_prov1");
+
+    /* No HWND exposed through Provider. */
+    Provider.prov_opts = ProviderOptions_ServerSideProvider;
+    node = (void *)0xdeadbeef;
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), NULL);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", TRUE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(node_from_prov2, "node_from_prov2");
+
+    /* HUIANODE represents a COM interface. */
+    ref = IUnknown_AddRef((IUnknown *)node);
+    ok(ref == 2, "Unexpected refcnt %ld\n", ref);
+
+    ref = IUnknown_AddRef((IUnknown *)node);
+    ok(ref == 3, "Unexpected refcnt %ld\n", ref);
+
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+
+    ref = IUnknown_Release((IUnknown *)node);
+    ok(ref == 1, "Unexpected refcnt %ld\n", ref);
+
+    ref = IUnknown_Release((IUnknown *)node);
+    ok(ref == 0, "Unexpected refcnt %ld\n", ref);
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+
+    /*
+     * No HWND exposed through Provider_child, but it returns a parent from
+     * NavigateDirection_Parent. Behavior doesn't change.
+     */
+    Provider_child.prov_opts = ProviderOptions_ServerSideProvider;
+    node = (void *)0xdeadbeef;
+    hr = UiaNodeFromProvider(&Provider_child.IRawElementProviderSimple_iface, &node);
+    ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider_child.ref);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), NULL);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider_child", TRUE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(node_from_prov3, "node_from_prov3");
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider_child.ref == 1, "Unexpected refcnt %ld\n", Provider_child.ref);
+
+    /* HWND exposed, but Provider2 not returned from WM_GETOBJECT. */
+    Provider.hwnd = hwnd;
+    prov_root = NULL;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    /* Win10v1507 and below send this, Windows 7 sends it twice. */
+    SET_EXPECT_MULTI(winproc_GETOBJECT_CLIENT, 2);
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
+
+        /* Newer versions of Windows have "Hwnd(parent link):" */
+        if (get_provider_desc(V_BSTR(&v), L"Hwnd(parent link):", NULL))
+        {
+            check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Hwnd", NULL, TRUE);
+        }
+        else
+        {
+            check_node_provider_desc(V_BSTR(&v), L"Annotation", NULL, TRUE);
+            check_node_provider_desc(V_BSTR(&v), L"Main", NULL, FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider", FALSE);
+        }
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(node_from_prov4, "node_from_prov4");
+
+    ok(!!node, "node == NULL\n");
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+
+    /* Return Provider2 in response to WM_GETOBJECT. */
+    Provider.hwnd = Provider2.hwnd = hwnd;
+    Provider.prov_opts = Provider2.prov_opts = ProviderOptions_ServerSideProvider;
+    prov_root = &Provider2.IRawElementProviderSimple_iface;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    /* Windows 7 sends this. */
+    SET_EXPECT(winproc_GETOBJECT_CLIENT);
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
+
+    /* Win10v1507 and below hold a reference to the root provider for the HWND */
+    ok(broken(Provider2.ref == 2) || Provider2.ref == 1, "Unexpected refcnt %ld\n", Provider2.ref);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    ok(!!node, "node == NULL\n");
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
+
+        /* Newer versions of Windows have "Hwnd(parent link):" */
+        if (get_provider_desc(V_BSTR(&v), L"Hwnd(parent link):", NULL))
+        {
+            check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Hwnd", NULL, TRUE);
+        }
+        else
+        {
+            check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider2", TRUE);
+            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+            check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider", FALSE);
+        }
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(node_from_prov5, "node_from_prov5");
+
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+    ok(Provider2.ref == 1, "Unexpected refcnt %ld\n", Provider2.ref);
+
+    /*
+     * Windows 10 newer than v1507 only matches older behavior if
+     * Provider is a ClientSideProvider.
+     */
+    Provider.prov_opts = ProviderOptions_ClientSideProvider;
+    Provider2.prov_opts = ProviderOptions_ServerSideProvider;
+    prov_root = &Provider2.IRawElementProviderSimple_iface;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    /* Windows 7 sends this. */
+    SET_EXPECT(winproc_GETOBJECT_CLIENT);
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider2", TRUE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider", FALSE);
+        VariantClear(&v);
+    }
+    ok_method_sequence(node_from_prov6, "node_from_prov6");
+
+    todo_wine ok(Provider2.ref == 2, "Unexpected refcnt %ld\n", Provider2.ref);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+
+    ok(!!node, "node == NULL\n");
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+    ok(Provider2.ref == 1, "Unexpected refcnt %ld\n", Provider2.ref);
+
+    /* Provider_child has a parent, so it will be "(parent link)". */
+    Provider_child.prov_opts = ProviderOptions_ClientSideProvider;
+    Provider_child.hwnd = hwnd;
+    Provider2.prov_opts = ProviderOptions_ServerSideProvider;
+    prov_root = &Provider2.IRawElementProviderSimple_iface;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    /* Windows 7 sends this. */
+    SET_EXPECT(winproc_GETOBJECT_CLIENT);
+    hr = UiaNodeFromProvider(&Provider_child.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider2", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_child", TRUE);
+        VariantClear(&v);
+    }
+    ok_method_sequence(node_from_prov7, "node_from_prov7");
+
+    todo_wine ok(Provider2.ref == 2, "Unexpected refcnt %ld\n", Provider2.ref);
+    ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+
+    ok(!!node, "node == NULL\n");
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider_child.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+    ok(Provider2.ref == 1, "Unexpected refcnt %ld\n", Provider2.ref);
+
+    CoUninitialize();
+    DestroyWindow(hwnd);
+    UnregisterClassA("UiaNodeFromProvider class", NULL);
+    prov_root = NULL;
+}
+
+/* Sequence for types other than UIAutomationType_Element. */
+static const struct prov_method_sequence get_prop_seq[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE },
+    { 0 }
+};
+
+/* Sequence for getting a property that returns an invalid type. */
+static const struct prov_method_sequence get_prop_invalid_type_seq[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE },
+    /* Windows 7 calls this. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { 0 }
+};
+
+/* UIAutomationType_Element sequence. */
+static const struct prov_method_sequence get_elem_prop_seq[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* Only called on Windows versions past Win10v1507. */
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL },
+    { 0 }
+};
+
+/* UIAutomationType_ElementArray sequence. */
+static const struct prov_method_sequence get_elem_arr_prop_seq[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child2, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider_child2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider_child2, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_child2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_child2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROPERTY_VALUE },
+    { &Provider_child2, PROV_GET_PROPERTY_VALUE },
+    { 0 }
+};
+
+static void check_uia_prop_val(PROPERTYID prop_id, enum UIAutomationType type, VARIANT *v)
+{
+    LONG idx;
+
+    switch (type)
+    {
+    case UIAutomationType_String:
+        ok(V_VT(v) == VT_BSTR, "Unexpected VT %d\n", V_VT(v));
+        ok(!lstrcmpW(V_BSTR(v), uia_bstr_prop_str), "Unexpected BSTR %s\n", wine_dbgstr_w(V_BSTR(v)));
+        ok_method_sequence(get_prop_seq, NULL);
+        break;
+
+    case UIAutomationType_Bool:
+        ok(V_VT(v) == VT_BOOL, "Unexpected VT %d\n", V_VT(v));
+
+        /* UIA_IsKeyboardFocusablePropertyId is broken on Win8 and Win10v1507. */
+        if (prop_id == UIA_IsKeyboardFocusablePropertyId)
+            ok(check_variant_bool(v, TRUE) || broken(check_variant_bool(v, FALSE)),
+                    "Unexpected BOOL %#x\n", V_BOOL(v));
+        else
+            ok(check_variant_bool(v, TRUE), "Unexpected BOOL %#x\n", V_BOOL(v));
+        ok_method_sequence(get_prop_seq, NULL);
+        break;
+
+    case UIAutomationType_Int:
+        ok(V_VT(v) == VT_I4, "Unexpected VT %d\n", V_VT(v));
+
+        if (prop_id == UIA_NativeWindowHandlePropertyId)
+            ok(ULongToHandle(V_I4(v)) == Provider.hwnd, "Unexpected I4 %#lx\n", V_I4(v));
+        else
+            ok(V_I4(v) == uia_i4_prop_val, "Unexpected I4 %#lx\n", V_I4(v));
+        ok_method_sequence(get_prop_seq, NULL);
+        break;
+
+    case UIAutomationType_IntArray:
+        ok(V_VT(v) == (VT_ARRAY | VT_I4), "Unexpected VT %d\n", V_VT(v));
+
+        for (idx = 0; idx < ARRAY_SIZE(uia_i4_arr_prop_val); idx++)
+        {
+            ULONG val;
+
+            SafeArrayGetElement(V_ARRAY(v), &idx, &val);
+            ok(val == uia_i4_arr_prop_val[idx], "Unexpected I4 %#lx at idx %ld\n", val, idx);
+        }
+        ok_method_sequence(get_prop_seq, NULL);
+        break;
+
+    case UIAutomationType_Double:
+        ok(V_VT(v) == VT_R8, "Unexpected VT %d\n", V_VT(v));
+        ok(V_R8(v) == uia_r8_prop_val, "Unexpected R8 %lf\n", V_R8(v));
+        ok_method_sequence(get_prop_seq, NULL);
+        break;
+
+    case UIAutomationType_DoubleArray:
+        ok(V_VT(v) == (VT_ARRAY | VT_R8), "Unexpected VT %d\n", V_VT(v));
+        for (idx = 0; idx < ARRAY_SIZE(uia_r8_arr_prop_val); idx++)
+        {
+            double val;
+
+            SafeArrayGetElement(V_ARRAY(v), &idx, &val);
+            ok(val == uia_r8_arr_prop_val[idx], "Unexpected R8 %lf at idx %ld\n", val, idx);
+        }
+        ok_method_sequence(get_prop_seq, NULL);
+        break;
+
+    case UIAutomationType_Element:
+    {
+        HUIANODE tmp_node;
+        HRESULT hr;
+        VARIANT v1;
+
+#ifdef _WIN64
+        ok(V_VT(v) == VT_I8, "Unexpected VT %d\n", V_VT(v));
+        tmp_node = (HUIANODE)V_I8(v);
+#else
+        ok(V_VT(v) == VT_I4, "Unexpected VT %d\n", V_VT(v));
+        tmp_node = (HUIANODE)V_I4(v);
+#endif
+        ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider_child.ref);
+
+        hr = UiaGetPropertyValue(tmp_node, UIA_ControlTypePropertyId, &v1);
+        ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+        ok(V_VT(&v1) == VT_I4, "Unexpected VT %d\n", V_VT(&v1));
+        ok(V_I4(&v1) == uia_i4_prop_val, "Unexpected I4 %#lx\n", V_I4(&v1));
+
+        ok(UiaNodeRelease(tmp_node), "Failed to release node\n");
+        ok(Provider_child.ref == 1, "Unexpected refcnt %ld\n", Provider_child.ref);
+        ok_method_sequence(get_elem_prop_seq, NULL);
+        break;
+    }
+
+    case UIAutomationType_ElementArray:
+        ok(V_VT(v) == (VT_ARRAY | VT_UNKNOWN), "Unexpected VT %d\n", V_VT(v));
+        if (V_VT(v) != (VT_ARRAY | VT_UNKNOWN))
+            break;
+
+        ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider_child.ref);
+        ok(Provider_child2.ref == 2, "Unexpected refcnt %ld\n", Provider_child2.ref);
+        for (idx = 0; idx < ARRAY_SIZE(uia_unk_arr_prop_val); idx++)
+        {
+            HUIANODE tmp_node;
+            HRESULT hr;
+            VARIANT v1;
+
+            SafeArrayGetElement(V_ARRAY(v), &idx, &tmp_node);
+
+            hr = UiaGetPropertyValue(tmp_node, UIA_ControlTypePropertyId, &v1);
+            ok(hr == S_OK, "node[%ld] Unexpected hr %#lx\n", idx, hr);
+            ok(V_VT(&v1) == VT_I4, "node[%ld] Unexpected VT %d\n", idx, V_VT(&v1));
+            ok(V_I4(&v1) == uia_i4_prop_val, "node[%ld] Unexpected I4 %#lx\n", idx, V_I4(&v1));
+
+            ok(UiaNodeRelease(tmp_node), "Failed to release node[%ld]\n", idx);
+            VariantClear(&v1);
+        }
+
+        VariantClear(v);
+        ok(Provider_child.ref == 1, "Unexpected refcnt %ld\n", Provider_child.ref);
+        ok(Provider_child2.ref == 1, "Unexpected refcnt %ld\n", Provider_child2.ref);
+        ok_method_sequence(get_elem_arr_prop_seq, NULL);
+        break;
+
+    default:
+        break;
+    }
+
+    VariantClear(v);
+    V_VT(v) = VT_EMPTY;
+}
+
+struct uia_element_property {
+    const GUID *prop_guid;
+    enum UIAutomationType type;
+    BOOL skip_invalid;
+};
+
+static const struct uia_element_property element_properties[] = {
+    { &ProcessId_Property_GUID,                UIAutomationType_Int, TRUE },
+    { &ControlType_Property_GUID,              UIAutomationType_Int },
+    { &LocalizedControlType_Property_GUID,     UIAutomationType_String, TRUE },
+    { &Name_Property_GUID,                     UIAutomationType_String },
+    { &AcceleratorKey_Property_GUID,           UIAutomationType_String },
+    { &AccessKey_Property_GUID,                UIAutomationType_String },
+    { &HasKeyboardFocus_Property_GUID,         UIAutomationType_Bool },
+    { &IsKeyboardFocusable_Property_GUID,      UIAutomationType_Bool },
+    { &IsEnabled_Property_GUID,                UIAutomationType_Bool },
+    { &AutomationId_Property_GUID,             UIAutomationType_String },
+    { &ClassName_Property_GUID,                UIAutomationType_String },
+    { &HelpText_Property_GUID,                 UIAutomationType_String },
+    { &Culture_Property_GUID,                  UIAutomationType_Int },
+    { &IsControlElement_Property_GUID,         UIAutomationType_Bool },
+    { &IsContentElement_Property_GUID,         UIAutomationType_Bool },
+    { &LabeledBy_Property_GUID,                UIAutomationType_Element },
+    { &IsPassword_Property_GUID,               UIAutomationType_Bool },
+    { &NewNativeWindowHandle_Property_GUID,    UIAutomationType_Int },
+    { &ItemType_Property_GUID,                 UIAutomationType_String },
+    { &IsOffscreen_Property_GUID,              UIAutomationType_Bool },
+    { &Orientation_Property_GUID,              UIAutomationType_Int },
+    { &FrameworkId_Property_GUID,              UIAutomationType_String },
+    { &IsRequiredForForm_Property_GUID,        UIAutomationType_Bool },
+    { &ItemStatus_Property_GUID,               UIAutomationType_String },
+    { &AriaRole_Property_GUID,                 UIAutomationType_String },
+    { &AriaProperties_Property_GUID,           UIAutomationType_String },
+    { &IsDataValidForForm_Property_GUID,       UIAutomationType_Bool },
+    { &ControllerFor_Property_GUID,            UIAutomationType_ElementArray },
+    { &DescribedBy_Property_GUID,              UIAutomationType_ElementArray },
+    { &FlowsTo_Property_GUID,                  UIAutomationType_ElementArray },
+    /* Implemented on Win8+ */
+    { &OptimizeForVisualContent_Property_GUID, UIAutomationType_Bool },
+    { &LiveSetting_Property_GUID,              UIAutomationType_Int },
+    { &FlowsFrom_Property_GUID,                UIAutomationType_ElementArray },
+    { &IsPeripheral_Property_GUID,             UIAutomationType_Bool },
+    /* Implemented on Win10v1507+. */
+    { &PositionInSet_Property_GUID,            UIAutomationType_Int },
+    { &SizeOfSet_Property_GUID,                UIAutomationType_Int },
+    { &Level_Property_GUID,                    UIAutomationType_Int },
+    { &AnnotationTypes_Property_GUID,          UIAutomationType_IntArray },
+    { &AnnotationObjects_Property_GUID,        UIAutomationType_ElementArray },
+    /* Implemented on Win10v1809+. */
+    { &LandmarkType_Property_GUID,             UIAutomationType_Int },
+    { &LocalizedLandmarkType_Property_GUID,    UIAutomationType_String, TRUE },
+    { &FullDescription_Property_GUID,          UIAutomationType_String },
+    { &FillColor_Property_GUID,                UIAutomationType_Int },
+    { &OutlineColor_Property_GUID,             UIAutomationType_IntArray },
+    { &FillType_Property_GUID,                 UIAutomationType_Int },
+    { &VisualEffects_Property_GUID,            UIAutomationType_Int },
+    { &OutlineThickness_Property_GUID,         UIAutomationType_DoubleArray },
+    { &Rotation_Property_GUID,                 UIAutomationType_Double },
+    { &Size_Property_GUID,                     UIAutomationType_DoubleArray },
+    { &HeadingLevel_Property_GUID,             UIAutomationType_Int },
+    { &IsDialog_Property_GUID,                 UIAutomationType_Bool },
+};
+
+static void test_UiaGetPropertyValue(void)
+{
+    const struct uia_element_property *elem_prop;
+    IUnknown *unk_ns;
+    unsigned int i;
+    HUIANODE node;
+    int prop_id;
+    HRESULT hr;
+    VARIANT v;
+
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+    Provider.prov_opts = ProviderOptions_ServerSideProvider;
+    Provider_child.prov_opts = Provider_child2.prov_opts = ProviderOptions_ServerSideProvider;
+    Provider.hwnd = Provider_child.hwnd = Provider_child2.hwnd = NULL;
+    node = (void *)0xdeadbeef;
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    ok_method_sequence(node_from_prov8, NULL);
+
+    hr = UiaGetReservedNotSupportedValue(&unk_ns);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(element_properties); i++)
+    {
+        elem_prop = &element_properties[i];
+
+        Provider.ret_invalid_prop_type = FALSE;
+        VariantClear(&v);
+        prop_id = UiaLookupId(AutomationIdentifierType_Property, elem_prop->prop_guid);
+        if (!prop_id)
+        {
+            win_skip("No propertyId for GUID %s, skipping further tests.\n", debugstr_guid(elem_prop->prop_guid));
+            break;
+        }
+        winetest_push_context("prop_id %d", prop_id);
+        hr = UiaGetPropertyValue(node, prop_id, &v);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        check_uia_prop_val(prop_id, elem_prop->type, &v);
+
+        /*
+         * Some properties have special behavior if an invalid value is
+         * returned, skip them here.
+         */
+        if (!elem_prop->skip_invalid)
+        {
+            Provider.ret_invalid_prop_type = TRUE;
+            hr = UiaGetPropertyValue(node, prop_id, &v);
+            if (hr == E_NOTIMPL)
+                todo_wine ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+            else
+                ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+            {
+                ok_method_sequence(get_prop_invalid_type_seq, NULL);
+                ok(V_VT(&v) == VT_UNKNOWN, "Unexpected vt %d\n", V_VT(&v));
+                ok(V_UNKNOWN(&v) == unk_ns, "unexpected IUnknown %p\n", V_UNKNOWN(&v));
+                VariantClear(&v);
+            }
+        }
+
+        winetest_pop_context();
+    }
+
+    Provider.ret_invalid_prop_type = FALSE;
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+
+    IUnknown_Release(unk_ns);
+    CoUninitialize();
+}
+
 START_TEST(uiautomation)
 {
     HMODULE uia_dll = LoadLibraryA("uiautomationcore.dll");
+    BOOL (WINAPI *pImmDisableIME)(DWORD);
+    HMODULE hModuleImm32;
+
+    /* Make sure COM isn't initialized by imm32. */
+    hModuleImm32 = LoadLibraryA("imm32.dll");
+    if (hModuleImm32) {
+        pImmDisableIME = (void *)GetProcAddress(hModuleImm32, "ImmDisableIME");
+        if (pImmDisableIME)
+            pImmDisableIME(0);
+    }
+    pImmDisableIME = NULL;
+    FreeLibrary(hModuleImm32);
 
     test_UiaHostProviderFromHwnd();
     test_uia_reserved_value_ifaces();
+    test_UiaLookupId();
+    test_UiaNodeFromProvider();
+    test_UiaGetPropertyValue();
     if (uia_dll)
     {
         pUiaProviderFromIAccessible = (void *)GetProcAddress(uia_dll, "UiaProviderFromIAccessible");

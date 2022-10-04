@@ -773,6 +773,17 @@ interface nsIChannelEventSink : nsISupports
 
 [
     object,
+    uuid(87d55fba-cb7e-4f38-84c1-5c6c2b2a55e9),
+    local
+]
+interface nsIProgressEventSink : nsISupports
+{
+    nsresult OnProgress(nsIRequest *aRequest, nsISupports *aContext, int64_t aProgress, int64_t aProgressMax);
+    nsresult OnStatus(nsIRequest *aRequest, nsISupports *aContext, nsresult aStatus, const char16_t *aStatusArg);
+}
+
+[
+    object,
     uuid(79de76e5-994e-4f6b-81aa-42d9adb6e67e),
     local
 ]
@@ -3302,6 +3313,20 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
     nsresult GetLocation(uint32_t *aLocation);
     nsresult GetRepeat(bool *aRepeat);
     nsresult GetKey(nsAString *aKey);
+}
+
+[
+    object,
+    uuid(e0682338-4c3f-4d3a-9487-d7492ea76335),
+    local
+]
+interface nsIDOMProgressEvent : nsISupports
+{
+    nsresult GetLengthComputable(bool *aLengthComputable);
+    nsresult GetLoaded(uint64_t *aLoaded);
+    nsresult GetTotal(uint64_t *aTotal);
+    nsresult InitProgressEvent(const nsAString *typeArg, bool canBubbleArg, bool cancelableArg,
+             bool lengthComputableArg, uint64_t loadedArg, uint64_t totalArg);
 }
 
 [

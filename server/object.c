@@ -573,7 +573,7 @@ struct security_descriptor *set_sd_from_token_internal( const struct security_de
     }
     else if (token)
     {
-        owner = token_get_user( token );
+        owner = token_get_owner( token );
         new_sd.owner_len = sid_len( owner );
     }
     else new_sd.owner_len = 0;

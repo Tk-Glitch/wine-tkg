@@ -67,6 +67,8 @@ enum dbg_line_status
 
 enum dbg_internal_types
 {
+    /* types that we synthetize inside the debugger */
+    dbg_itype_synthetized       = 0xf0000000,
     /* order here must match types.c:basic_types_details table */
     dbg_itype_first             = 0xffffff00,
     dbg_itype_void              = dbg_itype_first,
@@ -282,6 +284,8 @@ struct dbg_process
     int                         source_start_line;
     int                         source_end_line;
     const struct data_model*    data_model;
+    struct dbg_type*            synthetized_types;
+    unsigned                    num_synthetized_types;
 };
 
 /* describes the way the debugger interacts with a given process */
@@ -385,6 +389,7 @@ extern void             info_win32_virtual(DWORD pid);
 extern void             info_win32_segments(DWORD start, int length);
 extern void             info_win32_exception(void);
 extern void             info_wine_dbg_channel(BOOL add, const char* chnl, const char* name);
+extern WCHAR*           fetch_thread_description(DWORD tid);
 
   /* memory.c */
 extern BOOL             memory_read_value(const struct dbg_lvalue* lvalue, DWORD size, void* result);
@@ -498,6 +503,7 @@ extern BOOL             types_is_integral_type(const struct dbg_lvalue*);
 extern BOOL             types_is_float_type(const struct dbg_lvalue*);
 extern BOOL             types_is_pointer_type(const struct dbg_lvalue*);
 extern BOOL             types_find_basic(const WCHAR*, const char*, struct dbg_type* type);
+extern BOOL             types_unload_module(DWORD_PTR linear);
 
   /* winedbg.c */
 #ifdef __GNUC__
@@ -535,12 +541,6 @@ static inline BOOL dbg_write_memory(void* addr, const void* buffer, size_t len)
 {
     SIZE_T wlen;
     return dbg_curr_process->process_io->write(dbg_curr_process->handle, addr, buffer, len, &wlen) && len == wlen;
-}
-
-static inline void* dbg_heap_realloc(void* buffer, size_t size)
-{
-    return (buffer) ? HeapReAlloc(GetProcessHeap(), 0, buffer, size) :
-        HeapAlloc(GetProcessHeap(), 0, size);
 }
 
 struct data_model

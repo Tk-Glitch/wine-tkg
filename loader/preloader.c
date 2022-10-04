@@ -1460,7 +1460,7 @@ void* wld_start( void **stack )
 
     i = 0;
     /* delete sysinfo values if addresses conflict */
-    if (is_in_preload_range( av, AT_SYSINFO ) || is_in_preload_range( av, AT_SYSINFO_EHDR ))
+    if (1)
     {
         delete_av[i++].a_type = AT_SYSINFO;
         delete_av[i++].a_type = AT_SYSINFO_EHDR;

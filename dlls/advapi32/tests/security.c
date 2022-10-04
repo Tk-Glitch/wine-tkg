@@ -1765,6 +1765,60 @@ static void test_AccessCheck(void)
     HeapFree(GetProcessHeap(), 0, PrivSet);
 }
 
+static TOKEN_USER *get_alloc_token_user( HANDLE token )
+{
+    TOKEN_USER *token_user;
+    DWORD size;
+    BOOL ret;
+
+    ret = GetTokenInformation( token, TokenUser, NULL, 0, &size );
+    ok(!ret, "Expected failure, got %d\n", ret);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %ld\n", GetLastError());
+
+    token_user = HeapAlloc( GetProcessHeap(), 0, size );
+    ret = GetTokenInformation( token, TokenUser, token_user, size, &size );
+    ok(ret, "GetTokenInformation failed with error %ld\n", GetLastError());
+
+    return token_user;
+}
+
+static TOKEN_OWNER *get_alloc_token_owner( HANDLE token )
+{
+    TOKEN_OWNER *token_owner;
+    DWORD size;
+    BOOL ret;
+
+    ret = GetTokenInformation( token, TokenOwner, NULL, 0, &size );
+    ok(!ret, "Expected failure, got %d\n", ret);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %ld\n", GetLastError());
+
+    token_owner = HeapAlloc( GetProcessHeap(), 0, size );
+    ret = GetTokenInformation( token, TokenOwner, token_owner, size, &size );
+    ok(ret, "GetTokenInformation failed with error %ld\n", GetLastError());
+
+    return token_owner;
+}
+
+static TOKEN_PRIMARY_GROUP *get_alloc_token_primary_group( HANDLE token )
+{
+    TOKEN_PRIMARY_GROUP *token_primary_group;
+    DWORD size;
+    BOOL ret;
+
+    ret = GetTokenInformation( token, TokenPrimaryGroup, NULL, 0, &size );
+    ok(!ret, "Expected failure, got %d\n", ret);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %ld\n", GetLastError());
+
+    token_primary_group = HeapAlloc( GetProcessHeap(), 0, size );
+    ret = GetTokenInformation( token, TokenPrimaryGroup, token_primary_group, size, &size );
+    ok(ret, "GetTokenInformation failed with error %ld\n", GetLastError());
+
+    return token_primary_group;
+}
+
 /* test GetTokenInformation for the various attributes */
 static void test_token_attr(void)
 {
@@ -1773,6 +1827,7 @@ static void test_token_attr(void)
     TOKEN_PRIVILEGES *Privileges;
     TOKEN_GROUPS *Groups;
     TOKEN_USER *User;
+    TOKEN_OWNER *Owner;
     TOKEN_DEFAULT_DACL *Dacl;
     BOOL ret;
     DWORD i, GLE;
@@ -1873,6 +1928,20 @@ static void test_token_attr(void)
     trace("TokenUser: %s attr: 0x%08lx\n", SidString, User->User.Attributes);
     LocalFree(SidString);
     HeapFree(GetProcessHeap(), 0, User);
+
+    /* owner */
+    ret = GetTokenInformation(Token, TokenOwner, NULL, 0, &Size);
+    ok(!ret && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
+        "GetTokenInformation(TokenOwner) failed with error %ld\n", GetLastError());
+    Owner = HeapAlloc(GetProcessHeap(), 0, Size);
+    ret = GetTokenInformation(Token, TokenOwner, Owner, Size, &Size);
+    ok(ret,
+        "GetTokenInformation(TokenOwner) failed with error %ld\n", GetLastError());
+
+    ConvertSidToStringSidA(Owner->Owner, &SidString);
+    trace("TokenOwner: %s\n", SidString);
+    LocalFree(SidString);
+    HeapFree(GetProcessHeap(), 0, Owner);
 
     /* logon */
     ret = GetTokenInformation(Token, TokenLogonSid, NULL, 0, &Size);
@@ -6437,16 +6506,28 @@ static void test_TokenIntegrityLevel(void)
     CloseHandle(token);
 }
 
-static void test_default_dacl_owner_sid(void)
+static void test_default_dacl_owner_group_sid(void)
 {
-    HANDLE handle;
+    TOKEN_USER *token_user;
+    TOKEN_OWNER *token_owner;
+    TOKEN_PRIMARY_GROUP *token_primary_group;
+    HANDLE handle, token;
     BOOL ret, defaulted, present, found;
     DWORD size, index;
     SECURITY_DESCRIPTOR *sd;
     SECURITY_ATTRIBUTES sa;
-    PSID owner;
+    PSID owner, group;
     ACL *dacl;
     ACCESS_ALLOWED_ACE *ace;
+
+    ret = OpenProcessToken( GetCurrentProcess(), TOKEN_QUERY, &token );
+    ok(ret, "OpenProcessToken failed with error %ld\n", GetLastError());
+
+    token_user = get_alloc_token_user( token );
+    token_owner = get_alloc_token_owner( token );
+    token_primary_group = get_alloc_token_primary_group( token );
+
+    CloseHandle( token );
 
     sd = HeapAlloc( GetProcessHeap(), 0, SECURITY_DESCRIPTOR_MIN_LENGTH );
     ret = InitializeSecurityDescriptor( sd, SECURITY_DESCRIPTOR_REVISION );
@@ -6459,11 +6540,11 @@ static void test_default_dacl_owner_sid(void)
     ok( handle != NULL, "error %lu\n", GetLastError() );
 
     size = 0;
-    ret = GetKernelObjectSecurity( handle, OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION, NULL, 0, &size );
+    ret = GetKernelObjectSecurity( handle, OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION, NULL, 0, &size );
     ok( !ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "error %lu\n", GetLastError() );
 
     sd = HeapAlloc( GetProcessHeap(), 0, size );
-    ret = GetKernelObjectSecurity( handle, OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION, sd, size, &size );
+    ret = GetKernelObjectSecurity( handle, OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION, sd, size, &size );
     ok( ret, "error %lu\n", GetLastError() );
 
     owner = (void *)0xdeadbeef;
@@ -6472,6 +6553,15 @@ static void test_default_dacl_owner_sid(void)
     ok( ret, "error %lu\n", GetLastError() );
     ok( owner != (void *)0xdeadbeef, "owner not set\n" );
     ok( !defaulted, "owner defaulted\n" );
+    ok( EqualSid( owner, token_owner->Owner ), "owner shall equal token owner\n" );
+
+    group = (void *)0xdeadbeef;
+    defaulted = TRUE;
+    ret = GetSecurityDescriptorGroup( sd, &group, &defaulted );
+    ok( ret, "error %lu\n", GetLastError() );
+    ok( group != (void *)0xdeadbeef, "group not set\n" );
+    ok( !defaulted, "group defaulted\n" );
+    ok( EqualSid( group, token_primary_group->PrimaryGroup ), "group shall equal token primary group\n" );
 
     dacl = (void *)0xdeadbeef;
     present = FALSE;
@@ -6486,13 +6576,32 @@ static void test_default_dacl_owner_sid(void)
     found = FALSE;
     while (GetAce( dacl, index++, (void **)&ace ))
     {
+        ok( ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE,
+            "expected ACCESS_ALLOWED_ACE_TYPE, got %d\n", ace->Header.AceType );
         if (EqualSid( &ace->SidStart, owner )) found = TRUE;
     }
     ok( found, "owner sid not found in dacl\n" );
 
+    if (!EqualSid( token_user->User.Sid, token_owner->Owner ))
+    {
+        index = 0;
+        found = FALSE;
+        while (GetAce( dacl, index++, (void **)&ace ))
+        {
+            ok( ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE,
+                "expected ACCESS_ALLOWED_ACE_TYPE, got %d\n", ace->Header.AceType );
+            if (EqualSid( &ace->SidStart, token_user->User.Sid )) found = TRUE;
+        }
+        ok( !found, "DACL shall not reference token user if it is different from token owner\n" );
+    }
+
     HeapFree( GetProcessHeap(), 0, sa.lpSecurityDescriptor );
     HeapFree( GetProcessHeap(), 0, sd );
     CloseHandle( handle );
+
+    HeapFree( GetProcessHeap(), 0, token_primary_group );
+    HeapFree( GetProcessHeap(), 0, token_owner );
+    HeapFree( GetProcessHeap(), 0, token_user );
 }
 
 static void test_AdjustTokenPrivileges(void)
@@ -8635,7 +8744,7 @@ START_TEST(security)
     test_GetUserNameW();
     test_CreateRestrictedToken();
     test_TokenIntegrityLevel();
-    test_default_dacl_owner_sid();
+    test_default_dacl_owner_group_sid();
     test_AdjustTokenPrivileges();
     test_AddAce();
     test_AddMandatoryAce();

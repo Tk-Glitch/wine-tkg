@@ -244,7 +244,7 @@ LPDIOBJECTDATAFORMAT dataformat_to_odf_by_type(LPCDIDATAFORMAT df, int n, DWORD 
 }
 
 static BOOL match_device_object( const DIDATAFORMAT *device_format, DIDATAFORMAT *user_format,
-                                 const DIDATAFORMAT *format, const DIOBJECTDATAFORMAT *match_obj, DWORD version )
+                                 const DIOBJECTDATAFORMAT *match_obj, DWORD version )
 {
     DWORD i, device_instance, instance = DIDFT_GETINSTANCE( match_obj->dwType );
     DIOBJECTDATAFORMAT *device_obj, *user_obj;
@@ -292,7 +292,7 @@ static HRESULT dinput_device_init_user_format( struct dinput_device *impl, const
     {
         match_obj = format->rgodf + i;
 
-        if (!match_device_object( device_format, user_format, format, match_obj, impl->dinput->dwVersion ))
+        if (!match_device_object( device_format, user_format, match_obj, impl->dinput->dwVersion ))
         {
             WARN( "object %s not found\n", debugstr_diobjectdataformat( match_obj ) );
             if (!(match_obj->dwType & DIDFT_OPTIONAL)) goto failed;
@@ -904,25 +904,23 @@ static HRESULT WINAPI dinput_device_EnumObjects( IDirectInputDevice8W *iface,
 
 static HRESULT enum_object_filter_init( struct dinput_device *impl, DIPROPHEADER *filter )
 {
-    DIDATAFORMAT *device_format = &impl->device_format, *user_format = &impl->user_format;
-    DIOBJECTDATAFORMAT *device_obj, *user_obj;
+    DIOBJECTDATAFORMAT *user_objs = impl->user_format.rgodf;
+    DWORD i, count = impl->device_format.dwNumObjs;
 
     if (filter->dwHow > DIPH_BYUSAGE) return DIERR_INVALIDPARAM;
     if (filter->dwHow == DIPH_BYUSAGE && !(impl->instance.dwDevType & DIDEVTYPE_HID)) return DIERR_UNSUPPORTED;
     if (filter->dwHow != DIPH_BYOFFSET) return DI_OK;
 
-    if (!user_format->rgodf) return DIERR_NOTFOUND;
+    if (!user_objs) return DIERR_NOTFOUND;
 
-    user_obj = user_format->rgodf + device_format->dwNumObjs;
-    device_obj = device_format->rgodf + device_format->dwNumObjs;
-    while (user_obj-- > user_format->rgodf && device_obj-- > device_format->rgodf)
+    for (i = 0; i < count; i++)
     {
-        if (!user_obj->dwType) continue;
-        if (user_obj->dwOfs == filter->dwObj) break;
+        if (!user_objs[i].dwType) continue;
+        if (user_objs[i].dwOfs == filter->dwObj) break;
     }
-    if (user_obj < user_format->rgodf) return DIERR_NOTFOUND;
+    if (i == count) return DIERR_NOTFOUND;
 
-    filter->dwObj = device_obj->dwOfs;
+    filter->dwObj = impl->device_format.rgodf[i].dwOfs;
     return DI_OK;
 }
 

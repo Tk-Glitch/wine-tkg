@@ -3771,7 +3771,7 @@ static void create_file(const char *file_name, const char *content)
 
     file = CreateFileA(file_name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL, NULL);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed\n");
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed: %lu\n", GetLastError());
     if(file == INVALID_HANDLE_VALUE)
         return;
 
@@ -4181,7 +4181,7 @@ START_TEST(url)
         trace("emulated about test (to object)...\n");
         test_BindToObject(ABOUT_TEST, BINDTEST_EMULATE, S_OK);
 
-        trace("emulalated test reporting result in read...\n");
+        trace("emulated test reporting result in read...\n");
         test_BindToStorage(WINETEST_SYNC_TEST, BINDTEST_EMULATE, TYMED_ISTREAM);
 
         trace("file test...\n");

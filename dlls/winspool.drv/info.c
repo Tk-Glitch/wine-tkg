@@ -2857,15 +2857,18 @@ BOOL WINAPI ClosePrinter(HANDLE hPrinter)
             LIST_FOR_EACH_SAFE(cursor, cursor2, &printer->queue->jobs)
             {
                 job_t *job = LIST_ENTRY(cursor, job_t, entry);
+                TRACE("Scheduling Job: %p\n", job);
                 ScheduleJob(hPrinter, job->job_id);
             }
             HeapFree(GetProcessHeap(), 0, printer->queue);
         }
 
         if (printer->backend_printer) {
+            TRACE("Closing Bankend printer\n");
             backend->fpClosePrinter(printer->backend_printer);
         }
 
+        TRACE("Freeing Printer entry\n");
         free_printer_entry( printer );
         printer_handles[i - 1] = NULL;
         LeaveCriticalSection(&printer_handles_cs);

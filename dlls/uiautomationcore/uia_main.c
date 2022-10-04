@@ -18,9 +18,9 @@
 
 #define COBJMACROS
 
+#include "combaseapi.h"
 #include "initguid.h"
-#include "uiautomation.h"
-#include "ocidl.h"
+#include "uia_private.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -295,15 +295,6 @@ HRESULT WINAPI UiaGetReservedNotSupportedValue(IUnknown **value)
     *value = &uia_reserved_ns_iface;
 
     return S_OK;
-}
-
-/***********************************************************************
- *          UiaLookupId (uiautomationcore.@)
- */
-int WINAPI UiaLookupId(enum AutomationIdentifierType type, const GUID *guid)
-{
-    FIXME("(%d, %s) stub!\n", type, debugstr_guid(guid));
-    return 1;
 }
 
 /***********************************************************************

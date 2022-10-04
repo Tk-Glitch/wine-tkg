@@ -62,7 +62,7 @@
 @ stub UiaFind
 @ stub UiaGetErrorDescription
 @ stub UiaGetPatternProvider
-@ stub UiaGetPropertyValue
+@ stdcall UiaGetPropertyValue(ptr long ptr)
 @ stdcall UiaGetReservedMixedAttributeValue(ptr)
 @ stdcall UiaGetReservedNotSupportedValue(ptr)
 @ stub UiaGetRootNode
@@ -79,8 +79,8 @@
 @ stub UiaNodeFromFocus
 @ stub UiaNodeFromHandle
 @ stub UiaNodeFromPoint
-@ stub UiaNodeFromProvider
-@ stub UiaNodeRelease
+@ stdcall UiaNodeFromProvider(ptr ptr)
+@ stdcall UiaNodeRelease(ptr)
 @ stub UiaPatternRelease
 #@ stub UiaProviderForNonClient
 @ stdcall UiaProviderFromIAccessible(ptr long long ptr)

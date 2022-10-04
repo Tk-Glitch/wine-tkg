@@ -28,6 +28,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
+#include "winver.h"
 #include "wincontypes.h"
 #include "winternl.h"
 #include "winuser.h"
@@ -543,6 +544,93 @@ done:
     return ret;
 }
 
+static int battleye_launcher_redirect_hack(const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len, WCHAR **cmd_line)
+{
+    static const WCHAR belauncherW[] = L"c:\\windows\\system32\\belauncher.exe";
+
+    WCHAR full_path[MAX_PATH];
+    WCHAR *p;
+    DWORD size;
+    void *block;
+    DWORD *translation;
+    char buf[100];
+    char *product_name;
+    WCHAR *new_cmd_line;
+
+    if (!GetLongPathNameW( app_name, full_path, MAX_PATH )) lstrcpynW( full_path, app_name, MAX_PATH );
+    if (!GetFullPathNameW( full_path, MAX_PATH, full_path, NULL )) lstrcpynW( full_path, app_name, MAX_PATH );
+
+    /* We detect the BattlEye launcher executable through the product name property, as the executable name varies */
+    size = GetFileVersionInfoSizeExW(0, full_path, NULL);
+    if (!size)
+        return 0;
+
+    block = HeapAlloc( GetProcessHeap(), 0, size );
+
+    if (!GetFileVersionInfoExW(0, full_path, 0, size, block))
+    {
+        HeapFree( GetProcessHeap(), 0, block );
+        return 0;
+    }
+
+    if (!VerQueryValueA(block, "\\VarFileInfo\\Translation", (void **) &translation, &size) || size != 4)
+    {
+        HeapFree( GetProcessHeap(), 0, block );
+        return 0;
+    }
+
+    sprintf(buf, "\\StringFileInfo\\%08x\\ProductName", MAKELONG(HIWORD(*translation), LOWORD(*translation)));
+
+    if (!VerQueryValueA(block, buf, (void **) &product_name, &size))
+    {
+        HeapFree( GetProcessHeap(), 0, block );
+        return 0;
+    }
+
+    if (strcmp(product_name, "BattlEye Launcher"))
+    {
+        HeapFree( GetProcessHeap(), 0, block);
+        return 0;
+    }
+
+    HeapFree( GetProcessHeap(), 0, block );
+
+    TRACE("Detected launch of a BattlEye Launcher, redirecting to Proton version.\n");
+
+    if (new_name_len < wcslen(belauncherW) + 1)
+    {
+        WARN("Game executable path doesn't fit in buffer.\n");
+        return 0;
+    }
+
+    wcscpy(new_name, belauncherW);
+
+    /* find and replace executable name in command line, and add BE argument */
+    p = *cmd_line;
+    if (p[0] == '\"')
+        p++;
+
+    if (!wcsncmp(p, app_name, wcslen(app_name)))
+    {
+        new_cmd_line = HeapAlloc( GetProcessHeap(), 0, ( wcslen(*cmd_line) + wcslen(belauncherW) + 1 - wcslen(app_name) ) * sizeof(WCHAR) );
+
+        wcscpy(new_cmd_line, *cmd_line);
+        p = new_cmd_line;
+        if (p[0] == '\"')
+            p++;
+
+        memmove( p + wcslen(belauncherW), p + wcslen(app_name), (wcslen(p) - wcslen(belauncherW)) * sizeof(WCHAR) );
+        memcpy( p, belauncherW, wcslen(belauncherW) * sizeof(WCHAR) );
+
+        TRACE("old command line %s.\n", debugstr_w(*cmd_line));
+        TRACE("new command line %s.\n", debugstr_w(new_cmd_line));
+
+        *cmd_line = new_cmd_line;
+    }
+
+    return 1;
+}
+
 /**********************************************************************
  *           CreateProcessInternalW   (kernelbase.@)
  */
@@ -633,6 +721,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         }
     }
     /* end CROSSOVER HACK */
+
+    p = tidy_cmdline;
+    if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &tidy_cmdline ))
+    {
+        app_name = name;
+        if (p != tidy_cmdline && p != cmd_line)
+            HeapFree( GetProcessHeap(), 0, p );
+    }
 
     /* Warn if unsupported features are used */
 

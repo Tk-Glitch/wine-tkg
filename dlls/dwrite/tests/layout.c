@@ -2672,9 +2672,9 @@ if (0) { /* crashes on native */
     count = 0;
     hr = IDWriteTextLayout1_GetClusterMetrics(layout1, clusters, 4, &count);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(count == 3, "Unexpected cluster count %u.\n", count);
+    todo_wine ok(count == 3, "Unexpected cluster count %u.\n", count);
     ok(clusters[0].length == 1, "got %u\n", clusters[0].length);
-    ok(clusters[1].length == 2, "got %u\n", clusters[1].length);
+    todo_wine ok(clusters[1].length == 2, "got %u\n", clusters[1].length);
     ok(clusters[2].length == 1, "got %u\n", clusters[2].length);
 
     /* pair kerning flag participates in itemization - combining characters
@@ -3352,39 +3352,6 @@ static void test_GetMetrics(void)
     ok(metrics.layoutHeight == 1000.0, "Unexpected box height %f.\n", metrics.layoutHeight);
     ok(metrics.maxBidiReorderingDepth == 1, "Unexpected reordering depth %u.\n", metrics.maxBidiReorderingDepth);
     ok(metrics.lineCount == 1, "Unexpected line count %u.\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    IDWriteTextFormat_Release(format);
-
-    /* nonexistent font */
-    hr = IDWriteFactory_CreateTextFormat(factory, L"Blah!", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, 10.0, L"en-us", &format);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    hr = IDWriteFactory_CreateTextLayout(factory, L"A", 4, format, 500.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    count = 0;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 500.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-
     IDWriteTextLayout_Release(layout);
 
     IDWriteTextFormat_Release(format);
@@ -4532,7 +4499,6 @@ static void test_SetWordWrapping(void)
 /* Collection dedicated to fallback testing */
 
 static const WCHAR g_blahfontW[] = {'B','l','a','h',0};
-static const WCHAR g_fontNotInCollectionW[] = {'n','o','t','B','l','a','h',0};
 static HRESULT WINAPI fontcollection_QI(IDWriteFontCollection *iface, REFIID riid, void **obj)
 {
     if (IsEqualIID(riid, &IID_IDWriteFontCollection) || IsEqualIID(riid, &IID_IUnknown)) {
@@ -4593,9 +4559,6 @@ static HRESULT WINAPI fontcollection_FindFamilyName(IDWriteFontCollection *iface
     if (!lstrcmpW(name, g_blahfontW)) {
         *index = 123456;
         *exists = TRUE;
-        return S_OK;
-    } else if (!lstrcmpW(name, g_fontNotInCollectionW)) {
-        *exists = FALSE;
         return S_OK;
     }
     ok(0, "unexpected call, name %s\n", wine_dbgstr_w(name));
@@ -4680,7 +4643,8 @@ static void test_MapCharacters(void)
     ok(mappedlength == 1, "got %u\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
     ok(font != NULL, "got %p\n", font);
-    IDWriteFont_Release(font);
+    if (font)
+        IDWriteFont_Release(font);
 
     /* same Latin text, full length */
     g_source = L"abc";
@@ -4691,9 +4655,11 @@ static void test_MapCharacters(void)
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 3, "got %u\n", mappedlength);
+
     ok(scale == 1.0f, "got %f\n", scale);
     ok(font != NULL, "got %p\n", font);
-    IDWriteFont_Release(font);
+    if (font)
+        IDWriteFont_Release(font);
 
     /* string 'a\x3058b' */
     g_source = str2W;
@@ -4706,7 +4672,8 @@ static void test_MapCharacters(void)
     ok(mappedlength == 1, "got %u\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
     ok(font != NULL, "got %p\n", font);
-    IDWriteFont_Release(font);
+    if (font)
+        IDWriteFont_Release(font);
 
     g_source = str2W;
     mappedlength = 0;
@@ -4715,11 +4682,14 @@ static void test_MapCharacters(void)
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 1, 2, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     ok(mappedlength == 1, "got %u\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
+    todo_wine
     ok(font != NULL, "got %p\n", font);
+if (font) {
     IDWriteFont_Release(font);
-
+}
     /* Try with explicit collection, Tahoma will be forced. */
     /* 1. Latin part */
     g_source = str2W;
@@ -4742,10 +4712,7 @@ static void test_MapCharacters(void)
     IDWriteLocalizedStrings_Release(strings);
     IDWriteFont_Release(font);
 
-    /**
-     * 2. Hiragana character. Tahoma is requested, but it doesn't support
-     * Japanese. A NULL font is returned if there is no fallback for Japanese.
-     */
+    /* 2. Hiragana character, force Tahoma font does not support Japanese */
     g_source = str2W;
     mappedlength = 0;
     scale = 0.0f;
@@ -4755,16 +4722,21 @@ static void test_MapCharacters(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
-
-    exists = FALSE;
-    hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &strings, &exists);
-    ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
-    hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     todo_wine
-    ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
-    IDWriteLocalizedStrings_Release(strings);
-    IDWriteFont_Release(font);
+    ok(font != NULL, "got %p\n", font);
+
+    if (font)
+    {
+        exists = FALSE;
+        hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &strings, &exists);
+        ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
+        hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        todo_wine
+        ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
+        IDWriteLocalizedStrings_Release(strings);
+        IDWriteFont_Release(font);
+    }
 
     IDWriteFontFallback_Release(fallback);
     IDWriteFactory2_Release(factory2);
@@ -4825,14 +4797,17 @@ static void test_system_fallback(void)
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
+        font = NULL;
+
         g_source = tests[i].text;
         hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &length, &font, &scale);
-    todo_wine
         ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
         if (hr != S_OK) continue;
+        todo_wine
         ok(length == 1, "Unexpected length %u\n", length);
         ok(scale == 1.0f, "got %f\n", scale);
+        if (!font) continue;
 
         get_font_name(font, name, ARRAY_SIZE(name));
     todo_wine
@@ -4884,14 +4859,14 @@ static void test_FontFallbackBuilder(void)
     EXPECT_REF(builder, 1);
     hr = IDWriteFontFallbackBuilder_CreateFontFallback(builder, &fallback);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    EXPECT_REF(factory2, 3);
+    todo_wine EXPECT_REF(factory2, 3);
     EXPECT_REF(fallback, 1);
     EXPECT_REF(builder, 1);
 
     IDWriteFontFallback_AddRef(fallback);
     EXPECT_REF(builder, 1);
     EXPECT_REF(fallback, 2);
-    EXPECT_REF(factory2, 3);
+    todo_wine EXPECT_REF(factory2, 3);
     IDWriteFontFallback_Release(fallback);
 
     /* New instance is created every time, even if mappings have not changed. */
@@ -4960,12 +4935,11 @@ static void test_FontFallbackBuilder(void)
     font = (void*)0xdeadbeef;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 1.0f, "got %f\n", scale);
-    ok(font == NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 1.0f, "Unexpected scale %f.\n", scale);
+    ok(!font, "Unexpected font instance %p.\n", font);
+
     IDWriteFontFallback_Release(fallback);
 
     /* remap with custom collection */
@@ -4982,12 +4956,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5007,12 +4979,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5033,12 +5003,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5084,21 +5052,17 @@ static void test_fallback(void)
 
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-todo_wine {
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
     ok(count == 4, "Unexpected count %u.\n", count);
-}
     for (i = 0, width = 0.0; i < count; i++)
         width += clusters[i].width;
 
     memset(&metrics, 0xcc, sizeof(metrics));
     hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
     ok(hr == S_OK, "Failed to get layout metrics, hr %#lx.\n", hr);
-todo_wine {
     ok(metrics.width > 0.0 && metrics.width == width, "Unexpected width %.2f, expected %.2f.\n", metrics.width, width);
     ok(metrics.height > 0.0, "Unexpected height %.2f.\n", metrics.height);
     ok(metrics.lineCount == 1, "Unexpected line count %u.\n", metrics.lineCount);
-}
     IDWriteTextLayout_Release(layout);
     IDWriteTextFormat_Release(format);
 
@@ -5397,6 +5361,7 @@ static void test_SetUnderline(void)
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
+    todo_wine
     ok(count == 3, "Unexpected cluster count %u.\n", count);
 
     range.startPosition = 0;
@@ -5407,6 +5372,7 @@ static void test_SetUnderline(void)
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
+    todo_wine
     ok(count == 3, "Unexpected cluster count %u.\n", count);
 
     flush_sequence(sequences, RENDERER_ID);
@@ -6587,235 +6553,6 @@ if (SUCCEEDED(hr))
     IDWriteFactory_Release(factory);
 }
 
-static void test_GetMetrics_with_custom_fontcollection(void)
-{
-    static const WCHAR emptystringW[] = {0};
-    static const WCHAR mappedW[] = {'a','b','c','d',0};
-    static const WCHAR notmappedW[] = {'a',0xffff,'b',0}; // u+ffff = not a unicode character
-    DWRITE_CLUSTER_METRICS clusters[4];
-    DWRITE_TEXT_METRICS metrics;
-    IDWriteTextFormat *format;
-    IDWriteTextLayout *layout;
-    IDWriteFactory *factory;
-    UINT32 count, i;
-    FLOAT width;
-    HRESULT hr;
-
-    factory = create_factory();
-
-    /* font is in font collection */
-    hr = IDWriteFactory_CreateTextFormat(factory, g_blahfontW, &fallbackcollection,
-            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 10.0, L"en-us", &format);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    /* text is mapped by fontfallback */
-    hr = IDWriteFactory_CreateTextLayout(factory, mappedW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    /* text is not mapped by fontfallback */
-    hr = IDWriteFactory_CreateTextLayout(factory, notmappedW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    /* empty string */
-    hr = IDWriteFactory_CreateTextLayout(factory, emptystringW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    /* zero-length empty string */
-    hr = IDWriteFactory_CreateTextLayout(factory, emptystringW, 0, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 0, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    IDWriteTextFormat_Release(format);
-
-    /* font not in font collection */
-    hr = IDWriteFactory_CreateTextFormat(factory, g_fontNotInCollectionW, &fallbackcollection,
-            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 10.0, L"en-us", &format);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    /* text is mapped by fontfallback */
-    hr = IDWriteFactory_CreateTextLayout(factory, mappedW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    /* text is not mapped by fontfallback */
-    hr = IDWriteFactory_CreateTextLayout(factory, notmappedW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    /* empty string */
-    hr = IDWriteFactory_CreateTextLayout(factory, emptystringW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 4, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    /* zero-length empty string */
-    hr = IDWriteFactory_CreateTextLayout(factory, emptystringW, 0, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    count = 9999;
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(count == 0, "got %u\n", count);
-    for (i = 0, width = 0.0; i < count; i++)
-        width += clusters[i].width;
-    memset(&metrics, 0xcc, sizeof(metrics));
-    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(metrics.left == 0.0, "got %.2f\n", metrics.left);
-    ok(metrics.top == 0.0, "got %.2f\n", metrics.top);
-    ok(metrics.width == width, "got %.2f, expected %.2f\n", metrics.width, width);
-    ok(metrics.widthIncludingTrailingWhitespace == width, "got %.2f, expected %.2f\n",
-        metrics.widthIncludingTrailingWhitespace, width);
-    todo_wine
-    ok(metrics.height > 0.0, "got %.2f\n", metrics.height);
-    ok(metrics.layoutWidth == 1000.0, "got %.2f\n", metrics.layoutWidth);
-    ok(metrics.layoutHeight == 1000.0, "got %.2f\n", metrics.layoutHeight);
-    ok(metrics.maxBidiReorderingDepth == 1, "got %u\n", metrics.maxBidiReorderingDepth);
-    todo_wine
-    ok(metrics.lineCount == 1, "got %u\n", metrics.lineCount);
-    IDWriteTextLayout_Release(layout);
-
-    IDWriteTextFormat_Release(format);
-
-    IDWriteFactory_Release(factory);
-}
-
 START_TEST(layout)
 {
     IDWriteFactory *factory;
@@ -6849,7 +6586,6 @@ START_TEST(layout)
     test_SetFontStretch();
     test_SetStrikethrough();
     test_GetMetrics();
-    test_GetMetrics_with_custom_fontcollection();
     test_SetFlowDirection();
     test_SetDrawingEffect();
     test_GetLineMetrics();

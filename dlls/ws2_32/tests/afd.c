@@ -162,8 +162,7 @@ static void check_poll_(int line, SOCKET s, HANDLE event, int mask, int expect, 
     ok_(__FILE__, line)(out_params.count == 1, "got count %u\n", out_params.count);
     ok_(__FILE__, line)(out_params.sockets[0].socket == s, "got socket %#Ix\n", out_params.sockets[0].socket);
     todo_wine_if (todo) ok_(__FILE__, line)(out_params.sockets[0].flags == expect, "got flags %#x\n", out_params.sockets[0].flags);
-    todo_wine_if (expect & AFD_POLL_RESET)
-        ok_(__FILE__, line)(!out_params.sockets[0].status, "got status %#x\n", out_params.sockets[0].status);
+    ok_(__FILE__, line)(!out_params.sockets[0].status, "got status %#x\n", out_params.sockets[0].status);
 }
 
 static void test_poll(void)
@@ -829,6 +828,37 @@ static void test_poll(void)
     ok(out_params->sockets[0].flags == AFD_POLL_READ, "got flags %#x\n", out_params->sockets[0].flags);
     ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
 
+    in_params->timeout = -1000 * 10000;
+    in_params->count = 1;
+    in_params->sockets[0].socket = server;
+    in_params->sockets[0].flags = AFD_POLL_CONNECT;
+    params_size = offsetof(struct afd_poll_params, sockets[1]);
+
+    ret = NtDeviceIoControlFile((HANDLE)server, event, NULL, NULL, &io,
+            IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
+    ok(ret == STATUS_PENDING, "got %#x\n", ret);
+
+    ret = connect(server, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "got error %lu\n", GetLastError());
+
+    ret = WaitForSingleObject(event, 100);
+    todo_wine ok(!ret, "got %#x\n", ret);
+    if (!ret)
+    {
+        ok(!io.Status, "got %#lx\n", io.Status);
+        ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
+        ok(out_params->count == 1, "got count %u\n", out_params->count);
+        ok(out_params->sockets[0].socket == server, "got socket %#Ix\n", out_params->sockets[0].socket);
+        ok(out_params->sockets[0].flags == AFD_POLL_CONNECT, "got flags %#x\n", out_params->sockets[0].flags);
+        ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+    }
+    else
+    {
+        CancelIo((HANDLE)server);
+        ret = WaitForSingleObject(event, 100);
+        ok(!ret, "wait timed out\n");
+    }
+
     closesocket(client);
     closesocket(server);
 
@@ -1376,10 +1406,10 @@ static void test_poll_reset(void)
     ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
     ok(out_params->count == 1, "got count %u\n", out_params->count);
     ok(out_params->sockets[0].socket == client, "got socket %#Ix\n", out_params->sockets[0].socket);
-    todo_wine ok(out_params->sockets[0].flags == AFD_POLL_RESET, "got flags %#x\n", out_params->sockets[0].flags);
+    ok(out_params->sockets[0].flags == AFD_POLL_RESET, "got flags %#x\n", out_params->sockets[0].flags);
     ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
 
-    check_poll_todo(client, event, AFD_POLL_WRITE | AFD_POLL_CONNECT | AFD_POLL_RESET);
+    check_poll(client, event, AFD_POLL_WRITE | AFD_POLL_CONNECT | AFD_POLL_RESET);
 
     closesocket(client);
     CloseHandle(event);
@@ -2011,7 +2041,7 @@ static void test_get_events_reset(void)
     ret = NtDeviceIoControlFile((HANDLE)client, NULL, NULL, NULL, &io,
             IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
     ok(!ret, "got %#x\n", ret);
-    todo_wine ok(params.flags == (AFD_POLL_RESET | AFD_POLL_CONNECT | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_CONNECT | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
@@ -2029,7 +2059,7 @@ static void test_get_events_reset(void)
     ret = NtDeviceIoControlFile((HANDLE)server, NULL, NULL, NULL, &io,
             IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
     ok(!ret, "got %#x\n", ret);
-    todo_wine ok(params.flags == (AFD_POLL_RESET | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 

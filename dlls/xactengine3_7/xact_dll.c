@@ -34,6 +34,7 @@
 #include "xact3.h"
 #endif
 #include "wine/debug.h"
+#include "wine/rbtree.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xact3);
 
@@ -51,6 +52,66 @@ WINE_DEFAULT_DEBUG_CHANNEL(xact3);
 #define IXACT3WaveBank IXACTWaveBank
 #define IXACT3WaveBankVtbl IXACTWaveBankVtbl
 #endif
+
+struct wrapper_lookup
+{
+    struct wine_rb_entry entry;
+    void *fact;
+    void *xact;
+};
+
+typedef struct _XACT3EngineImpl {
+    IXACT3Engine IXACT3Engine_iface;
+
+    FACTAudioEngine *fact_engine;
+
+    XACT_READFILE_CALLBACK pReadFile;
+    XACT_GETOVERLAPPEDRESULT_CALLBACK pGetOverlappedResult;
+    XACT_NOTIFICATION_CALLBACK notification_callback;
+
+    void *contexts[17];
+    struct wine_rb_tree wb_wrapper_lookup;
+    CRITICAL_SECTION wb_wrapper_lookup_cs;
+} XACT3EngineImpl;
+
+static int wrapper_lookup_compare(const void *key, const struct wine_rb_entry *entry)
+{
+    struct wrapper_lookup *lookup = WINE_RB_ENTRY_VALUE(entry, struct wrapper_lookup, entry);
+
+    return (key > lookup->fact) - (key < lookup->fact);
+}
+
+static void wrapper_lookup_destroy(struct wine_rb_entry *entry, void *context)
+{
+    struct wrapper_lookup *lookup = WINE_RB_ENTRY_VALUE(entry, struct wrapper_lookup, entry);
+
+    HeapFree(GetProcessHeap(), 0, lookup);
+}
+
+static void wrapper_remove_entry(XACT3EngineImpl *engine, void *key)
+{
+    struct wrapper_lookup *lookup;
+    struct wine_rb_entry *entry;
+
+    EnterCriticalSection(&engine->wb_wrapper_lookup_cs);
+
+    entry = wine_rb_get(&engine->wb_wrapper_lookup, key);
+    if (!entry)
+    {
+        LeaveCriticalSection(&engine->wb_wrapper_lookup_cs);
+
+        WARN("cannot find key in wrapper lookup\n");
+    }
+    else
+    {
+        wine_rb_remove(&engine->wb_wrapper_lookup, entry);
+
+        LeaveCriticalSection(&engine->wb_wrapper_lookup_cs);
+
+        lookup = WINE_RB_ENTRY_VALUE(entry, struct wrapper_lookup, entry);
+        HeapFree(GetProcessHeap(), 0, lookup);
+    }
+}
 
 typedef struct _XACT3CueImpl {
     IXACT3Cue IXACT3Cue_iface;
@@ -304,6 +365,7 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
     XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
     XACT3CueImpl *cue;
     FACTCue *fcue;
+
     UINT ret;
 
     TRACE("(%p)->(%u, 0x%lx, %lu, %p)\n", This, nCueIndex, dwFlags, timeOffset,
@@ -328,8 +390,6 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
     cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
     cue->fact_cue = fcue;
     *ppCue = &cue->IXACT3Cue_iface;
-
-    FACTCue_SetPrivateContext(fcue, &cue->IXACT3Cue_iface);
 
     TRACE("Created Cue: %p\n", cue);
 
@@ -372,8 +432,6 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Play(IXACT3SoundBank *iface,
         cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
         cue->fact_cue = fcue;
         *ppCue = &cue->IXACT3Cue_iface;
-
-        FACTCue_SetPrivateContext(fcue, &cue->IXACT3Cue_iface);
     }
 
     return hr;
@@ -547,6 +605,7 @@ typedef struct _XACT3WaveBankImpl {
     IXACT3WaveBank IXACT3WaveBank_iface;
 
     FACTWaveBank *fact_wavebank;
+    struct _XACT3EngineImpl *engine;
 } XACT3WaveBankImpl;
 
 static inline XACT3WaveBankImpl *impl_from_IXACT3WaveBank(IXACT3WaveBank *iface)
@@ -562,6 +621,9 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Destroy(IXACT3WaveBank *iface)
     TRACE("(%p)\n", This);
 
     hr = FACTWaveBank_Destroy(This->fact_wavebank);
+
+    wrapper_remove_entry(This->engine, This->fact_wavebank);
+
     HeapFree(GetProcessHeap(), 0, This);
     return hr;
 }
@@ -631,8 +693,6 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Prepare(IXACT3WaveBank *iface,
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
 
-    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
-
     TRACE("Created Wave: %p\n", wave);
 
     return S_OK;
@@ -674,8 +734,6 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Play(IXACT3WaveBank *iface,
         wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
         wave->fact_wave = fwave;
         *ppWave = &wave->IXACT3Wave_iface;
-
-        FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
     }
 
     return hr;
@@ -716,18 +774,6 @@ static const IXACT3WaveBankVtbl XACT3WaveBank_Vtbl =
 #endif
     IXACT3WaveBankImpl_GetState
 };
-
-typedef struct _XACT3EngineImpl {
-    IXACT3Engine IXACT3Engine_iface;
-
-    FACTAudioEngine *fact_engine;
-
-    XACT_READFILE_CALLBACK pReadFile;
-    XACT_GETOVERLAPPEDRESULT_CALLBACK pGetOverlappedResult;
-    XACT_NOTIFICATION_CALLBACK notification_callback;
-
-    void *contexts[17];
-} XACT3EngineImpl;
 
 typedef struct wrap_readfile_struct {
     XACT3EngineImpl *engine;
@@ -802,7 +848,11 @@ static ULONG WINAPI IXACT3EngineImpl_Release(IXACT3Engine *iface)
     TRACE("(%p)->(): Refcount now %lu\n", This, ref);
 
     if (!ref)
+    {
+        DeleteCriticalSection(&This->wb_wrapper_lookup_cs);
+        wine_rb_destroy(&This->wb_wrapper_lookup, wrapper_lookup_destroy, NULL);
         HeapFree(GetProcessHeap(), 0, This);
+    }
     return ref;
 }
 
@@ -842,10 +892,45 @@ static HRESULT WINAPI IXACT3EngineImpl_GetFinalMixFormat(IXACT3Engine *iface,
 
 #endif
 
+static XACTNOTIFICATIONTYPE xact_notification_type_from_fact(uint8_t type)
+{
+    /* we can't use a switch statement, because the constants are static const
+     * variables, and some compilers can't deal with that */
+#define X(a) if (type == FACTNOTIFICATIONTYPE_##a) return XACTNOTIFICATIONTYPE_##a
+    X(CUEPREPARED);
+    X(CUEPLAY);
+    X(CUESTOP);
+    X(CUEDESTROYED);
+    X(MARKER);
+    X(SOUNDBANKDESTROYED);
+    X(WAVEBANKDESTROYED);
+    X(LOCALVARIABLECHANGED);
+    X(GLOBALVARIABLECHANGED);
+    X(GUICONNECTED);
+    X(GUIDISCONNECTED);
+    X(WAVEPLAY);
+    X(WAVESTOP);
+    X(WAVEBANKPREPARED);
+    X(WAVEBANKSTREAMING_INVALIDCONTENT);
+#if XACT3_VER >= 0x0205
+    X(WAVEPREPARED);
+    X(WAVELOOPED);
+    X(WAVEDESTROYED);
+#endif
+#undef X
+
+    FIXME("unknown type %#x\n", type);
+    return 0;
+}
+
 static void FACTCALL fact_notification_cb(const FACTNotification *notification)
 {
     XACT3EngineImpl *engine = (XACT3EngineImpl *)notification->pvContext;
-    XACT_NOTIFICATION note;
+    XACT_NOTIFICATION xnotification;
+    struct wrapper_lookup *lookup;
+    struct wine_rb_entry *entry;
+
+    TRACE("notification %p\n", notification->pvContext);
 
     /* Older versions of FAudio don't pass through the context */
     if (!engine)
@@ -854,40 +939,26 @@ static void FACTCALL fact_notification_cb(const FACTNotification *notification)
         return;
     }
 
-    note.type = notification->type;
-    note.pvContext = engine->contexts[notification->type - 1];
+    xnotification.type = xact_notification_type_from_fact(notification->type);
+    xnotification.timeStamp = notification->timeStamp;
+    xnotification.pvContext = engine->contexts[notification->type - 1];
 
-    if (notification->type == XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED)
+    if (notification->type == XACTNOTIFICATIONTYPE_WAVEBANKPREPARED
+            || notification->type == XACTNOTIFICATIONTYPE_WAVEBANKDESTROYED)
     {
-        note.soundBank.pSoundBank = FACTSoundBank_GetPrivateContext(notification->wave.pSoundBank);
-    }
-    else if (notification->type == XACTNOTIFICATIONTYPE_WAVESTOP
-#if XACT3_VER >= 0x0205
-             || notification->type == XACTNOTIFICATIONTYPE_WAVEDESTROYED
-             || notification->type == XACTNOTIFICATIONTYPE_WAVELOOPED
-             || notification->type == XACTNOTIFICATIONTYPE_WAVEPLAY
-             || notification->type == XACTNOTIFICATIONTYPE_WAVEPREPARED)
-#else
-             )
-#endif
-    {
-        note.wave.cueIndex = notification->wave.cueIndex;
-        note.wave.pCue = FACTCue_GetPrivateContext(notification->wave.pCue);
-        note.wave.pSoundBank = FACTSoundBank_GetPrivateContext(notification->wave.pSoundBank);
-#if XACT3_VER >= 0x0205
-        note.wave.pWave = FACTWave_GetPrivateContext(notification->wave.pWave);
-#endif
-        note.wave.pWaveBank = FACTWaveBank_GetPrivateContext(notification->wave.pWaveBank);
-    }
-    else if (notification->type == XACTNOTIFICATIONTYPE_CUEPLAY ||
-             notification->type == XACTNOTIFICATIONTYPE_CUEPREPARED ||
-             notification->type == XACTNOTIFICATIONTYPE_CUESTOP ||
-             notification->type == XACTNOTIFICATIONTYPE_CUEDESTROYED)
-    {
-        if (notification->type != XACTNOTIFICATIONTYPE_CUEDESTROYED)
-            note.cue.pCue = FACTCue_GetPrivateContext(notification->cue.pCue);
-        note.cue.cueIndex = notification->cue.cueIndex;
-        note.cue.pSoundBank = FACTSoundBank_GetPrivateContext(notification->cue.pSoundBank);
+        EnterCriticalSection(&engine->wb_wrapper_lookup_cs);
+        entry = wine_rb_get(&engine->wb_wrapper_lookup, notification->waveBank.pWaveBank);
+        if (!entry)
+        {
+            WARN("cannot find wave bank in wrapper lookup\n");
+            xnotification.waveBank.pWaveBank = NULL;
+        }
+        else
+        {
+            lookup = WINE_RB_ENTRY_VALUE(entry, struct wrapper_lookup, entry);
+            xnotification.waveBank.pWaveBank = lookup->xact;
+        }
+        LeaveCriticalSection(&engine->wb_wrapper_lookup_cs);
     }
     else
     {
@@ -895,7 +966,7 @@ static void FACTCALL fact_notification_cb(const FACTNotification *notification)
         return;
     }
 
-    engine->notification_callback(&note);
+    engine->notification_callback(&xnotification);
 }
 
 static HRESULT WINAPI IXACT3EngineImpl_Initialize(IXACT3Engine *iface,
@@ -1011,48 +1082,9 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateSoundBank(IXACT3Engine *iface,
     sb->fact_soundbank = fsb;
     *ppSoundBank = &sb->IXACT3SoundBank_iface;
 
-    FACTSoundBank_SetPrivateContext(fsb, &sb->IXACT3SoundBank_iface);
-
     TRACE("Created SoundBank: %p\n", sb);
 
     return S_OK;
-}
-
-struct thread_data
-{
-    XACT3EngineImpl *engine;
-    XACT_NOTIFICATION note;
-};
-
-static DWORD WINAPI thread_notications(LPVOID data)
-{
-    struct thread_data *tdata = data;
-
-    Sleep(1000);
-
-    FIXME("Callback XACTNOTIFICATIONTYPE_WAVEBANKPREPARED (%p)\n", tdata->engine);
-
-    tdata->engine->notification_callback(&tdata->note);
-
-    CoTaskMemFree(data);
-    return 0;
-}
-
-static void send_wavebank_notification(XACT3EngineImpl *This, IXACT3WaveBank *wavebank)
-{
-    if (This->notification_callback)
-    {
-        HANDLE thread;
-        struct thread_data *tdata = CoTaskMemAlloc(sizeof(struct thread_data));
-
-        tdata->engine = This;
-        tdata->note.type = XACTNOTIFICATIONTYPE_WAVEBANKPREPARED;
-        tdata->note.pvContext = This->contexts[XACTNOTIFICATIONTYPE_WAVEBANKPREPARED - 1];
-        tdata->note.wave.pWaveBank = wavebank;
-
-        thread = CreateThread(NULL, 0, thread_notications, tdata, 0, NULL);
-        CloseHandle(thread);
-    }
 }
 
 static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *iface,
@@ -1060,6 +1092,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
         DWORD dwAllocAttributes, IXACT3WaveBank **ppWaveBank)
 {
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
+    struct wrapper_lookup *lookup;
     XACT3WaveBankImpl *wb;
     FACTWaveBank *fwb;
     UINT ret;
@@ -1083,13 +1116,33 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
         return E_OUTOFMEMORY;
     }
 
+    lookup = HeapAlloc(GetProcessHeap(), 0, sizeof(*lookup));
+    if (!lookup)
+    {
+        FACTWaveBank_Destroy(fwb);
+        HeapFree(GetProcessHeap(), 0, wb);
+        ERR("Failed to allocate wrapper_lookup!\n");
+        return E_OUTOFMEMORY;
+    }
+    lookup->fact = fwb;
+    lookup->xact = &wb->IXACT3WaveBank_iface;
+
+    EnterCriticalSection(&This->wb_wrapper_lookup_cs);
+
+    ret = wine_rb_put(&This->wb_wrapper_lookup, lookup->fact, &lookup->entry);
+
+    LeaveCriticalSection(&This->wb_wrapper_lookup_cs);
+
+    if (ret)
+    {
+        WARN("wrapper_lookup already present in the tree??\n");
+        HeapFree(GetProcessHeap(), 0, lookup);
+    }
+
     wb->IXACT3WaveBank_iface.lpVtbl = &XACT3WaveBank_Vtbl;
     wb->fact_wavebank = fwb;
+    wb->engine = This;
     *ppWaveBank = &wb->IXACT3WaveBank_iface;
-
-    send_wavebank_notification(This, &wb->IXACT3WaveBank_iface);
-
-    FACTWaveBank_SetPrivateContext(fwb, &wb->IXACT3WaveBank_iface);
 
     TRACE("Created in-memory WaveBank: %p\n", wb);
 
@@ -1102,6 +1155,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
 {
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
     FACTStreamingParameters fakeParms;
+    struct wrapper_lookup *lookup;
     wrap_readfile_struct *fake;
     XACT3WaveBankImpl *wb;
     FACTWaveBank *fwb;
@@ -1135,13 +1189,33 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
         return E_OUTOFMEMORY;
     }
 
+    lookup = HeapAlloc(GetProcessHeap(), 0, sizeof(*lookup));
+    if (!lookup)
+    {
+        FACTWaveBank_Destroy(fwb);
+        HeapFree(GetProcessHeap(), 0, wb);
+        ERR("Failed to allocate wrapper_lookup!\n");
+        return E_OUTOFMEMORY;
+    }
+    lookup->fact = fwb;
+    lookup->xact = &wb->IXACT3WaveBank_iface;
+
+    EnterCriticalSection(&This->wb_wrapper_lookup_cs);
+
+    ret = wine_rb_put(&This->wb_wrapper_lookup, lookup->fact, &lookup->entry);
+
+    LeaveCriticalSection(&This->wb_wrapper_lookup_cs);
+
+    if (ret)
+    {
+        WARN("wrapper_lookup already present in the tree??\n");
+        HeapFree(GetProcessHeap(), 0, lookup);
+    }
+
     wb->IXACT3WaveBank_iface.lpVtbl = &XACT3WaveBank_Vtbl;
     wb->fact_wavebank = fwb;
+    wb->engine = This;
     *ppWaveBank = &wb->IXACT3WaveBank_iface;
-
-    send_wavebank_notification(This, &wb->IXACT3WaveBank_iface);
-
-    FACTWaveBank_SetPrivateContext(fwb, &wb->IXACT3WaveBank_iface);
 
     TRACE("Created streaming WaveBank: %p\n", wb);
 
@@ -1190,8 +1264,6 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
     wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
-
-    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
 
     TRACE("Created Wave: %p\n", wave);
 
@@ -1255,8 +1327,6 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
 
-    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
-
     TRACE("Created Wave: %p\n", wave);
 
     return S_OK;
@@ -1293,8 +1363,6 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareWave(IXACT3Engine *iface,
     wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
-
-    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
 
     TRACE("Created Wave: %p\n", wave);
 
@@ -1390,7 +1458,6 @@ static inline void unwrap_notificationdesc(FACTNotificationDescription *fd,
 
     /* We have to unwrap the FACT object first! */
     fd->flags = xd->flags;
-    fd->pvContext = xd->pvContext;
     if (flags & NOTIFY_cueIndex)
         fd->cueIndex = xd->cueIndex;
 #if XACT3_VER >= 0x0205
@@ -1435,10 +1502,9 @@ static HRESULT WINAPI IXACT3EngineImpl_RegisterNotification(IXACT3Engine *iface,
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
     FACTNotificationDescription fdesc;
 
-    TRACE("(%p)->(%p, pvContext %p)\n", This, pNotificationDesc, pNotificationDesc->pvContext);
+    TRACE("(%p)->(%p)\n", This, pNotificationDesc);
 
     unwrap_notificationdesc(&fdesc, pNotificationDesc);
-
     This->contexts[pNotificationDesc->type - 1] = pNotificationDesc->pvContext;
     fdesc.pvContext = This;
     return FACTAudioEngine_RegisterNotification(This->fact_engine, &fdesc);
@@ -1453,7 +1519,6 @@ static HRESULT WINAPI IXACT3EngineImpl_UnRegisterNotification(IXACT3Engine *ifac
     TRACE("(%p)->(%p)\n", This, pNotificationDesc);
 
     unwrap_notificationdesc(&fdesc, pNotificationDesc);
-
     This->contexts[pNotificationDesc->type - 1] = pNotificationDesc->pvContext;
     fdesc.pvContext = This;
     return FACTAudioEngine_UnRegisterNotification(This->fact_engine, &fdesc);
@@ -1633,6 +1698,9 @@ static HRESULT WINAPI XACT3CF_CreateInstance(IClassFactory *iface, IUnknown *pOu
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
+
+    wine_rb_init(&object->wb_wrapper_lookup, wrapper_lookup_compare);
+    InitializeCriticalSection(&object->wb_wrapper_lookup_cs);
 
     return hr;
 }

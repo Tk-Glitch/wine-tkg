@@ -29,8 +29,6 @@
 
 #include "main.h"
 
-static const WCHAR* editValueName;
-static WCHAR* stringValueData;
 static BOOL isDecimal;
 
 struct edit_params
@@ -81,71 +79,195 @@ static void WINAPIV error_code_messagebox(HWND hwnd, unsigned int msg_id, ...)
     va_end(ap);
 }
 
-static BOOL change_dword_base(HWND hwndDlg, BOOL toHex)
-{
-    WCHAR buf[128];
-    UINT64 val;
-
-    if (!GetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf, ARRAY_SIZE(buf))) return FALSE;
-    if (!swscanf(buf, toHex ? L"%I64u" : L"%I64x", &val)) return FALSE;
-    wsprintfW(buf, toHex ? L"%I64x" : L"%I64u", val);
-    return SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf);
-}
-
-static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static BOOL update_registry_value(HWND hwndDlg, struct edit_params *params)
 {
     HWND hwndValue;
-    WCHAR buff[64];
-    int len;
+    unsigned int len;
+    WCHAR *buf;
+    LONG ret;
 
-    switch(uMsg) {
+    hwndValue = GetDlgItem(hwndDlg, IDC_VALUE_DATA);
+    len = GetWindowTextLengthW(hwndValue);
+    buf = malloc((len + 1) * sizeof(WCHAR));
+    len = GetWindowTextW(hwndValue, buf, len + 1);
+
+    free(params->data);
+
+    switch (params->type)
+    {
+    case REG_SZ:
+    case REG_EXPAND_SZ:
+        params->data = buf;
+        params->size = (len + 1) * sizeof(WCHAR);
+        break;
+    case REG_DWORD:
+        params->size = sizeof(DWORD);
+        params->data = malloc(params->size);
+        swscanf(buf, isDecimal ? L"%lu" : L"%lx", params->data);
+        free(buf);
+        break;
+    case REG_QWORD:
+        params->size = sizeof(UINT64);
+        params->data = malloc(params->size);
+        swscanf(buf, isDecimal ? L"%I64u" : L"%I64x", params->data);
+        free(buf);
+        break;
+    case REG_MULTI_SZ:
+    {
+        WCHAR *tmp = malloc((len + 2) * sizeof(WCHAR));
+        unsigned int i, j;
+
+        for (i = 0, j = 0; i < len; i++)
+        {
+            if (buf[i] == '\r' && buf[i + 1] == '\n')
+            {
+                if (tmp[j - 1]) tmp[j++] = 0;
+                i++;
+            }
+            else tmp[j++] = buf[i];
+        }
+
+        tmp[j++] = 0;
+        tmp[j++] = 0;
+
+        free(buf);
+        params->data = tmp;
+        params->size = j * sizeof(WCHAR);
+        break;
+    }
+    default: /* hex data types */
+        free(buf);
+        params->size = SendMessageW(hwndValue, HEM_GETDATA, 0, 0);
+        params->data = malloc(params->size);
+        SendMessageW(hwndValue, HEM_GETDATA, (WPARAM)params->size, (LPARAM)params->data);
+    }
+
+    ret = RegSetValueExW(params->hkey, params->value_name, 0, params->type, (BYTE *)params->data, params->size);
+    if (ret) error_code_messagebox(hwndDlg, IDS_SET_VALUE_FAILED);
+
+    return !ret;
+}
+
+static void set_dlgproc_value_name(HWND hwndDlg, struct edit_params *params)
+{
+    if (params->value_name)
+        SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, params->value_name);
+    else
+        SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, g_pszDefaultValueName);
+}
+
+static INT_PTR CALLBACK modify_string_dlgproc(HWND hwndDlg, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    struct edit_params *params;
+    int ret = 0;
+
+    switch (msg)
+    {
     case WM_INITDIALOG:
-        SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, editValueName);
-        SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, stringValueData);
-        CheckRadioButton(hwndDlg, IDC_DWORD_HEX, IDC_DWORD_DEC, IDC_DWORD_HEX);
-        isDecimal = FALSE;
-        if (lParam == REG_QWORD && LoadStringW(GetModuleHandleW(0), IDS_EDIT_QWORD, buff, ARRAY_SIZE(buff)))
-            SetWindowTextW(hwndDlg, buff);
+        params = (struct edit_params *)lparam;
+        SetWindowLongPtrW(hwndDlg, DWLP_USER, (ULONG_PTR)params);
+        set_dlgproc_value_name(hwndDlg, params);
+        SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, params->data);
         return TRUE;
     case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case IDC_DWORD_HEX:
-	    if (isDecimal && change_dword_base(hwndDlg, TRUE)) isDecimal = FALSE;
-	break;
-        case IDC_DWORD_DEC:
-	    if (!isDecimal && change_dword_base(hwndDlg, FALSE)) isDecimal = TRUE;
-	break;
+        switch (LOWORD(wparam))
+        {
         case IDOK:
-            if ((hwndValue = GetDlgItem(hwndDlg, IDC_VALUE_DATA))) {
-                len = GetWindowTextLengthW(hwndValue);
-                stringValueData = realloc(stringValueData, (len + 1) * sizeof(WCHAR));
-                if (!GetWindowTextW(hwndValue, stringValueData, len + 1))
-                    *stringValueData = 0;
-                }
-            /* Fall through */
+            params = (struct edit_params *)GetWindowLongPtrW(hwndDlg, DWLP_USER);
+            ret = update_registry_value(hwndDlg, params);
+            /* fall through */
         case IDCANCEL:
-            EndDialog(hwndDlg, wParam);
+            EndDialog(hwndDlg, ret);
             return TRUE;
         }
     }
     return FALSE;
 }
 
-static INT_PTR CALLBACK bin_modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static void set_dword_edit_limit(HWND hwndDlg, DWORD type)
+{
+    if (isDecimal)
+        SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, EM_SETLIMITTEXT, type == REG_DWORD ? 10 : 20, 0);
+    else
+        SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, EM_SETLIMITTEXT, type == REG_DWORD ? 8 : 16, 0);
+}
+
+static void change_dword_base(HWND hwndDlg, BOOL toHex, DWORD type)
+{
+    WCHAR buf[64];
+    unsigned int len;
+    UINT64 val;
+
+    len = GetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf, ARRAY_SIZE(buf));
+    if (!len) SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, L"0");
+
+    if ((isDecimal && !toHex) || (!isDecimal && toHex))
+        return;
+
+    if (len)
+    {
+        swscanf(buf, toHex ? L"%I64u" : L"%I64x", &val);
+        swprintf(buf, ARRAY_SIZE(buf), toHex ? L"%I64x" : L"%I64u", val);
+        SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf);
+    }
+
+    isDecimal = !toHex;
+
+    set_dword_edit_limit(hwndDlg, type);
+}
+
+static INT_PTR CALLBACK modify_dword_dlgproc(HWND hwndDlg, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    static struct edit_params *params;
+    WCHAR buf[64];
+    int ret = 0;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+        params = (struct edit_params *)lparam;
+        SetWindowLongPtrW(hwndDlg, DWLP_USER, (ULONG_PTR)params);
+        set_dlgproc_value_name(hwndDlg, params);
+        SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, params->data);
+        CheckRadioButton(hwndDlg, IDC_DWORD_HEX, IDC_DWORD_DEC, IDC_DWORD_HEX);
+        isDecimal = FALSE;
+        if (params->type == REG_QWORD && LoadStringW(GetModuleHandleW(0), IDS_EDIT_QWORD, buf, ARRAY_SIZE(buf)))
+            SetWindowTextW(hwndDlg, buf);
+        set_dword_edit_limit(hwndDlg, params->type);
+        return TRUE;
+    case WM_COMMAND:
+        switch (LOWORD(wparam))
+        {
+        case IDC_DWORD_HEX:
+	    change_dword_base(hwndDlg, TRUE, params->type);
+            break;
+        case IDC_DWORD_DEC:
+	    change_dword_base(hwndDlg, FALSE, params->type);
+            break;
+        case IDOK:
+            params = (struct edit_params *)GetWindowLongPtrW(hwndDlg, DWLP_USER);
+            if (!SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, EM_LINELENGTH, 0, 0))
+                SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, L"0");
+            ret = update_registry_value(hwndDlg, params);
+            /* fall through */
+        case IDCANCEL:
+            EndDialog(hwndDlg, ret);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static INT_PTR CALLBACK modify_binary_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     struct edit_params *params;
-    BYTE *data;
-    LONG size;
-    LONG lRet;
+    int ret = 0;
 
     switch(uMsg) {
     case WM_INITDIALOG:
         params = (struct edit_params *)lParam;
         SetWindowLongPtrW(hwndDlg, DWLP_USER, (ULONG_PTR)params);
-        if (params->value_name)
-            SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, params->value_name);
-        else
-            SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, g_pszDefaultValueName);
+        set_dlgproc_value_name(hwndDlg, params);
         SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_SETDATA, (WPARAM)params->size, (LPARAM)params->data);
         SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, WM_SETFONT, (WPARAM) GetStockObject(ANSI_FIXED_FONT), TRUE);
         return TRUE;
@@ -153,62 +275,52 @@ static INT_PTR CALLBACK bin_modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wPara
         switch (LOWORD(wParam)) {
         case IDOK:
             params = (struct edit_params *)GetWindowLongPtrW(hwndDlg, DWLP_USER);
-            size = SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_GETDATA, 0, 0);
-            data = malloc(size);
-
-            SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_GETDATA, (WPARAM)size, (LPARAM)data);
-            lRet = RegSetValueExW(params->hkey, params->value_name, 0, params->type, data, size);
-            free(data);
-
-            if (lRet == ERROR_SUCCESS)
-                EndDialog(hwndDlg, 1);
-            else
-            {
-                error_code_messagebox(hwndDlg, IDS_SET_VALUE_FAILED);
-                EndDialog(hwndDlg, 0);
-            }
-            return TRUE;
+            ret = update_registry_value(hwndDlg, params);
+            /* fall through */
         case IDCANCEL:
-            EndDialog(hwndDlg, 0);
+            EndDialog(hwndDlg, ret);
             return TRUE;
         }
     }
     return FALSE;
 }
 
-static LPWSTR read_value(HWND hwnd, HKEY hKey, LPCWSTR valueName, DWORD *lpType, LONG *len)
+static BOOL read_value(HWND hwnd, struct edit_params *params)
 {
-    DWORD valueDataLen;
-    LPWSTR buffer = NULL;
-    LONG lRet;
+    LONG ret;
+    WCHAR *buf = NULL;
 
-    lRet = RegQueryValueExW(hKey, valueName, NULL, lpType, NULL, &valueDataLen);
-    if (lRet) {
-        if (lRet == ERROR_FILE_NOT_FOUND && !valueName) { /* no default value here, make it up */
-            if (len) *len = 1;
-            if (lpType) *lpType = REG_SZ;
-            buffer = malloc(sizeof(WCHAR));
-            *buffer = '\0';
-            return buffer;
+    if ((ret = RegQueryValueExW(params->hkey, params->value_name, NULL, &params->type, NULL, &params->size)))
+    {
+        if (ret == ERROR_FILE_NOT_FOUND && !params->value_name)
+        {
+            params->type = REG_SZ;
+            params->size = sizeof(WCHAR);
+            params->data = malloc(params->size);
+            *(WCHAR *)params->data = 0;
+            return TRUE;
         }
-        error_code_messagebox(hwnd, IDS_BAD_VALUE, valueName);
-        goto done;
+
+        goto error;
     }
 
-    buffer = malloc(valueDataLen + sizeof(WCHAR));
-    lRet = RegQueryValueExW(hKey, valueName, 0, 0, (LPBYTE)buffer, &valueDataLen);
-    if (lRet) {
-        error_code_messagebox(hwnd, IDS_BAD_VALUE, valueName);
-        goto done;
-    }
-    if((valueDataLen % sizeof(WCHAR)) == 0)
-        buffer[valueDataLen / sizeof(WCHAR)] = 0;
-    if(len) *len = valueDataLen;
-    return buffer;
+    buf = malloc(params->size + sizeof(WCHAR));
 
-done:
-    free(buffer);
-    return NULL;
+    if (RegQueryValueExW(params->hkey, params->value_name, NULL, &params->type, (BYTE *)buf, &params->size))
+        goto error;
+
+    if (params->size % sizeof(WCHAR) == 0)
+        buf[params->size / sizeof(WCHAR)] = 0;
+
+    params->data = buf;
+
+    return TRUE;
+
+error:
+    error_code_messagebox(hwnd, IDS_BAD_VALUE, params->value_name);
+    free(buf);
+    params->data = NULL;
+    return FALSE;
 }
 
 BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPWSTR keyName)
@@ -250,119 +362,86 @@ done:
     return result;
 }
 
+static void format_dlgproc_string(struct edit_params *params)
+{
+    int i, j, count, len;
+    WCHAR *str, *buf;
+
+    if (params->type == REG_DWORD || params->type == REG_QWORD)
+    {
+        UINT64 value = *((UINT64 *)params->data);
+
+        params->data = realloc(params->data, 32 * sizeof(WCHAR));
+        swprintf(params->data, 32, params->type == REG_DWORD ? L"%lx" : L"%I64x", value);
+        return;
+    }
+
+    /* REG_MULTI_SZ */
+    len = params->size / sizeof(WCHAR);
+    str = params->data;
+
+    for (i = 0, count = 0; i < len; i++)
+    {
+        if (!str[i] && str[i + 1]) count++;
+    }
+
+    buf = malloc(params->size + (count * sizeof(WCHAR)));
+
+    for (i = 0, j = 0; i < len; i++)
+    {
+        if (!str[i] && str[i + 1])
+        {
+            buf[j++] = '\r';
+            buf[j++] = '\n';
+        }
+        else buf[j++] = str[i];
+    }
+
+    free(params->data);
+    str = NULL;
+    params->data = buf;
+}
+
 BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
 {
+    struct edit_params params;
     BOOL result = FALSE;
-    DWORD type;
-    LONG lRet;
-    HKEY hKey;
-    LONG len;
 
-    lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
-    if (lRet) {
-        error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
-	return FALSE;
-    }
-
-    editValueName = valueName ? valueName : g_pszDefaultValueName;
-    if(!(stringValueData = read_value(hwnd, hKey, valueName, &type, &len))) goto done;
-
-    if ( (type == REG_SZ) || (type == REG_EXPAND_SZ) ) {
-        if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_STRING), hwnd, modify_dlgproc) == IDOK) {
-            lRet = RegSetValueExW(hKey, valueName, 0, type, (LPBYTE)stringValueData, (lstrlenW(stringValueData) + 1) * sizeof(WCHAR));
-            if (lRet == ERROR_SUCCESS) result = TRUE;
-            else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
-        }
-    } else if ( type == REG_DWORD ) {
-        DWORD value = *((DWORD*)stringValueData);
-        stringValueData = realloc(stringValueData, 64);
-        wsprintfW(stringValueData, L"%x", value);
-        if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc) == IDOK)
-        {
-            DWORD val;
-            if (swscanf(stringValueData, isDecimal ? L"%lu" : L"%lx", &val))
-            {
-                lRet = RegSetValueExW(hKey, valueName, 0, type, (BYTE*)&val, sizeof(val));
-                if (lRet == ERROR_SUCCESS) result = TRUE;
-                else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
-            }
-        }
-    } else if ( type == REG_QWORD ) {
-        UINT64 value = *((UINT64 *)stringValueData);
-        stringValueData = realloc(stringValueData, 64);
-        swprintf(stringValueData, 64, L"%I64x", value);
-        if (DialogBoxParamW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc, type) == IDOK)
-        {
-            if (swscanf(stringValueData, isDecimal ? L"%I64u" : L"%I64x", &value))
-            {
-                lRet = RegSetValueExW(hKey, valueName, 0, type, (BYTE *)&value, sizeof(value));
-                if (lRet == ERROR_SUCCESS) result = TRUE;
-                else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
-            }
-        }
-    } else if ( type == REG_MULTI_SZ ) {
-        WCHAR char1 = '\r', char2 = '\n';
-        WCHAR *tmpValueData = NULL;
-        INT i, j, count;
-
-        for (i = 0, count = 0; i < len / sizeof(WCHAR); i++)
-            if ( !stringValueData[i] && stringValueData[i + 1] )
-                count++;
-        tmpValueData = malloc(len + (count * sizeof(WCHAR)));
-
-        for ( i = 0, j = 0; i < len / sizeof(WCHAR); i++)
-        {
-            if ( !stringValueData[i] && stringValueData[i + 1])
-            {
-                tmpValueData[j++] = char1;
-                tmpValueData[j++] = char2;
-            }
-            else
-                tmpValueData[j++] = stringValueData[i];
-        }
-
-        free(stringValueData);
-        stringValueData = tmpValueData;
-        tmpValueData = NULL;
-
-        if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_MULTI_STRING), hwnd, modify_dlgproc) == IDOK)
-        {
-            len = lstrlenW( stringValueData );
-            tmpValueData = malloc((len + 2) * sizeof(WCHAR));
-
-            for (i = 0, j = 0; i < len; i++)
-            {
-                if ( stringValueData[i] == char1 && stringValueData[i + 1] == char2)
-                {
-                    if ( tmpValueData[j - 1] != 0)
-                        tmpValueData[j++] = 0;
-                    i++;
-                }
-                else
-                    tmpValueData[j++] = stringValueData[i];
-            }
-
-            tmpValueData[j++] = 0;
-            tmpValueData[j++] = 0;
-            free(stringValueData);
-            stringValueData = tmpValueData;
-
-            lRet = RegSetValueExW(hKey, valueName, 0, type, (LPBYTE)stringValueData, j * sizeof(WCHAR));
-            if (lRet == ERROR_SUCCESS) result = TRUE;
-            else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
-        }
-    }
-    else /* hex data types */
+    if (RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &params.hkey))
     {
-        struct edit_params params;
+        error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
+        return FALSE;
+    }
 
-        params.hkey = hKey;
-        params.value_name = valueName;
-        params.type = type;
-        params.data = stringValueData;
-        params.size = len;
+    params.value_name = valueName;
+
+    if (!read_value(hwnd, &params))
+    {
+        RegCloseKey(params.hkey);
+        return FALSE;
+    }
+
+    switch (params.type)
+    {
+    case REG_SZ:
+    case REG_EXPAND_SZ:
+        result = DialogBoxParamW(NULL, MAKEINTRESOURCEW(IDD_EDIT_STRING), hwnd,
+                                 modify_string_dlgproc, (LPARAM)&params);
+        break;
+    case REG_DWORD:
+    case REG_QWORD:
+        format_dlgproc_string(&params);
+        result = DialogBoxParamW(NULL, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd,
+                                 modify_dword_dlgproc, (LPARAM)&params);
+        break;
+    case REG_MULTI_SZ:
+        format_dlgproc_string(&params);
+        result = DialogBoxParamW(NULL, MAKEINTRESOURCEW(IDD_EDIT_MULTI_STRING), hwnd,
+                                 modify_string_dlgproc, (LPARAM)&params);
+        break;
+    default: /* hex data types */
         result = DialogBoxParamW(NULL, MAKEINTRESOURCEW(IDD_EDIT_BINARY), hwnd,
-                                 bin_modify_dlgproc, (LPARAM)&params);
+                                 modify_binary_dlgproc, (LPARAM)&params);
     }
 
     /* Update the listview item with the new data string */
@@ -370,15 +449,12 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
     {
         int index = SendMessageW(g_pChildWnd->hListWnd, LVM_GETNEXTITEM, -1,
                                  MAKELPARAM(LVNI_FOCUSED | LVNI_SELECTED, 0));
-        free(stringValueData);
-        stringValueData = read_value(hwnd, hKey, valueName, &type, &len);
-        format_value_data(g_pChildWnd->hListWnd, index, type, stringValueData, len);
+
+        format_value_data(g_pChildWnd->hListWnd, index, params.type, params.data, params.size);
     }
 
-done:
-    free(stringValueData);
-    stringValueData = NULL;
-    RegCloseKey(hKey);
+    free(params.data);
+    RegCloseKey(params.hkey);
     return result;
 }
 
@@ -501,46 +577,47 @@ done:
 
 BOOL RenameValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR oldName, LPCWSTR newName)
 {
-    LPWSTR value = NULL;
-    DWORD type;
-    LONG len, lRet;
+    struct edit_params params;
     BOOL result = FALSE;
-    HKEY hKey;
 
     if (!oldName) return FALSE;
     if (!newName) return FALSE;
 
-    lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
-    if (lRet) {
+    if (RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &params.hkey))
+    {
         error_code_messagebox(hwnd, IDS_RENAME_VALUE_FAILED);
-	return FALSE;
+        return FALSE;
     }
 
-    if (!RegQueryValueExW(hKey, newName, NULL, NULL, NULL, NULL)) {
+    if (!RegQueryValueExW(params.hkey, newName, NULL, NULL, NULL, NULL))
+    {
         error_code_messagebox(hwnd, IDS_VALUE_EXISTS, oldName);
         goto done;
     }
-    value = read_value(hwnd, hKey, oldName, &type, &len);
-    if(!value) goto done;
-    lRet = RegSetValueExW(hKey, newName, 0, type, (BYTE*)value, len);
-    if (lRet) {
+
+    params.value_name = oldName;
+    if (!read_value(hwnd, &params)) goto done;
+
+    if (RegSetValueExW(params.hkey, newName, 0, params.type, (BYTE *)params.data, params.size))
+    {
         error_code_messagebox(hwnd, IDS_RENAME_VALUE_FAILED);
-	goto done;
+        goto done;
     }
-    lRet = RegDeleteValueW(hKey, oldName);
-    if (lRet) {
-	RegDeleteValueW(hKey, newName);
+
+    if (RegDeleteValueW(params.hkey, oldName))
+    {
+        RegDeleteValueW(params.hkey, newName);
         error_code_messagebox(hwnd, IDS_RENAME_VALUE_FAILED);
-	goto done;
+        goto done;
     }
+
     result = TRUE;
 
 done:
-    free(value);
-    RegCloseKey(hKey);
+    free(params.data);
+    RegCloseKey(params.hkey);
     return result;
 }
-
 
 BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName)
 {

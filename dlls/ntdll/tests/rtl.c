@@ -3691,6 +3691,54 @@ static void test_RtlDestroyHeap(void)
     RtlRemoveVectoredExceptionHandler( handler );
 }
 
+static void test_RtlFirstFreeAce(void)
+{
+    PACL acl;
+    PACE_HEADER first;
+    BOOL ret;
+    DWORD size;
+    BOOLEAN found;
+
+    size = sizeof(ACL) + (sizeof(ACCESS_ALLOWED_ACE));
+    acl = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+    ret = InitializeAcl(acl, sizeof(ACL), ACL_REVISION);
+    ok(ret, "InitializeAcl failed with error %ld\n", GetLastError());
+
+    /* AceCount = 0 */
+    first = (ACE_HEADER *)0xdeadbeef;
+    found = RtlFirstFreeAce(acl, &first);
+    ok(found, "RtlFirstFreeAce failed\n");
+    ok(first == (PACE_HEADER)(acl + 1), "Failed to find ACL\n");
+
+    acl->AclSize = sizeof(ACL) - 1;
+    first = (ACE_HEADER *)0xdeadbeef;
+    found = RtlFirstFreeAce(acl, &first);
+    ok(found, "RtlFirstFreeAce failed\n");
+    ok(first == NULL, "Found FirstAce = %p\n", first);
+
+    /* AceCount = 1 */
+    acl->AceCount = 1;
+    acl->AclSize = size;
+    first = (ACE_HEADER *)0xdeadbeef;
+    found = RtlFirstFreeAce(acl, &first);
+    ok(found, "RtlFirstFreeAce failed\n");
+    ok(first == (PACE_HEADER)(acl + 1), "Failed to find ACL %p, %p\n", first, (PACE_HEADER)(acl + 1));
+
+    acl->AclSize = sizeof(ACL) - 1;
+    first = (ACE_HEADER *)0xdeadbeef;
+    found = RtlFirstFreeAce(acl, &first);
+    ok(!found, "RtlFirstFreeAce failed\n");
+    ok(first == NULL, "Found FirstAce = %p\n", first);
+
+    acl->AclSize = sizeof(ACL);
+    first = (ACE_HEADER *)0xdeadbeef;
+    found = RtlFirstFreeAce(acl, &first);
+    ok(!found, "RtlFirstFreeAce failed\n");
+    ok(first == NULL, "Found FirstAce = %p\n", first);
+
+    HeapFree(GetProcessHeap(), 0, acl);
+}
+
 static void test_RtlQueryPackageIdentity(void)
 {
     const WCHAR programW[] = {'M','i','c','r','o','s','o','f','t','.','W','i','n','d','o','w','s','.',
@@ -3805,4 +3853,5 @@ START_TEST(rtl)
     test_LdrRegisterDllNotification();
     test_DbgPrint();
     test_RtlDestroyHeap();
+    test_RtlFirstFreeAce();
 }

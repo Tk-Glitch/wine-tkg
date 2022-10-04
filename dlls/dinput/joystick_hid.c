@@ -276,6 +276,7 @@ static const GUID *object_usage_to_guid( USAGE usage_page, USAGE usage )
         case HID_USAGE_GENERIC_RY: return &GUID_RyAxis;
         case HID_USAGE_GENERIC_RZ: return &GUID_RzAxis;
         case HID_USAGE_GENERIC_SLIDER: return &GUID_Slider;
+        case HID_USAGE_GENERIC_DIAL: return &GUID_Slider;
         case HID_USAGE_GENERIC_HATSWITCH: return &GUID_POV;
         }
         break;
@@ -354,6 +355,8 @@ static const WCHAR *object_usage_to_string( DIDEVICEOBJECTINSTANCEW *instance )
     case MAKELONG(HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC): return L"X Axis";
     case MAKELONG(HID_USAGE_GENERIC_Y, HID_USAGE_PAGE_GENERIC): return L"Y Axis";
     case MAKELONG(HID_USAGE_GENERIC_Z, HID_USAGE_PAGE_GENERIC): return L"Z Axis";
+    case MAKELONG(HID_USAGE_GENERIC_SLIDER, HID_USAGE_PAGE_GENERIC): return L"Slider";
+    case MAKELONG(HID_USAGE_GENERIC_DIAL, HID_USAGE_PAGE_GENERIC): return L"Dial";
 
     case MAKELONG(PID_USAGE_ATTACK_LEVEL, HID_USAGE_PAGE_PID): return L"Attack Level";
     case MAKELONG(PID_USAGE_ATTACK_TIME, HID_USAGE_PAGE_PID): return L"Attack Time";

@@ -242,6 +242,7 @@ sync_test("builtin_toString", function() {
     }
     if(v >= 9) {
         test("computedStyle", window.getComputedStyle(e), "CSSStyleDeclaration");
+        test("doctype", document.doctype, "DocumentType");
 
         test("Event", document.createEvent("Event"), "Event");
         test("CustomEvent", document.createEvent("CustomEvent"), "CustomEvent");
@@ -660,6 +661,17 @@ sync_test("doc_mode", function() {
         ok(document.compatMode === "CSS1Compat", "document.compatMode = " + document.compatMode);
     else
         ok(document.compatMode === "BackCompat", "document.compatMode = " + document.compatMode);
+});
+
+sync_test("doctype", function() {
+    var doctype = document.doctype;
+
+    if(document.documentMode < 9) {
+        ok(doctype === null, "doctype = " + document.doctype);
+        return;
+    }
+
+    ok(doctype.name === "html", "doctype.name = " + doctype.name);
 });
 
 async_test("iframe_doc_mode", function() {
@@ -1406,6 +1418,240 @@ sync_test("elem_attr", function() {
         r = elem.style;
         ok(r === style, "elem.style after setAttribute = " + r);
     }
+});
+
+sync_test("elem_attrNS", function() {
+    var v = document.documentMode;
+    if(v < 9) return;  /* not available */
+
+    var specialspace_ns = "http://www.mozilla.org/ns/specialspace";
+    var svg_ns = "http://www.w3.org/2000/svg";
+
+    var elem = document.createElement("div"), r;
+
+    elem.setAttributeNS(specialspace_ns, "spec:align", "left");
+    r = elem.hasAttribute("spec:align");
+    ok(r === true, "spec:align does not exist");
+    r = elem.getAttribute("spec:align");
+    ok(r === "left", "spec:align = " + r);
+    r = elem.hasAttribute("align");
+    ok(r === false, "align exists");
+    r = elem.getAttribute("align");
+    ok(r === null, "align = " + r);
+    r = elem.hasAttributeNS(null, "spec:align");
+    ok(r === false, "null spec:align exists");
+    r = elem.getAttributeNS(null, "spec:align");
+    ok(r === "", "null spec:align = " + r);
+    r = elem.hasAttributeNS(null, "spec:align");
+    ok(r === false, "null align exists");
+    r = elem.getAttributeNS(null, "align");
+    ok(r === "", "null align = " + r);
+    r = elem.hasAttributeNS(svg_ns, "spec:align");
+    ok(r === false, "svg spec:align exists");
+    r = elem.getAttributeNS(svg_ns, "spec:align");
+    ok(r === "", "svg spec:align = " + r);
+    r = elem.hasAttributeNS(svg_ns, "align");
+    ok(r === false, "svg align exists");
+    r = elem.getAttributeNS(svg_ns, "align");
+    ok(r === "", "svg align = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "spec:align");
+    ok(r === false, "specialspace spec:align exists");
+    r = elem.getAttributeNS(specialspace_ns, "spec:align");
+    ok(r === "", "specialspace spec:align = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "align");
+    ok(r === true, "specialspace align does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "align");
+    ok(r === "left", "specialspace align = " + r);
+
+    try {
+        elem.setAttributeNS(null, "spec:align", "right");
+        ok(false, "expected exception setting qualified attr with null ns");
+    }catch(ex) {
+        todo_wine.
+        ok(ex.message === "NamespaceError", "setAttributeNS(null, 'spec:align', 'right') threw " + ex.message);
+    }
+    try {
+        elem.setAttributeNS("", "spec:align", "right");
+        ok(false, "expected exception setting qualified attr with empty ns");
+    }catch(ex) {
+        todo_wine.
+        ok(ex.message === "NamespaceError", "setAttributeNS('', 'spec:align', 'right') threw " + ex.message);
+    }
+    elem.setAttributeNS(null, "align", "right");
+    r = elem.getAttribute("spec:align");
+    ok(r === "left", "spec:align (null) = " + r);
+    r = elem.hasAttribute("align");
+    ok(r === true, "align (null) does not exist");
+    r = elem.getAttribute("align");
+    ok(r === "right", "align (null) = " + r);
+    r = elem.hasAttributeNS(null, "spec:align");
+    ok(r === false, "null spec:align exists");
+    r = elem.getAttributeNS(null, "spec:align");
+    ok(r === "", "null spec:align (null) = " + r);
+    r = elem.hasAttributeNS(null, "align");
+    ok(r === true, "null align does not exist");
+    r = elem.getAttributeNS(null, "align");
+    ok(r === "right", "null align (null) = " + r);
+    r = elem.hasAttributeNS(svg_ns, "spec:align");
+    ok(r === false, "svg spec:align (null) exists");
+    r = elem.getAttributeNS(svg_ns, "spec:align");
+    ok(r === "", "svg spec:align (null) = " + r);
+    r = elem.hasAttributeNS(svg_ns, "align");
+    ok(r === false, "svg align (null) exists");
+    r = elem.getAttributeNS(svg_ns, "align");
+    ok(r === "", "svg align (null) = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "spec:align");
+    ok(r === false, "specialspace_ns spec:align (null) exists");
+    r = elem.getAttributeNS(specialspace_ns, "spec:align");
+    ok(r === "", "specialspace spec:align (null) = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "align");
+    ok(r === true, "specialspace align (null) does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "align");
+    ok(r === "left", "specialspace align (null) = " + r);
+
+    elem.setAttribute("align", "center");
+    r = elem.hasAttributeNS(null, "spec:align");
+    ok(r === false, "null spec:align (non-NS) exists");
+    r = elem.getAttributeNS(null, "spec:align");
+    ok(r === "", "null spec:align (non-NS) = " + r);
+    r = elem.hasAttributeNS(null, "align");
+    ok(r === true, "null align (non-NS) does not exist");
+    r = elem.getAttributeNS(null, "align");
+    ok(r === "center", "null align (non-NS) = " + r);
+    r = elem.hasAttributeNS(svg_ns, "spec:align");
+    ok(r === false, "svg spec:align (non-NS) exists");
+    r = elem.getAttributeNS(svg_ns, "spec:align");
+    ok(r === "", "svg spec:align (non-NS) = " + r);
+    r = elem.hasAttributeNS(svg_ns, "align");
+    ok(r === false, "svg align (non-NS) exists");
+    r = elem.getAttributeNS(svg_ns, "align");
+    ok(r === "", "svg align (non-NS) = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "spec:align");
+    ok(r === false, "specialspace spec:align (non-NS) exists");
+    r = elem.getAttributeNS(specialspace_ns, "spec:align");
+    ok(r === "", "specialspace spec:align (non-NS) = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "align");
+    ok(r === true, "specialspace align (non-NS) does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "align");
+    ok(r === "left", "specialspace align (non-NS) = " + r);
+    elem.removeAttributeNS(null, "spec:align");
+
+    elem.setAttribute("emptynsattr", "none");
+    elem.setAttributeNS("", "emptynsattr", "test");
+    r = elem.hasAttribute("emptynsattr");
+    ok(r === true, "emptynsattr without NS does not exist");
+    r = elem.getAttribute("emptynsattr");
+    ok(r === "test", "emptynsattr without NS = " + r);
+    elem.setAttributeNS(null, "emptynsattr", "wine");
+    r = elem.hasAttribute("emptynsattr");
+    ok(r === true, "emptynsattr without NS does not exist");
+    r = elem.getAttribute("emptynsattr");
+    ok(r === "wine", "emptynsattr without NS = " + r);
+    elem.setAttributeNS(specialspace_ns, "emptynsattr", "ns");
+    r = elem.hasAttribute("emptynsattr");
+    ok(r === true, "emptynsattr without NS does not exist");
+    r = elem.getAttribute("emptynsattr");
+    ok(r === "wine", "emptynsattr without NS = " + r);
+    r = elem.hasAttributeNS("", "emptynsattr");
+    ok(r === true, "emptynsattr empty ns does not exist");
+    r = elem.getAttributeNS("", "emptynsattr");
+    ok(r === "wine", "emptynsattr empty ns = " + r);
+    r = elem.hasAttributeNS(null, "emptynsattr");
+    ok(r === true, "emptynsattr null ns does not exist");
+    r = elem.getAttributeNS(null, "emptynsattr");
+    ok(r === "wine", "emptynsattr null ns = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === true, "emptynsattr specialspace ns does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === "ns", "emptynsattr specialspace ns = " + r);
+
+    elem.removeAttributeNS("", "emptynsattr");
+    r = elem.hasAttribute("emptynsattr");
+    ok(r === true, "emptynsattr without NS after remove does not exist");
+    r = elem.getAttribute("emptynsattr");
+    ok(r === "ns", "emptynsattr without NS after remove = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === true, "emptynsattr specialspace ns after empty remove does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === "ns", "emptynsattr specialspace ns after empty remove = " + r);
+    elem.setAttribute("emptynsattr", "test");
+    r = elem.getAttribute("emptynsattr");
+    ok(r === "test", "emptynsattr without NS after re-set = " + r);
+    r = elem.getAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === "test", "emptynsattr specialspace ns after empty re-set = " + r);
+
+    elem.removeAttribute("emptynsattr");
+    r = elem.hasAttribute("emptynsattr");
+    ok(r === false, "emptynsattr without NS after non-NS remove exists");
+    r = elem.getAttribute("emptynsattr");
+    ok(r === null, "emptynsattr without NS after non-NS remove = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === false, "emptynsattr specialspace ns after non-NS remove exists");
+    r = elem.getAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === "", "emptynsattr specialspace ns after non-NS remove = " + r);
+
+    elem.setAttributeNS(specialspace_ns, "emptynsattr", "ns");
+    elem.removeAttributeNS(svg_ns, "emptynsattr");
+    r = elem.hasAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === true, "emptynsattr specialspace ns after wrong NS remove does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === "ns", "emptynsattr specialspace ns after wrong NS remove = " + r);
+    r = elem.hasAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === true, "emptynsattr specialspace ns after remove does not exist");
+    r = elem.getAttributeNS(specialspace_ns, "emptynsattr");
+    ok(r === "ns", "emptynsattr specialspace ns after remove = " + r);
+
+    var ns = {};
+    ns.toString = function() { return "toString namespace"; }
+    ns.valueOf = function() { return "valueOf namespace"; }
+    elem.setAttributeNS(ns, "foobar", "test");
+    r = elem.hasAttribute("foobar");
+    ok(r === true, "foobar without NS does not exist");
+    r = elem.getAttribute("foobar");
+    ok(r === "test", "foobar without NS = " + r);
+    r = elem.hasAttributeNS(ns, "foobar");
+    ok(r === true, "foobar does not exist");
+    r = elem.getAttributeNS(ns, "foobar");
+    ok(r === "test", "foobar = " + r);
+    r = elem.hasAttributeNS("toString namespace", "foobar");
+    ok(r === (v < 10 ? false : true), "foobar (toString namespace) " + (v < 10 ? "exists" : "does not exist"));
+    r = elem.getAttributeNS("toString namespace", "foobar");
+    ok(r === (v < 10 ? "" : "test"), "foobar (toString namespace) = " + r);
+    r = elem.hasAttributeNS("valueOf namespace", "foobar");
+    ok(r === (v < 10 ? true : false), "foobar (valueOf namespace) = " + (v < 10 ? "does not exist" : "exists"));
+    r = elem.getAttributeNS("valueOf namespace", "foobar");
+    ok(r === (v < 10 ? "test" : ""), "foobar (valueOf namespace) = " + r);
+
+    var arr = [3];
+    elem.setAttributeNS(svg_ns, "testattr", arr);
+    r = elem.getAttributeNS(svg_ns, "testattr");
+    ok(r === "3", "testattr = " + r);
+    ok(elem.testattr === undefined, "elem.testattr = " + elem.testattr);
+    elem.removeAttributeNS(svg_ns, "testattr");
+    r = elem.getAttributeNS(svg_ns, "testattr");
+    ok(r === "", "testattr after remove = " + r);
+
+    arr.toString = function() { return 42; }
+    elem.setAttributeNS(svg_ns, "testattr", arr);
+    r = elem.getAttributeNS(svg_ns, "testattr");
+    ok(r === "42", "testattr with custom toString = " + r);
+    elem.removeAttributeNS(svg_ns, "testattr");
+    r = elem.getAttributeNS(svg_ns, "testattr");
+    ok(r === "", "testattr with custom toString after remove = " + r);
+
+    arr.valueOf = function() { return "arrval"; }
+    elem.setAttributeNS(svg_ns, "testattr", arr);
+    r = elem.getAttributeNS(svg_ns, "testattr");
+    ok(r === "42", "testattr with custom valueOf = " + r);
+    elem.removeAttributeNS(svg_ns, "testattr");
+
+    elem.setAttributeNS(svg_ns, "boolattr", true);
+    r = elem.getAttributeNS(svg_ns, "boolattr");
+    ok(r === "true", "boolattr = " + r);
+
+    elem.setAttributeNS(svg_ns, "numattr", 13);
+    r = elem.getAttributeNS(svg_ns, "numattr");
+    ok(r === "13", "numattr = " + r);
 });
 
 sync_test("builtins_diffs", function() {

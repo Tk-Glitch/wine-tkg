@@ -643,7 +643,7 @@ static HRESULT layout_itemize(struct dwrite_textlayout *layout)
 
 static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
 {
-    IDWriteFontCollection *sys_collection;
+    IDWriteFontCollection *sys_collection, *collection;
     IDWriteFontFallback *fallback = NULL;
     struct layout_range *range;
     struct layout_run *r;
@@ -669,28 +669,19 @@ static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
     LIST_FOR_EACH_ENTRY(r, &layout->runs, struct layout_run, entry) {
         struct regular_layout_run *run = &r->u.regular;
         IDWriteFont *font;
-        UINT32 length, mapped_length;
-        FLOAT scale;
+        UINT32 length;
 
         if (r->kind == LAYOUT_RUN_INLINE)
             continue;
 
         range = get_layout_range_by_pos(layout, run->descr.textPosition);
+        collection = range->collection ? range->collection : sys_collection;
 
-        if (run->sa.shapes == DWRITE_SCRIPT_SHAPES_NO_VISUAL) {
-            hr = IDWriteFontFallback_MapCharacters(fallback,
-                (IDWriteTextAnalysisSource *)&layout->IDWriteTextAnalysisSource1_iface,
-                run->descr.textPosition,
-                run->descr.stringLength,
-                range->collection,
-                range->fontfamily,
-                range->weight,
-                range->style,
-                range->stretch,
-                &mapped_length,
-                &font,
-                &scale);
-            if (FAILED(hr)) {
+        if (run->sa.shapes == DWRITE_SCRIPT_SHAPES_NO_VISUAL)
+        {
+            if (FAILED(hr = create_matching_font(collection, range->fontfamily, range->weight, range->style,
+                    range->stretch, &IID_IDWriteFont, (void **)&font)))
+            {
                 WARN("%s: failed to create matching font for non visual run, family %s, collection %p\n",
                         debugstr_rundescr(&run->descr), debugstr_w(range->fontfamily), range->collection);
                 break;
@@ -709,8 +700,9 @@ static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
 
         length = run->descr.stringLength;
 
-        while (length) {
-            UINT32 mapped_length;
+        while (length)
+        {
+            UINT32 mapped_length = 0;
             FLOAT scale;
 
             run = &r->u.regular;
@@ -733,10 +725,19 @@ static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
                 goto fatal;
             }
 
-            if (!font) {
-                hr = E_FAIL;
-                WARN("Failed to create font face, hr %#x.\n", hr);
-                goto fatal;
+            if (!font)
+            {
+                if (FAILED(create_matching_font(range->collection, range->fontfamily, range->weight, range->style,
+                        range->stretch, &IID_IDWriteFont3, (void **)&font)))
+                {
+                    if (FAILED(hr = create_matching_font(sys_collection, L"Tahoma", range->weight, range->style,
+                        range->stretch, &IID_IDWriteFont3, (void **)&font)))
+                    {
+                        WARN("Failed to create last resort font, hr %#lx.\n", hr);
+                        goto fatal;
+                    }
+                }
+                mapped_length = run->descr.stringLength;
             }
 
             hr = IDWriteFont_CreateFontFace(font, &run->run.fontFace);
@@ -1838,47 +1839,15 @@ static HRESULT layout_set_dummy_line_metrics(struct dwrite_textlayout *layout, U
     DWRITE_FONT_METRICS fontmetrics;
     struct layout_range *range;
     IDWriteFontFace *fontface;
-    IDWriteFontFallback *fallback;
     IDWriteFont *font;
     HRESULT hr;
-    UINT32 mapped_length;
-    FLOAT scale;
 
     range = get_layout_range_by_pos(layout, pos);
-    hr = create_matching_font(range->collection,
-        range->fontfamily,
-        range->weight,
-        range->style,
-        range->stretch,
-        &font);
-
-    if (FAILED(hr)) {
-        if (layout->format.fallback) {
-            fallback = layout->format.fallback;
-            IDWriteFontFallback_AddRef(fallback);
-        } else if (FAILED(hr = IDWriteFactory7_GetSystemFontFallback(layout->factory, &fallback))) {
-            WARN("Failed to get system fallback, hr %#x.\n", hr);
-            return hr;
-        }
-
-        hr = IDWriteFontFallback_MapCharacters(fallback,
-                (IDWriteTextAnalysisSource *)&layout->IDWriteTextAnalysisSource1_iface,
-                pos,
-                layout->len,
-                range->collection,
-                range->fontfamily,
-                range->weight,
-                range->style,
-                range->stretch,
-                &mapped_length,
-                &font,
-                &scale);
-        IDWriteFontFallback_Release(fallback);
-    }
-    if (FAILED(hr))
+    if (FAILED(hr = create_matching_font(range->collection, range->fontfamily, range->weight, range->style,
+            range->stretch, &IID_IDWriteFont, (void **)&font)))
+    {
         return hr;
-    if (font == NULL)
-        return S_OK;
+    }
     hr = IDWriteFont_CreateFontFace(font, &fontface);
     IDWriteFont_Release(font);
     if (FAILED(hr))

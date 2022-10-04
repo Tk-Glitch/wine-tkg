@@ -107,6 +107,7 @@ static void test_WSAEnumProtocolsA(void)
         for (i = 0; i < ret; i++)
         {
             ok( strlen( buffer[i].szProtocol ), "No protocol name found\n" );
+            ok( !(buffer[i].dwProviderFlags & PFL_HIDDEN), "Found a protocol with PFL_HIDDEN.\n" );
             test_service_flags( buffer[i].iAddressFamily, buffer[i].iVersion,
                                 buffer[i].iSocketType, buffer[i].iProtocol,
                                 buffer[i].dwServiceFlags1);
@@ -174,6 +175,7 @@ static void test_WSAEnumProtocolsW(void)
         for (i = 0; i < ret; i++)
         {
             ok( lstrlenW( buffer[i].szProtocol ), "No protocol name found\n" );
+            ok( !(buffer[i].dwProviderFlags & PFL_HIDDEN), "Found a protocol with PFL_HIDDEN.\n" );
             test_service_flags( buffer[i].iAddressFamily, buffer[i].iVersion,
                                 buffer[i].iSocketType, buffer[i].iProtocol,
                                 buffer[i].dwServiceFlags1);
@@ -1570,7 +1572,7 @@ static const struct addr_hint_tests
 }
 hinttests[] =
 {
-    {AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0},
+    {AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0}, /* 0 */
     {AF_UNSPEC, SOCK_STREAM, IPPROTO_UDP, 0},
     {AF_UNSPEC, SOCK_STREAM, IPPROTO_IPV6,0},
     {AF_UNSPEC, SOCK_DGRAM,  IPPROTO_TCP, 0},
@@ -1580,7 +1582,7 @@ hinttests[] =
     {AF_INET,   SOCK_STREAM, IPPROTO_UDP, 0},
     {AF_INET,   SOCK_STREAM, IPPROTO_IPV6,0},
     {AF_INET,   SOCK_DGRAM,  IPPROTO_TCP, 0},
-    {AF_INET,   SOCK_DGRAM,  IPPROTO_UDP, 0},
+    {AF_INET,   SOCK_DGRAM,  IPPROTO_UDP, 0}, /* 10 */
     {AF_INET,   SOCK_DGRAM,  IPPROTO_IPV6,0},
     {AF_UNSPEC, 0,           IPPROTO_TCP, 0},
     {AF_UNSPEC, 0,           IPPROTO_UDP, 0},
@@ -1590,7 +1592,7 @@ hinttests[] =
     {AF_INET,   0,           IPPROTO_TCP, 0},
     {AF_INET,   0,           IPPROTO_UDP, 0},
     {AF_INET,   0,           IPPROTO_IPV6,0},
-    {AF_INET,   SOCK_STREAM, 0,           0},
+    {AF_INET,   SOCK_STREAM, 0,           0}, /* 20 */
     {AF_INET,   SOCK_DGRAM,  0,           0},
     {AF_UNSPEC, 999,         IPPROTO_TCP, WSAESOCKTNOSUPPORT},
     {AF_UNSPEC, 999,         IPPROTO_UDP, WSAESOCKTNOSUPPORT},
@@ -1600,7 +1602,7 @@ hinttests[] =
     {AF_INET,   999,         IPPROTO_IPV6,WSAESOCKTNOSUPPORT},
     {AF_UNSPEC, SOCK_STREAM, 999,         0},
     {AF_UNSPEC, SOCK_STREAM, 999,         0},
-    {AF_INET,   SOCK_DGRAM,  999,         0},
+    {AF_INET,   SOCK_DGRAM,  999,         0}, /* 30 */
     {AF_INET,   SOCK_DGRAM,  999,         0},
 };
 

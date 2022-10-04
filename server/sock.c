@@ -124,6 +124,7 @@ struct poll_req
     struct timeout_user *timeout;
     timeout_t orig_timeout;
     int exclusive;
+    int pending;
     unsigned int count;
     struct
     {
@@ -167,6 +168,8 @@ enum connection_state
     SOCK_CONNECTED,
     SOCK_CONNECTIONLESS,
 };
+
+#define MAX_ICMP_HISTORY_LENGTH 8
 
 struct sock
 {
@@ -215,6 +218,13 @@ struct sock
     unsigned int        sndbuf;      /* advisory send buffer size */
     unsigned int        rcvtimeo;    /* receive timeout in ms */
     unsigned int        sndtimeo;    /* send timeout in ms */
+    struct
+    {
+        unsigned short icmp_id;
+        unsigned short icmp_seq;
+    }
+    icmp_fixup_data[MAX_ICMP_HISTORY_LENGTH]; /* Sent ICMP packets history used to fixup reply id. */
+    unsigned int        icmp_fixup_data_len;  /* Sent ICMP packets history length. */
     unsigned int        rd_shutdown : 1; /* is the read end shut down? */
     unsigned int        wr_shutdown : 1; /* is the write end shut down? */
     unsigned int        wr_shutdown_pending : 1; /* is a write shutdown pending? */
@@ -222,6 +232,7 @@ struct sock
     unsigned int        aborted : 1; /* did we get a POLLERR or irregular POLLHUP? */
     unsigned int        nonblocking : 1; /* is the socket nonblocking? */
     unsigned int        bound : 1;   /* is the socket bound? */
+    unsigned int        reset : 1;   /* did we get a TCP reset? */
 };
 
 static void sock_dump( struct object *obj, int verbose );
@@ -637,20 +648,40 @@ static inline int sock_error( struct sock *sock )
     socklen_t len = sizeof(error);
 
     getsockopt( get_unix_fd(sock->fd), SOL_SOCKET, SO_ERROR, (void *)&error, &len);
-    if (sock->state == SOCK_CONNECTING)
+
+    switch (sock->state)
     {
+    case SOCK_UNCONNECTED:
+        break;
+
+    case SOCK_CONNECTING:
         if (error)
             sock->errors[AFD_POLL_BIT_CONNECT_ERR] = error;
         else
             error = sock->errors[AFD_POLL_BIT_CONNECT_ERR];
-    }
-    else if (sock->state == SOCK_LISTENING)
-    {
+        break;
+
+    case SOCK_LISTENING:
         if (error)
             sock->errors[AFD_POLL_BIT_ACCEPT] = error;
         else
             error = sock->errors[AFD_POLL_BIT_ACCEPT];
+        break;
+
+    case SOCK_CONNECTED:
+    case SOCK_CONNECTIONLESS:
+        if (error == ECONNRESET || error == EPIPE)
+        {
+            sock->reset = 1;
+            error = 0;
+        }
+        else if (error)
+            sock->errors[AFD_POLL_BIT_HUP] = error;
+        else
+            error = sock->errors[AFD_POLL_BIT_HUP];
+        break;
     }
+
     return error;
 }
 
@@ -874,6 +905,8 @@ static int get_poll_flags( struct sock *sock, int event )
         flags |= AFD_POLL_HUP;
     if (event & POLLERR)
         flags |= AFD_POLL_CONNECT_ERR;
+    if (sock->reset)
+        flags |= AFD_POLL_RESET;
 
     return flags;
 }
@@ -974,8 +1007,11 @@ static void complete_async_polls( struct sock *sock, int event, int error )
             req->sockets[i].flags = req->sockets[i].mask & flags;
             req->sockets[i].status = sock_get_ntstatus( error );
 
-            complete_async_poll( req, STATUS_SUCCESS );
-            break;
+            if (req->pending)
+            {
+                complete_async_poll( req, STATUS_SUCCESS );
+                break;
+            }
         }
     }
 }
@@ -1039,10 +1075,8 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
         int status = sock_get_ntstatus( error );
         struct accept_req *req, *next;
 
-        if (sock->rd_shutdown || sock->hangup)
-            async_wake_up( &sock->read_q, status );
-        if (sock->wr_shutdown)
-            async_wake_up( &sock->write_q, status );
+        async_wake_up( &sock->read_q, status );
+        async_wake_up( &sock->write_q, status );
 
         LIST_FOR_EACH_ENTRY_SAFE( req, next, &sock->accept_list, struct accept_req, entry )
         {
@@ -1057,10 +1091,19 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
             async_terminate( sock->connect_req->async, status );
     }
 
+    if (sock->reset)
+    {
+        async_wake_up( &sock->read_q, STATUS_CONNECTION_RESET );
+        async_wake_up( &sock->write_q, STATUS_CONNECTION_RESET );
+
+        if (sock->accept_recv_req && sock->accept_recv_req->iosb->status == STATUS_PENDING)
+            async_terminate( sock->accept_recv_req->async, STATUS_CONNECTION_RESET );
+    }
+
     return event;
 }
 
-static void post_socket_event( struct sock *sock, enum afd_poll_bit event_bit, int error )
+static void post_socket_event( struct sock *sock, enum afd_poll_bit event_bit )
 {
     unsigned int event = (1 << event_bit);
 
@@ -1068,11 +1111,10 @@ static void post_socket_event( struct sock *sock, enum afd_poll_bit event_bit, i
     {
         sock->pending_events |= event;
         sock->reported_events |= event;
-        sock->errors[event_bit] = error;
     }
 }
 
-static void sock_dispatch_events( struct sock *sock, enum connection_state prevstate, int event, int error )
+static void sock_dispatch_events( struct sock *sock, enum connection_state prevstate, int event )
 {
     switch (prevstate)
     {
@@ -1081,32 +1123,32 @@ static void sock_dispatch_events( struct sock *sock, enum connection_state prevs
 
     case SOCK_CONNECTING:
         if (event & POLLOUT)
-        {
-            post_socket_event( sock, AFD_POLL_BIT_CONNECT, 0 );
-            sock->errors[AFD_POLL_BIT_CONNECT_ERR] = 0;
-        }
+            post_socket_event( sock, AFD_POLL_BIT_CONNECT );
         if (event & (POLLERR | POLLHUP))
-            post_socket_event( sock, AFD_POLL_BIT_CONNECT_ERR, error );
+            post_socket_event( sock, AFD_POLL_BIT_CONNECT_ERR );
         break;
 
     case SOCK_LISTENING:
         if (event & (POLLIN | POLLERR | POLLHUP))
-            post_socket_event( sock, AFD_POLL_BIT_ACCEPT, error );
+            post_socket_event( sock, AFD_POLL_BIT_ACCEPT );
         break;
 
     case SOCK_CONNECTED:
     case SOCK_CONNECTIONLESS:
+        if (sock->reset)
+            post_socket_event( sock, AFD_POLL_BIT_RESET );
+
         if (event & POLLIN)
-            post_socket_event( sock, AFD_POLL_BIT_READ, 0 );
+            post_socket_event( sock, AFD_POLL_BIT_READ );
 
         if (event & POLLOUT)
-            post_socket_event( sock, AFD_POLL_BIT_WRITE, 0 );
+            post_socket_event( sock, AFD_POLL_BIT_WRITE );
 
         if (event & POLLPRI)
-            post_socket_event( sock, AFD_POLL_BIT_OOB, 0 );
+            post_socket_event( sock, AFD_POLL_BIT_OOB );
 
         if (event & (POLLERR | POLLHUP))
-            post_socket_event( sock, AFD_POLL_BIT_HUP, error );
+            post_socket_event( sock, AFD_POLL_BIT_HUP );
         break;
     }
 
@@ -1124,6 +1166,9 @@ static void sock_poll_event( struct fd *fd, int event )
     if (debug_level)
         fprintf(stderr, "socket %p select event: %x\n", sock, event);
 
+    if (event & (POLLERR | POLLHUP))
+        error = sock_error( sock );
+
     switch (sock->state)
     {
     case SOCK_UNCONNECTED:
@@ -1132,7 +1177,6 @@ static void sock_poll_event( struct fd *fd, int event )
     case SOCK_CONNECTING:
         if (event & (POLLERR|POLLHUP))
         {
-            error = sock_error( sock );
             sock->state = SOCK_UNCONNECTED;
             event &= ~POLLOUT;
         }
@@ -1140,16 +1184,18 @@ static void sock_poll_event( struct fd *fd, int event )
         {
             sock->state = SOCK_CONNECTED;
             sock->connect_time = current_time;
+            sock->errors[AFD_POLL_BIT_CONNECT_ERR] = 0;
         }
         break;
 
     case SOCK_LISTENING:
-        if (event & (POLLERR|POLLHUP))
-            error = sock_error( sock );
         break;
 
     case SOCK_CONNECTED:
     case SOCK_CONNECTIONLESS:
+        if (sock->reset)
+            event &= ~(POLLIN | POLLERR | POLLHUP);
+
         if (sock->type == WS_SOCK_STREAM && (event & POLLIN))
         {
             char dummy;
@@ -1168,10 +1214,15 @@ static void sock_poll_event( struct fd *fd, int event )
                 event &= ~POLLIN;
                 /* EAGAIN can happen if an async recv() falls between the server's poll()
                    call and the invocation of this routine */
-                if ( errno != EAGAIN )
+                if (errno == ECONNRESET || errno == EPIPE)
+                {
+                    sock->reset = 1;
+                }
+                else if (errno != EAGAIN)
                 {
                     error = errno;
                     event |= POLLERR;
+                    sock->errors[AFD_POLL_BIT_HUP] = error;
                     if ( debug_level )
                         fprintf( stderr, "recv error on socket %p: %d\n", sock, errno );
                 }
@@ -1196,7 +1247,7 @@ static void sock_poll_event( struct fd *fd, int event )
     }
 
     event = sock_dispatch_asyncs( sock, event, error );
-    sock_dispatch_events( sock, prevstate, event, error );
+    sock_dispatch_events( sock, prevstate, event );
     complete_async_polls( sock, event, error );
 
     sock_reselect( sock );
@@ -1290,7 +1341,7 @@ static int sock_get_poll_events( struct fd *fd )
             return -1;
         }
 
-        if (sock->aborted)
+        if (sock->aborted || sock->reset)
             return -1;
 
         if (sock->accept_recv_req)
@@ -1460,12 +1511,7 @@ static void sock_destroy( struct object *obj )
     free_async_queue( &sock->connect_q );
     free_async_queue( &sock->poll_q );
     if (sock->event) release_object( sock->event );
-    if (sock->fd)
-    {
-        /* shut the socket down to force pending poll() calls in the client to return */
-        shutdown( get_unix_fd(sock->fd), SHUT_RDWR );
-        release_object( sock->fd );
-    }
+    if (sock->fd) release_object( sock->fd );
 }
 
 static struct sock *create_socket(void)
@@ -1500,10 +1546,12 @@ static struct sock *create_socket(void)
     sock->aborted = 0;
     sock->nonblocking = 0;
     sock->bound = 0;
+    sock->reset = 0;
     sock->rcvbuf = 0;
     sock->sndbuf = 0;
     sock->rcvtimeo = 0;
     sock->sndtimeo = 0;
+    sock->icmp_fixup_data_len = 0;
     init_async_queue( &sock->read_q );
     init_async_queue( &sock->write_q );
     init_async_queue( &sock->ifchange_q );
@@ -1620,6 +1668,23 @@ static int init_socket( struct sock *sock, int family, int type, int protocol )
     }
 
     sockfd = socket( unix_family, unix_type, unix_protocol );
+
+#ifdef linux
+    if (sockfd == -1 && errno == EPERM && unix_family == AF_INET
+        && unix_type == SOCK_RAW && unix_protocol == IPPROTO_ICMP)
+    {
+        sockfd = socket( unix_family, SOCK_DGRAM, unix_protocol );
+        if (sockfd != -1)
+        {
+            const int val = 1;
+
+            setsockopt( sockfd, IPPROTO_IP, IP_RECVTTL, (const char *)&val, sizeof(val) );
+            setsockopt( sockfd, IPPROTO_IP, IP_RECVTOS, (const char *)&val, sizeof(val) );
+            setsockopt( sockfd, IPPROTO_IP, IP_PKTINFO, (const char *)&val, sizeof(val) );
+        }
+    }
+#endif
+
     if (sockfd == -1)
     {
         if (errno == EINVAL) set_win32_error( WSAESOCKTNOSUPPORT );
@@ -2360,13 +2425,17 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 
         if (!ret)
         {
-            sock->state = SOCK_CONNECTED;
-            sock->connect_time = current_time;
+            if (sock->type != WS_SOCK_DGRAM)
+            {
+                sock->state = SOCK_CONNECTED;
+                sock->connect_time = current_time;
+            }
 
             if (!send_len) return;
         }
 
-        sock->state = SOCK_CONNECTING;
+        if (sock->type != WS_SOCK_DGRAM)
+            sock->state = SOCK_CONNECTING;
 
         if (params->synchronous && sock->nonblocking)
         {
@@ -2980,32 +3049,6 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
     }
 }
 
-static int poll_single_socket( struct sock *sock, int mask )
-{
-    struct pollfd pollfd;
-
-    pollfd.fd = get_unix_fd( sock->fd );
-    pollfd.events = poll_flags_from_afd( sock, mask );
-    if (pollfd.events < 0 || poll( &pollfd, 1, 0 ) < 0)
-        return 0;
-
-    if (sock->state == SOCK_CONNECTING && (pollfd.revents & (POLLERR | POLLHUP)))
-        pollfd.revents &= ~POLLOUT;
-
-    if ((mask & AFD_POLL_HUP) && (pollfd.revents & POLLIN) && sock->type == WS_SOCK_STREAM)
-    {
-        char dummy;
-
-        if (!recv( get_unix_fd( sock->fd ), &dummy, 1, MSG_PEEK ))
-        {
-            pollfd.revents &= ~POLLIN;
-            pollfd.revents |= POLLHUP;
-        }
-    }
-
-    return get_poll_flags( sock, pollfd.revents ) & mask;
-}
-
 static void handle_exclusive_poll(struct poll_req *req)
 {
     unsigned int i;
@@ -3043,6 +3086,7 @@ static void poll_socket( struct sock *poll_sock, struct async *async, int exclus
         return;
 
     req->timeout = NULL;
+    req->pending = 0;
     if (timeout && timeout != TIMEOUT_INFINITE &&
         !(req->timeout = add_timeout_user( timeout, async_poll_timeout, req )))
     {
@@ -3081,26 +3125,28 @@ static void poll_socket( struct sock *poll_sock, struct async *async, int exclus
     {
         struct sock *sock = req->sockets[i].sock;
         int mask = req->sockets[i].mask;
-        int flags = poll_single_socket( sock, mask );
+        struct pollfd pollfd;
 
-        if (flags)
-        {
-            signaled = TRUE;
-            req->sockets[i].flags = flags;
-            req->sockets[i].status = sock_get_ntstatus( sock_error( sock ) );
-        }
+        pollfd.fd = get_unix_fd( sock->fd );
+        pollfd.events = poll_flags_from_afd( sock, mask );
+        if (pollfd.events >= 0 && poll( &pollfd, 1, 0 ) >= 0)
+            sock_poll_event( sock->fd, pollfd.revents );
 
         /* FIXME: do other error conditions deserve a similar treatment? */
         if (sock->state != SOCK_CONNECTING && sock->errors[AFD_POLL_BIT_CONNECT_ERR] && (mask & AFD_POLL_CONNECT_ERR))
         {
-            signaled = TRUE;
             req->sockets[i].flags |= AFD_POLL_CONNECT_ERR;
             req->sockets[i].status = sock_get_ntstatus( sock->errors[AFD_POLL_BIT_CONNECT_ERR] );
         }
+
+        if (req->sockets[i].flags)
+            signaled = TRUE;
     }
 
     if (!timeout || signaled)
         complete_async_poll( req, STATUS_SUCCESS );
+    else
+        req->pending = 1;
 
     for (i = 0; i < req->count; ++i)
         sock_reselect( req->sockets[i].sock );
@@ -3576,5 +3622,49 @@ DECL_HANDLER(send_socket)
         reply->nonblocking = sock->nonblocking;
         release_object( async );
     }
+    release_object( sock );
+}
+
+DECL_HANDLER(socket_send_icmp_id)
+{
+    struct sock *sock = (struct sock *)get_handle_obj( current->process, req->handle, 0, &sock_ops );
+
+    if (!sock) return;
+
+    if (sock->icmp_fixup_data_len == MAX_ICMP_HISTORY_LENGTH)
+    {
+        memmove( sock->icmp_fixup_data, sock->icmp_fixup_data + 1,
+                 sizeof(*sock->icmp_fixup_data) * (MAX_ICMP_HISTORY_LENGTH - 1) );
+        --sock->icmp_fixup_data_len;
+    }
+
+    sock->icmp_fixup_data[sock->icmp_fixup_data_len].icmp_id = req->icmp_id;
+    sock->icmp_fixup_data[sock->icmp_fixup_data_len].icmp_seq = req->icmp_seq;
+    ++sock->icmp_fixup_data_len;
+
+    release_object( sock );
+}
+
+DECL_HANDLER(socket_get_icmp_id)
+{
+    struct sock *sock = (struct sock *)get_handle_obj( current->process, req->handle, 0, &sock_ops );
+    unsigned int i;
+
+    if (!sock) return;
+
+    for (i = 0; i < sock->icmp_fixup_data_len; ++i)
+    {
+        if (sock->icmp_fixup_data[i].icmp_seq == req->icmp_seq)
+        {
+            reply->icmp_id = sock->icmp_fixup_data[i].icmp_id;
+            --sock->icmp_fixup_data_len;
+            memmove( &sock->icmp_fixup_data[i], &sock->icmp_fixup_data[i + 1],
+                     (sock->icmp_fixup_data_len - i) * sizeof(*sock->icmp_fixup_data) );
+            release_object( sock );
+            return;
+        }
+    }
+
+    set_error( STATUS_NOT_FOUND );
     release_object( sock );
 }

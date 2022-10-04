@@ -329,6 +329,9 @@ extern const vtable_ptr improper_scheduler_attach_vtable;
 typedef exception improper_scheduler_detach;
 extern const vtable_ptr improper_scheduler_detach_vtable;
 
+typedef exception invalid_multiple_scheduling;
+extern const vtable_ptr invalid_multiple_scheduling_vtable;
+
 typedef exception invalid_scheduler_policy_key;
 extern const vtable_ptr invalid_scheduler_policy_key_vtable;
 
@@ -378,7 +381,7 @@ static void create_default_scheduler(void);
 DEFINE_THISCALL_WRAPPER(improper_lock_ctor_str, 8)
 improper_lock* __thiscall improper_lock_ctor_str(improper_lock *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &improper_lock_vtable);
 }
 
@@ -403,7 +406,7 @@ DEFINE_THISCALL_WRAPPER(improper_scheduler_attach_ctor_str, 8)
 improper_scheduler_attach* __thiscall improper_scheduler_attach_ctor_str(
         improper_scheduler_attach *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &improper_scheduler_attach_vtable);
 }
 
@@ -430,7 +433,7 @@ DEFINE_THISCALL_WRAPPER(improper_scheduler_detach_ctor_str, 8)
 improper_scheduler_detach* __thiscall improper_scheduler_detach_ctor_str(
         improper_scheduler_detach *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &improper_scheduler_detach_vtable);
 }
 
@@ -451,13 +454,42 @@ improper_scheduler_detach * __thiscall improper_scheduler_detach_copy_ctor(
     return __exception_copy_ctor(_this, rhs, &improper_scheduler_detach_vtable);
 }
 
+/* ??0invalid_multiple_scheduling@Concurrency@@QAA@PBD@Z */
+/* ??0invalid_multiple_scheduling@Concurrency@@QAE@PBD@Z */
+/* ??0invalid_multiple_scheduling@Concurrency@@QEAA@PEBD@Z */
+DEFINE_THISCALL_WRAPPER(invalid_multiple_scheduling_ctor_str, 8)
+invalid_multiple_scheduling* __thiscall invalid_multiple_scheduling_ctor_str(
+        invalid_multiple_scheduling *this, const char *str)
+{
+    TRACE("(%p %s)\n", this, str);
+    return __exception_ctor(this, str, &invalid_multiple_scheduling_vtable);
+}
+
+/* ??0invalid_multiple_scheduling@Concurrency@@QAA@XZ */
+/* ??0invalid_multiple_scheduling@Concurrency@@QAE@XZ */
+/* ??0invalid_multiple_scheduling@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(invalid_multiple_scheduling_ctor, 4)
+invalid_multiple_scheduling* __thiscall invalid_multiple_scheduling_ctor(
+        invalid_multiple_scheduling *this)
+{
+    return invalid_multiple_scheduling_ctor_str(this, NULL);
+}
+
+DEFINE_THISCALL_WRAPPER(invalid_multiple_scheduling_copy_ctor,8)
+invalid_multiple_scheduling * __thiscall invalid_multiple_scheduling_copy_ctor(
+        invalid_multiple_scheduling * _this, const invalid_multiple_scheduling * rhs)
+{
+    TRACE("(%p %p)\n", _this, rhs);
+    return __exception_copy_ctor(_this, rhs, &invalid_multiple_scheduling_vtable);
+}
+
 /* ??0invalid_scheduler_policy_key@Concurrency@@QAE@PBD@Z */
 /* ??0invalid_scheduler_policy_key@Concurrency@@QEAA@PEBD@Z */
 DEFINE_THISCALL_WRAPPER(invalid_scheduler_policy_key_ctor_str, 8)
 invalid_scheduler_policy_key* __thiscall invalid_scheduler_policy_key_ctor_str(
         invalid_scheduler_policy_key *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &invalid_scheduler_policy_key_vtable);
 }
 
@@ -484,7 +516,7 @@ DEFINE_THISCALL_WRAPPER(invalid_scheduler_policy_thread_specification_ctor_str, 
 invalid_scheduler_policy_thread_specification* __thiscall invalid_scheduler_policy_thread_specification_ctor_str(
         invalid_scheduler_policy_thread_specification *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &invalid_scheduler_policy_thread_specification_vtable);
 }
 
@@ -511,7 +543,7 @@ DEFINE_THISCALL_WRAPPER(invalid_scheduler_policy_value_ctor_str, 8)
 invalid_scheduler_policy_value* __thiscall invalid_scheduler_policy_value_ctor_str(
         invalid_scheduler_policy_value *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &invalid_scheduler_policy_value_vtable);
 }
 
@@ -583,6 +615,8 @@ DEFINE_RTTI_DATA1(improper_scheduler_attach, 0, &cexception_rtti_base_descriptor
         ".?AVimproper_scheduler_attach@Concurrency@@")
 DEFINE_RTTI_DATA1(improper_scheduler_detach, 0, &cexception_rtti_base_descriptor,
         ".?AVimproper_scheduler_detach@Concurrency@@")
+DEFINE_RTTI_DATA1(invalid_multiple_scheduling, 0, &cexception_rtti_base_descriptor,
+        ".?AVinvalid_multiple_scheduling@Concurrency@@")
 DEFINE_RTTI_DATA1(invalid_scheduler_policy_key, 0, &cexception_rtti_base_descriptor,
         ".?AVinvalid_scheduler_policy_key@Concurrency@@")
 DEFINE_RTTI_DATA1(invalid_scheduler_policy_thread_specification, 0, &cexception_rtti_base_descriptor,
@@ -608,6 +642,9 @@ __ASM_BLOCK_BEGIN(concurrency_exception_vtables)
             VTABLE_ADD_FUNC(cexception_vector_dtor)
             VTABLE_ADD_FUNC(cexception_what));
     __ASM_VTABLE(improper_scheduler_detach,
+            VTABLE_ADD_FUNC(cexception_vector_dtor)
+            VTABLE_ADD_FUNC(cexception_what));
+    __ASM_VTABLE(invalid_multiple_scheduling,
             VTABLE_ADD_FUNC(cexception_vector_dtor)
             VTABLE_ADD_FUNC(cexception_what));
     __ASM_VTABLE(invalid_scheduler_policy_key,
@@ -3042,6 +3079,7 @@ void msvcrt_init_concurrency(void *base)
     init_improper_lock_rtti(base);
     init_improper_scheduler_attach_rtti(base);
     init_improper_scheduler_detach_rtti(base);
+    init_invalid_multiple_scheduling_rtti(base);
     init_invalid_scheduler_policy_key_rtti(base);
     init_invalid_scheduler_policy_thread_specification_rtti(base);
     init_invalid_scheduler_policy_value_rtti(base);

@@ -1023,6 +1023,14 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleTitleA( LPSTR title, DWORD size )
 }
 
 
+BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleSelectionInfo(CONSOLE_SELECTION_INFO *info)
+{
+    FIXME("stub (%p)\n", info);
+    info->dwFlags = CONSOLE_NO_SELECTION;
+    return TRUE;
+}
+
+
 /******************************************************************************
  *	GetConsoleTitleW   (kernelbase.@)
  */

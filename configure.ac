@@ -1132,7 +1132,7 @@ then
         WINE_CHECK_MINGW_HEADER(vkd3d_shader.h)
         if test "$ac_cv_mingw_header_vkd3d_h" = "yes" -a "$ac_cv_mingw_header_vkd3d_shader_h" = "yes"
         then
-            WINE_CHECK_MINGW_LIB(vkd3d,vkd3d_serialize_versioned_root_signature,[:],[:],[$VKD3D_PE_LIBS])
+            WINE_CHECK_MINGW_LIB(vkd3d,vkd3d_set_log_callback,[:],[:],[$VKD3D_PE_LIBS])
             WINE_CHECK_MINGW_LIB(vkd3d-shader,vkd3d_shader_compile,[:],[:],[$VKD3D_PE_LIBS])
             if test "$ac_cv_mingw_lib_vkd3d" = "no" -o "$ac_cv_mingw_lib_vkd3d_shader" = "no"
             then
@@ -1145,7 +1145,7 @@ then
         fi])
     if test "x$VKD3D_PE_LIBS" = "x"
     then
-        WINE_NOTICE([libvkd3d ${notice_platform}MinGW development files not found; using bundled version.])
+        WINE_NOTICE([libvkd3d ${notice_platform}MinGW development files not found (or too old); using bundled version.])
     fi
 
     WINE_MINGW_PACKAGE_FLAGS(ZLIB,[zlib],[-lz],
@@ -3378,6 +3378,7 @@ WINE_CONFIG_MAKEFILE(po)
 WINE_CONFIG_MAKEFILE(programs/arp)
 WINE_CONFIG_MAKEFILE(programs/aspnet_regiis)
 WINE_CONFIG_MAKEFILE(programs/attrib)
+WINE_CONFIG_MAKEFILE(programs/belauncher)
 WINE_CONFIG_MAKEFILE(programs/cabarc)
 WINE_CONFIG_MAKEFILE(programs/cacls)
 WINE_CONFIG_MAKEFILE(programs/chcp.com)
@@ -3657,7 +3658,7 @@ dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.13.r0.gcd8ca4d7\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.14.r0.g1d21e2b6\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:
