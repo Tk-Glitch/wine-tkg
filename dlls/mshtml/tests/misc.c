@@ -168,10 +168,36 @@ static HRESULT get_localstorage(IHTMLDocument2 *doc, IHTMLStorage **storage)
     return hres;
 }
 
+static HRESULT get_sessionstorage(IHTMLDocument2 *doc, IHTMLStorage **storage)
+{
+    IHTMLWindow2 *window;
+    IHTMLWindow6 *window6;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
+    ok(window != NULL, "window == NULL\n");
+
+    hres = IHTMLWindow2_QueryInterface(window, &IID_IHTMLWindow6, (void**)&window6);
+    IHTMLWindow2_Release(window);
+    if(FAILED(hres)) {
+        win_skip("IHTMLWindow6 not supported\n");
+        return hres;
+    }
+
+    hres = IHTMLWindow6_get_sessionStorage(window6, storage);
+    ok(hres == S_OK, "get_sessionStorage failed: %08lx\n", hres);
+    ok(*storage != NULL, "*storage == NULL\n");
+
+    IHTMLWindow6_Release(window6);
+    return hres;
+}
+
 static void test_HTMLStorage(void)
 {
     IHTMLDocument2 *doc, *doc2;
     IHTMLStorage *storage, *storage2;
+    LONG space, length, lval;
     VARIANT var;
     BSTR key, value;
     HRESULT hres;
@@ -195,6 +221,10 @@ static void test_HTMLStorage(void)
     hres = IHTMLStorage_removeItem(storage, key);
     ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
 
+    hres = IHTMLStorage_get_length(storage, &length);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(length >= 0, "length = %ld\n", lval);
+
     value = SysAllocString(L"null");
     hres = IHTMLStorage_setItem(storage, key, value);
     ok(hres == S_OK, "setItem failed: %08lx\n", hres);
@@ -204,6 +234,19 @@ static void test_HTMLStorage(void)
     ok(hres == S_OK, "getItem failed: %08lx\n", hres);
     ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
     if (V_VT(&var) == VT_BSTR) ok(!wcscmp(V_BSTR(&var), L"null"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    SysFreeString(key);
+
+    hres = IHTMLStorage_key(storage, 0, &key);
+    ok(hres == S_OK, "key failed %08lx\n", hres);
+    ok(!wcscmp(key, L"undefined"), "key(0) = %s\n", wine_dbgstr_w(key));
+    SysFreeString(key);
+
+    hres = IHTMLStorage_key(storage, 1, &key);
+    ok(hres == E_INVALIDARG, "key failed %08lx\n", hres);
+    hres = IHTMLStorage_key(storage, -1, &key);
+    ok(hres == E_INVALIDARG, "key failed %08lx\n", hres);
+
+    key = SysAllocString(L"undefined");
     hres = IHTMLStorage_removeItem(storage, key);
     ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
     SysFreeString(key);
@@ -291,8 +334,288 @@ static void test_HTMLStorage(void)
 
     IHTMLStorage_Release(storage);
     IHTMLStorage_Release(storage2);
-    IHTMLDocument2_Release(doc);
+
+    /* Session storage on same docs */
+    hres = get_sessionstorage(doc, &storage);
+    ok(hres == S_OK, "got %08lx\n", hres);
+
+    hres = get_sessionstorage(doc2, &storage2);
+    ok(hres == S_OK, "got %08lx\n", hres);
+
+    hres = IHTMLStorage_get_length(storage, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 0, "length = %ld\n", lval);
+
+    hres = IHTMLStorage_get_remainingSpace(storage, &space);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(space >= 5000000, "remainingSpace = %ld\n", space);
+
+    key = SysAllocString(L"");
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_NULL, "got %d\n", V_VT(&var));
+    SysFreeString(key);
+
+    key = SysAllocString(L"undefined");
+    hres = IHTMLStorage_removeItem(storage, key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+
+    value = SysAllocString(L"null");
+    hres = IHTMLStorage_setItem(storage, key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+
+    hres = IHTMLStorage_get_length(storage, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 1, "length = %ld\n", lval);
+    hres = IHTMLStorage_get_length(storage2, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 1, "length = %ld\n", lval);
+
+    hres = IHTMLStorage_get_remainingSpace(storage, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space - 13, "remainingSpace = %ld\n", lval);
+    hres = IHTMLStorage_get_remainingSpace(storage2, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space - 13, "remainingSpace = %ld\n", lval);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"null"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"null"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+    SysFreeString(key);
+
+    value = SysAllocString(L"asdf");
+    hres = IHTMLStorage_setItem(storage, NULL, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, NULL, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"asdf"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    V_VT(&var) = 0xdead;
+    key = SysAllocString(L"");
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"asdf"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+    SysFreeString(key);
+
+    key = SysAllocString(L"null-value");
+    hres = IHTMLStorage_setItem(storage, key, NULL);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L""), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    hres = IHTMLStorage_removeItem(storage, NULL);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+    hres = IHTMLStorage_removeItem(storage2, key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+    SysFreeString(key);
+
+    key = SysAllocString(L"aaaa");
+    value = SysAllocString(L"bbbb");
+    hres = IHTMLStorage_setItem(storage2, key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"bbbb"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+    SysFreeString(key);
+
+    hres = IHTMLStorage_get_length(storage, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 2, "length = %ld\n", lval);
+    hres = IHTMLStorage_get_length(storage2, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 2, "length = %ld\n", lval);
+
+    hres = IHTMLStorage_get_remainingSpace(storage, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space - 21, "remainingSpace = %ld\n", lval);
+    hres = IHTMLStorage_get_remainingSpace(storage2, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space - 21, "remainingSpace = %ld\n", lval);
+
+    hres = IHTMLStorage_key(storage, 0, &key);
+    ok(hres == S_OK, "key failed %08lx\n", hres);
+    ok(!wcscmp(key, L"undefined"), "key(0) = %s\n", wine_dbgstr_w(key));
+    SysFreeString(key);
+
+    hres = IHTMLStorage_key(storage, 1, &key);
+    ok(hres == S_OK, "key failed %08lx\n", hres);
+    ok(!wcscmp(key, L"aaaa"), "key(0) = %s\n", wine_dbgstr_w(key));
+    SysFreeString(key);
+
+    hres = IHTMLStorage_key(storage, 2, &key);
+    ok(hres == E_INVALIDARG, "key failed %08lx\n", hres);
+    hres = IHTMLStorage_key(storage, -1, &key);
+    ok(hres == E_INVALIDARG, "key failed %08lx\n", hres);
+
+    key = SysAllocString(L"undefined");
+    hres = IHTMLStorage_removeItem(storage2, key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+    SysFreeString(key);
+
+    hres = IHTMLStorage_key(storage, 0, &key);
+    ok(hres == S_OK, "key failed %08lx\n", hres);
+    ok(!wcscmp(key, L"aaaa"), "key(0) = %s\n", wine_dbgstr_w(key));
+    SysFreeString(key);
+
+    hres = IHTMLStorage_key(storage, 1, &key);
+    ok(hres == E_INVALIDARG, "key failed %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    key = SysAllocString(L"undefined");
+    hres = IHTMLStorage_getItem(storage, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_NULL, "got %d\n", V_VT(&var));
+    SysFreeString(key);
+
+    hres = IHTMLStorage_clear(storage2);
+    ok(hres == S_OK, "clear failed %08lx\n", hres);
+
+    hres = IHTMLStorage_get_length(storage, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 0, "length = %ld\n", lval);
+    hres = IHTMLStorage_get_length(storage2, &lval);
+    ok(hres == S_OK, "get_length failed %08lx\n", hres);
+    ok(lval == 0, "length = %ld\n", lval);
+
+    hres = IHTMLStorage_get_remainingSpace(storage, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space, "remainingSpace = %ld\n", lval);
+    hres = IHTMLStorage_get_remainingSpace(storage2, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space, "remainingSpace = %ld\n", lval);
+
+    hres = IHTMLStorage_key(storage, 0, &key);
+    ok(hres == E_INVALIDARG, "key failed %08lx\n", hres);
+
+    key = SysAllocString(L"foo");
+    value = SysAllocString(L"bar");
+    hres = IHTMLStorage_setItem(storage, key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+
+    IHTMLStorage_Release(storage2);
     IHTMLDocument2_Release(doc2);
+
+    /* Case insensitive domain */
+    doc2 = create_doc_from_url(L"htTp://www.CodeWeavers.com/");
+    hres = get_sessionstorage(doc2, &storage2);
+    ok(hres == S_OK, "got %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"bar"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    IHTMLStorage_Release(storage2);
+    IHTMLDocument2_Release(doc2);
+
+    /* Different schemes */
+    doc2 = create_doc_from_url(L"https://www.codeweavers.com/");
+    hres = get_sessionstorage(doc2, &storage2);
+    ok(hres == S_OK, "got %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"bar"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    hres = IHTMLStorage_get_remainingSpace(storage, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space - 6, "remainingSpace = %ld\n", lval);
+
+    IHTMLStorage_Release(storage2);
+    IHTMLDocument2_Release(doc2);
+
+    doc2 = create_doc_from_url(L"ftp://www.codeweavers.com/");
+    hres = get_sessionstorage(doc2, &storage2);
+    ok(hres == S_OK, "got %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_NULL, "got %d\n", V_VT(&var));
+
+    hres = IHTMLStorage_get_remainingSpace(storage2, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space, "remainingSpace = %ld\n", lval);
+
+    hres = IHTMLStorage_setItem(storage2, key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"bar"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    hres = IHTMLStorage_clear(storage2);
+    ok(hres == S_OK, "clear failed %08lx\n", hres);
+
+    IHTMLStorage_Release(storage2);
+    IHTMLDocument2_Release(doc2);
+
+    /* Different domain */
+    doc2 = create_doc_from_url(L"https://www.winehq.org/");
+    hres = get_sessionstorage(doc2, &storage2);
+    ok(hres == S_OK, "got %08lx\n", hres);
+
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_BSTR, "got %d\n", V_VT(&var));
+    ok(!wcscmp(V_BSTR(&var), L"bar"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+    V_VT(&var) = 0xdead;
+    hres = IHTMLStorage_getItem(storage2, key, &var);
+    ok(hres == S_OK, "getItem failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_NULL, "got %d\n", V_VT(&var));
+
+    hres = IHTMLStorage_get_remainingSpace(storage2, &lval);
+    ok(hres == S_OK, "get_remainingSpace failed %08lx\n", hres);
+    ok(lval == space, "remainingSpace = %ld\n", lval);
+
+    hres = IHTMLStorage_clear(storage);
+    ok(hres == S_OK, "clear failed %08lx\n", hres);
+
+    IHTMLStorage_Release(storage2);
+    IHTMLStorage_Release(storage);
+    IHTMLDocument2_Release(doc2);
+    IHTMLDocument2_Release(doc);
+    SysFreeString(value);
+    SysFreeString(key);
 }
 
 START_TEST(misc)

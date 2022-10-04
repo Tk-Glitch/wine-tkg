@@ -319,6 +319,9 @@ static inline DWORD d3dusage_from_wined3dusage(unsigned int wined3d_usage, unsig
 
 static inline D3DPOOL d3dpool_from_wined3daccess(unsigned int access, unsigned int usage)
 {
+    if (usage & WINED3DUSAGE_MANAGED)
+        return D3DPOOL_MANAGED;
+
     switch (access & (WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_CPU))
     {
         default:
@@ -374,6 +377,16 @@ static inline unsigned int wined3daccess_from_d3dpool(D3DPOOL pool, unsigned int
     return access;
 }
 
+static inline unsigned int wined3d_usage_from_d3d(D3DPOOL pool, DWORD usage)
+{
+    usage &= WINED3DUSAGE_MASK;
+    if (pool == D3DPOOL_SCRATCH)
+        usage |= WINED3DUSAGE_SCRATCH;
+    else if (pool == D3DPOOL_MANAGED)
+        usage |= WINED3DUSAGE_MANAGED;
+    return usage;
+}
+
 static inline unsigned int wined3d_bind_flags_from_d3d9_usage(DWORD usage)
 {
     unsigned int bind_flags = 0;
@@ -384,11 +397,6 @@ static inline unsigned int wined3d_bind_flags_from_d3d9_usage(DWORD usage)
         bind_flags |= WINED3D_BIND_DEPTH_STENCIL;
 
     return bind_flags;
-}
-
-static inline DWORD wined3dusage_from_d3dusage(unsigned int usage)
-{
-    return usage & WINED3DUSAGE_MASK;
 }
 
 static inline enum wined3d_multisample_type wined3d_multisample_type_from_d3d(D3DMULTISAMPLE_TYPE type)

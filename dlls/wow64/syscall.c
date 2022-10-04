@@ -391,7 +391,7 @@ static DWORD get_syscall_num( const BYTE *syscall )
             id = *(DWORD *)(syscall + 1);
         break;
 
-    case IMAGE_FILE_MACHINE_ARM:
+    case IMAGE_FILE_MACHINE_ARMNT:
         if (*(WORD *)syscall == 0xb40f)
         {
             DWORD inst = *(DWORD *)((WORD *)syscall + 1);
@@ -552,7 +552,7 @@ static const WCHAR *get_cpu_dll_name(void)
     {
     case IMAGE_FILE_MACHINE_I386:
         return (native_machine == IMAGE_FILE_MACHINE_ARM64 ? L"xtajit.dll" : L"wow64cpu.dll");
-    case IMAGE_FILE_MACHINE_ARM:
+    case IMAGE_FILE_MACHINE_ARMNT:
         return L"wowarmhw.dll";
     default:
         ERR( "unsupported machine %04x\n", current_machine );

@@ -4015,7 +4015,7 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFormatSupport(ID3D11Device2 *
                 | D3D11_FORMAT_SUPPORT_MULTISAMPLE_LOAD;
     }
 
-    return S_OK;
+    return *format_support ? S_OK : E_FAIL;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CheckMultisampleQualityLevels(ID3D11Device2 *iface,
@@ -4252,6 +4252,18 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFeatureSupport(ID3D11Device2 
             FIXME("Returning fake data architecture info.\n");
             options->TileBasedDeferredRenderer = FALSE;
             return S_OK;
+        }
+
+        case D3D11_FEATURE_FORMAT_SUPPORT:
+        {
+            D3D11_FEATURE_DATA_FORMAT_SUPPORT *data = feature_support_data;
+            if (feature_support_data_size != sizeof(*data))
+            {
+                WARN("Invalid size %u for D3D11_FEATURE_FORMAT_SUPPORT.\n", feature_support_data_size);
+                return E_INVALIDARG;
+            }
+
+            return d3d11_device_CheckFormatSupport(iface, data->InFormat, &data->OutFormatSupport);
         }
 
         default:

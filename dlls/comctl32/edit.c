@@ -25,7 +25,6 @@
  *   - EDITBALLOONTIP structure
  *   - EM_HIDEBALLOONTIP/Edit_HideBalloonTip
  *   - EM_SHOWBALLOONTIP/Edit_ShowBalloonTip
- *   - EM_GETIMESTATUS, EM_SETIMESTATUS
  *   - EN_ALIGN_LTR_EC
  *   - EN_ALIGN_RTL_EC
  *   - ES_OEMCONVERT
@@ -143,6 +142,7 @@ typedef struct
 	 */
 	UINT composition_len;   /* length of composition, 0 == no composition */
 	int composition_start;  /* the character position for the composition */
+        UINT ime_status;        /* IME status flag */
 	/*
 	 * Uniscribe Data
 	 */
@@ -3402,7 +3402,7 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
  */
 static LRESULT EDIT_WM_KillFocus(HTHEME theme, EDITSTATE *es)
 {
-    UINT flags = RDW_INVALIDATE | RDW_UPDATENOW;
+    UINT flags = RDW_INVALIDATE;
 
     es->flags &= ~EF_FOCUSED;
     DestroyCaret();
@@ -3684,7 +3684,7 @@ static void EDIT_WM_NCPaint(HWND hwnd, HRGN region)
  */
 static void EDIT_WM_SetFocus(HTHEME theme, EDITSTATE *es)
 {
-    UINT flags = RDW_INVALIDATE | RDW_UPDATENOW;
+    UINT flags = RDW_INVALIDATE;
 
     es->flags |= EF_FOCUSED;
 
@@ -4810,6 +4810,17 @@ static LRESULT CALLBACK EDIT_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         result = EDIT_EM_GetCueBanner(es, (WCHAR *)wParam, (DWORD)lParam);
         break;
 
+    case EM_SETIMESTATUS:
+        if (wParam == EMSIS_COMPOSITIONSTRING)
+            es->ime_status = lParam & 0xFFFF;
+
+        result = 1;
+        break;
+
+    case EM_GETIMESTATUS:
+        result = wParam == EMSIS_COMPOSITIONSTRING ? es->ime_status : 1;
+        break;
+
     /* End of the EM_ messages which were in numerical order; what order
      * are these in?  vaguely alphabetical?
      */
@@ -4848,7 +4859,6 @@ static LRESULT CALLBACK EDIT_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         }
         break;
 
-    case WM_IME_CHAR:
     case WM_CHAR:
     {
         WCHAR charW = wParam;
@@ -5052,6 +5062,12 @@ static LRESULT CALLBACK EDIT_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         break;
 
     case WM_IME_COMPOSITION:
+        if (lParam & GCS_RESULTSTR && !(es->ime_status & EIMES_GETCOMPSTRATONCE))
+        {
+            DefWindowProcW(hwnd, msg, wParam, lParam);
+            break;
+        }
+
         EDIT_ImeComposition(hwnd, lParam, es);
         break;
 

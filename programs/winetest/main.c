@@ -66,8 +66,9 @@ static BOOL is_wow64;
 static int failures;
 
 /* filters for running only specific tests */
-static char *filters[64];
-static unsigned int nb_filters = 0;
+static char **filters;
+static unsigned int nb_filters;
+static unsigned int alloc_filters;
 static BOOL exclude_tests = FALSE;
 
 /* Needed to check for .NET dlls */
@@ -109,6 +110,36 @@ static BOOL test_filtered_out( LPCSTR module, LPCSTR testname )
     return !exclude_tests;
 }
 
+static void add_filter( const char *name )
+{
+    if (name[0] == '@')
+    {
+        char *p, *str, buffer[256];
+        FILE *f = fopen( name + 1, "rt" );
+        if (!f) return;
+
+        while (fgets( buffer, sizeof(buffer), f ))
+        {
+            p = buffer;
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == '#') continue;
+            str = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
+            *p = 0;
+            add_filter( str );
+        }
+        fclose( f );
+        return;
+    }
+
+    if (nb_filters >= alloc_filters)
+    {
+        alloc_filters = max( alloc_filters * 2, 64 );
+        filters = xrealloc( filters, alloc_filters * sizeof(*filters) );
+    }
+    filters[nb_filters++] = xstrdup(name);
+}
+
 static char * get_file_version(char * file_name)
 {
     static char version[32];
@@ -117,25 +148,22 @@ static char * get_file_version(char * file_name)
 
     size = GetFileVersionInfoSizeA(file_name, &handle);
     if (size) {
-        char * data = heap_alloc(size);
-        if (data) {
-            if (GetFileVersionInfoA(file_name, handle, size, data)) {
-                static const char backslash[] = "\\";
-                VS_FIXEDFILEINFO *pFixedVersionInfo;
-                UINT len;
-                if (VerQueryValueA(data, backslash, (LPVOID *)&pFixedVersionInfo, &len)) {
-                    sprintf(version, "%ld.%ld.%ld.%ld",
-                            pFixedVersionInfo->dwFileVersionMS >> 16,
-                            pFixedVersionInfo->dwFileVersionMS & 0xffff,
-                            pFixedVersionInfo->dwFileVersionLS >> 16,
-                            pFixedVersionInfo->dwFileVersionLS & 0xffff);
-                } else
-                    sprintf(version, "version not found");
+        char * data = xalloc(size);
+        if (GetFileVersionInfoA(file_name, handle, size, data)) {
+            static const char backslash[] = "\\";
+            VS_FIXEDFILEINFO *pFixedVersionInfo;
+            UINT len;
+            if (VerQueryValueA(data, backslash, (LPVOID *)&pFixedVersionInfo, &len)) {
+                sprintf(version, "%ld.%ld.%ld.%ld",
+                        pFixedVersionInfo->dwFileVersionMS >> 16,
+                        pFixedVersionInfo->dwFileVersionMS & 0xffff,
+                        pFixedVersionInfo->dwFileVersionLS >> 16,
+                        pFixedVersionInfo->dwFileVersionLS & 0xffff);
             } else
-                sprintf(version, "version error %lu", GetLastError());
-            heap_free(data);
+                sprintf(version, "version not found");
         } else
-            sprintf(version, "version error %u", ERROR_OUTOFMEMORY);
+            sprintf(version, "version error %lu", GetLastError());
+        free(data);
     } else if (GetLastError() == ERROR_FILE_NOT_FOUND)
         sprintf(version, "dll is missing");
     else
@@ -237,16 +265,10 @@ static int running_as_admin (void)
     /* Get the group info from the token */
     groups_size = 0;
     GetTokenInformation(token, TokenGroups, NULL, 0, &groups_size);
-    groups = heap_alloc(groups_size);
-    if (groups == NULL)
-    {
-        CloseHandle(token);
-        FreeSid(administrators);
-        return -1;
-    }
+    groups = xalloc(groups_size);
     if (! GetTokenInformation(token, TokenGroups, groups, groups_size, &groups_size))
     {
-        heap_free(groups);
+        free(groups);
         CloseHandle(token);
         FreeSid(administrators);
         return -1;
@@ -258,14 +280,14 @@ static int running_as_admin (void)
     {
         if (EqualSid(groups->Groups[group_index].Sid, administrators))
         {
-            heap_free(groups);
+            free(groups);
             FreeSid(administrators);
             return 1;
         }
     }
 
     /* If we end up here we didn't find the Administrators group */
-    heap_free(groups);
+    free(groups);
     FreeSid(administrators);
     return 0;
 }
@@ -326,9 +348,7 @@ static BOOL is_stub_dll(const char *filename)
     size = GetFileVersionInfoSizeA(filename, &ver);
     if (!size) return FALSE;
 
-    data = HeapAlloc(GetProcessHeap(), 0, size);
-    if (!data) return FALSE;
-
+    data = xalloc(size);
     if (GetFileVersionInfoA(filename, ver, size, data))
     {
         char buf[256];
@@ -337,9 +357,37 @@ static BOOL is_stub_dll(const char *filename)
         if (VerQueryValueA(data, buf, (void**)&p, &size))
             isstub = !lstrcmpiA("wcodstub.dll", p);
     }
-    HeapFree(GetProcessHeap(), 0, data);
+    free(data);
 
     return isstub;
+}
+
+static int disable_crash_dialog(void)
+{
+    HKEY key;
+    DWORD type, data, size;
+    int ret = 0;
+
+    if (RegCreateKeyA( HKEY_CURRENT_USER, "Software\\Wine\\WineDbg", &key )) return 0;
+    size = sizeof(data);
+    if (RegQueryValueExA( key, "ShowCrashDialog", NULL, &type, (BYTE *)&data, &size )) ret = 1;
+    else if (type != REG_DWORD || data) ret = 2;
+    data = 0;
+    RegSetValueExA( key, "ShowCrashDialog", 0, REG_DWORD, (BYTE *)&data, sizeof(data) );
+    RegCloseKey( key );
+    return ret;
+}
+
+static void restore_crash_dialog( int prev )
+{
+    HKEY key;
+    DWORD data = 1;
+
+    if (!prev) return;
+    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\WineDbg", &key )) return;
+    if (prev == 1) RegDeleteKeyValueA( key, NULL, "ShowCrashDialog" );
+    else RegSetValueExA( key, "ShowCrashDialog", 0, REG_DWORD, (BYTE *)&data, sizeof(data) );
+    RegCloseKey( key );
 }
 
 static void print_version (void)
@@ -561,12 +609,12 @@ extract_test (struct wine_test *test, const char *dir, LPSTR res_name)
     code = extract_rcdata (res_name, "TESTRES", &size);
     if (!code) report (R_FATAL, "Can't find test resource %s: %d",
                        res_name, GetLastError ());
-    test->name = heap_strdup( res_name );
+    test->name = xstrdup( res_name );
     test->exename = strmake (NULL, "%s\\%s", dir, test->name);
     exepos = strstr (test->name, testexe);
     if (!exepos) report (R_FATAL, "Not an .exe file: %s", test->name);
     *exepos = 0;
-    test->name = heap_realloc (test->name, exepos - test->name + 1);
+    test->name = xrealloc(test->name, exepos - test->name + 1);
     report (R_STEP, "Extracting: %s", test->name);
 
     hfile = CreateFileA(test->exename, GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -597,15 +645,9 @@ static DWORD wait_process( HANDLE process, DWORD timeout )
 
 static void append_path( const char *path)
 {
-    char *newpath;
-
-    newpath = heap_alloc(strlen(curpath) + 1 + strlen(path) + 1);
-    strcpy(newpath, curpath);
-    strcat(newpath, ";");
-    strcat(newpath, path);
+    char *newpath = strmake( NULL, "%s;%s", curpath, path );
     SetEnvironmentVariableA("PATH", newpath);
-
-    heap_free(newpath);
+    free(newpath);
 }
 
 /* Run a command for MS milliseconds.  If OUT != NULL, also redirect
@@ -740,7 +782,7 @@ get_subtests (const char *tempdir, struct wine_test *test, LPSTR res_name)
         /* Restore PATH again */
         SetEnvironmentVariableA("PATH", curpath);
     }
-    heap_free (cmd);
+    free(cmd);
 
     if (status)
     {
@@ -773,19 +815,17 @@ get_subtests (const char *tempdir, struct wine_test *test, LPSTR res_name)
     index += sizeof header;
 
     allocated = 10;
-    test->subtests = heap_alloc (allocated * sizeof(char*));
+    test->subtests = xalloc(allocated * sizeof(char*));
     index = strtok (index, whitespace);
     while (index) {
         if (test->subtest_count == allocated) {
             allocated *= 2;
-            test->subtests = heap_realloc (test->subtests,
-                                           allocated * sizeof(char*));
+            test->subtests = xrealloc(test->subtests, allocated * sizeof(char*));
         }
-        test->subtests[test->subtest_count++] = heap_strdup(index);
+        test->subtests[test->subtest_count++] = xstrdup(index);
         index = strtok (NULL, whitespace);
     }
-    test->subtests = heap_realloc (test->subtests,
-                                   test->subtest_count * sizeof(char*));
+    test->subtests = xrealloc(test->subtests, test->subtest_count * sizeof(char*));
     err = 0;
 
  quit:
@@ -815,7 +855,7 @@ run_test (struct wine_test* test, const char* subtest, HANDLE out_file, const ch
         xprintf ("%s:%s start %s\n", test->name, subtest, file);
         status = run_ex (cmd, out_file, tempdir, 120000, FALSE, &pid);
         if (status == -2) status = -GetLastError();
-        heap_free (cmd);
+        free(cmd);
         xprintf ("%s:%s:%04x done (%d) in %ds\n", test->name, subtest, pid, status, (GetTickCount()-start)/1000);
         if (status) failures++;
     }
@@ -882,7 +922,7 @@ static HMODULE load_com_dll(const char *name, char **path, char *filename)
                 strcpy( filename, dllname );
                 p = strrchr(dllname, '\\');
                 if (p) *p = 0;
-                *path = heap_strdup( dllname );
+                *path = xstrdup( dllname );
             }
         }
         RegCloseKey(hkey);
@@ -898,7 +938,7 @@ static void get_dll_path(HMODULE dll, char **path, char *filename)
     GetModuleFileNameA(dll, dllpath, MAX_PATH);
     strcpy(filename, dllpath);
     *strrchr(dllpath, '\\') = '\0';
-    *path = heap_strdup( dllpath );
+    *path = xstrdup( dllpath );
 }
 
 static BOOL CALLBACK
@@ -1033,7 +1073,7 @@ run_tests (char *logname, char *outdir)
 
     /* Get the current PATH only once */
     needed = GetEnvironmentVariableA("PATH", NULL, 0);
-    curpath = heap_alloc(needed);
+    curpath = xalloc(needed);
     GetEnvironmentVariableA("PATH", curpath, needed);
 
     SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -1120,7 +1160,7 @@ run_tests (char *logname, char *outdir)
     if (!EnumResourceNamesA (NULL, "TESTRES", EnumTestFileProc, (LPARAM)&nr_of_files))
         report (R_FATAL, "Can't enumerate test files: %d",
                 GetLastError ());
-    wine_tests = heap_alloc (nr_of_files * sizeof wine_tests[0]);
+    wine_tests = xalloc(nr_of_files * sizeof wine_tests[0]);
 
     /* Do this only once during extraction (and version checking) */
     hmscoree = LoadLibraryA("mscoree.dll");
@@ -1183,8 +1223,8 @@ run_tests (char *logname, char *outdir)
     logfile = 0;
     if (newdir)
         remove_dir (tempdir);
-    heap_free(wine_tests);
-    heap_free(curpath);
+    free(wine_tests);
+    free(curpath);
 
     return logname;
 }
@@ -1230,7 +1270,7 @@ static void extract_only (const char *target_dir)
     if (!EnumResourceNamesA(NULL, "TESTRES", EnumTestFileProc, (LPARAM)&nr_of_files))
         report (R_FATAL, "Can't enumerate test files: %d", GetLastError ());
 
-    wine_tests = heap_alloc (nr_of_files * sizeof wine_tests[0] );
+    wine_tests = xalloc(nr_of_files * sizeof wine_tests[0] );
 
     report (R_STATUS, "Extracting tests");
     report (R_PROGRESS, 0, nr_of_files);
@@ -1274,6 +1314,7 @@ int __cdecl main( int argc, char *argv[] )
     int reset_env = 1;
     int poweroff = 0;
     int interactive = 1;
+    int prev_crash_dialog = 0;
     int i;
 
     InitCommonControls();
@@ -1294,12 +1335,7 @@ int __cdecl main( int argc, char *argv[] )
             exit (0);
         }
         else if ((argv[i][0] != '-' && argv[i][0] != '/') || argv[i][2]) {
-            if (nb_filters == ARRAY_SIZE(filters))
-            {
-                report (R_ERROR, "Too many test filters specified");
-                exit (2);
-            }
-            filters[nb_filters++] = argv[i];
+            add_filter( argv[i] );
         }
         else switch (argv[i][1]) {
         case 'c':
@@ -1423,6 +1459,8 @@ int __cdecl main( int argc, char *argv[] )
 
             if (!check_display_driver())
                 report (R_FATAL, "Unable to create a window, the display driver is not working.");
+
+            if (!interactive) prev_crash_dialog = disable_crash_dialog();
         }
 
         SetConsoleCtrlHandler(ctrl_handler, TRUE);
@@ -1438,7 +1476,7 @@ int __cdecl main( int argc, char *argv[] )
         if (nb_filters && !exclude_tests)
         {
             run_tests( logname, outdir );
-            exit(0);
+            exit( failures ? 3 : 0 );
         }
 
         while (!tag) {
@@ -1478,6 +1516,7 @@ int __cdecl main( int argc, char *argv[] )
                     report (R_WARNING, "Can't remove logfile: %u", GetLastError());
         } else run_tests (logname, outdir);
         report (R_STATUS, "Finished - %u failures", failures);
+        if (prev_crash_dialog) restore_crash_dialog( prev_crash_dialog );
     }
     if (poweroff)
     {
@@ -1495,5 +1534,5 @@ int __cdecl main( int argc, char *argv[] )
         }
         ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCEIFHUNG, SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_MINOR_OTHER);
     }
-    exit (0);
+    exit( failures ? 3 : 0 );
 }

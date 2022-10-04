@@ -577,19 +577,6 @@ static IDirect3DDevice7 *create_device_ex(HWND window, DWORD coop_level, const G
     return device;
 }
 
-static HRESULT WINAPI enum_devtype_software_cb(char *desc_str, char *name, D3DDEVICEDESC7 *desc, void *ctx)
-{
-    BOOL *software_ok = ctx;
-    if (IsEqualGUID(&desc->deviceGUID, &IID_IDirect3DRGBDevice))
-    {
-        ok(!(desc->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT),
-           "RGB emulation device shouldn't have HWTRANSFORMANDLIGHT flag\n");
-        *software_ok = TRUE;
-        return DDENUMRET_CANCEL;
-    }
-    return DDENUMRET_OK;
-}
-
 static IDirect3DDevice7 *create_device(HWND window, DWORD coop_level)
 {
     const GUID *device_guid = &IID_IDirect3DHALDevice;
@@ -6850,7 +6837,6 @@ static void test_surface_lock(void)
     ULONG refcount;
     DDPIXELFORMAT z_fmt;
     BOOL hal_ok = FALSE;
-    BOOL software_ok = FALSE;
     const GUID *devtype = &IID_IDirect3DHALDevice;
     D3DDEVICEDESC7 device_desc;
     BOOL cubemap_supported;
@@ -6975,10 +6961,6 @@ static void test_surface_lock(void)
     ok(SUCCEEDED(hr), "Failed to enumerate devices, hr %#lx.\n", hr);
     if (hal_ok)
         devtype = &IID_IDirect3DTnLHalDevice;
-
-    hr = IDirect3D7_EnumDevices(d3d, enum_devtype_software_cb, &software_ok);
-    ok(SUCCEEDED(hr), "Failed to enumerate devices, hr %#x.\n", hr);
-    if (!software_ok) win_skip("RGB device not found, unable to check flags\n");
 
     memset(&z_fmt, 0, sizeof(z_fmt));
     hr = IDirect3D7_EnumZBufferFormats(d3d, devtype, enum_z_fmt, &z_fmt);
@@ -10042,11 +10024,13 @@ static void test_vb_writeonly(void)
 
 static void test_lost_device(void)
 {
+    IDirectDrawSurface7 *surface, *back_buffer, *back_buffer2, *ds;
     IDirectDrawSurface7 *sysmem_surface, *vidmem_surface;
-    IDirectDrawSurface7 *surface, *back_buffer;
     DDSURFACEDESC2 surface_desc;
     HWND window1, window2;
     IDirectDraw7 *ddraw;
+    DDPIXELFORMAT z_fmt;
+    IDirect3D7 *d3d;
     ULONG refcount;
     DDSCAPS2 caps;
     HRESULT hr;
@@ -10273,9 +10257,38 @@ static void test_lost_device(void)
     surface_desc.dwSize = sizeof(surface_desc);
     surface_desc.dwFlags = DDSD_CAPS | DDSD_BACKBUFFERCOUNT;
     surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP;
-    U5(surface_desc).dwBackBufferCount = 1;
+    U5(surface_desc).dwBackBufferCount = 2;
     hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
     ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ds = NULL;
+    hr = IDirectDraw7_QueryInterface(ddraw, &IID_IDirect3D7, (void **)&d3d);
+    if (hr == S_OK)
+    {
+        memset(&z_fmt, 0, sizeof(z_fmt));
+        hr = IDirect3D7_EnumZBufferFormats(d3d, &IID_IDirect3DHALDevice, enum_z_fmt, &z_fmt);
+        if (FAILED(hr) || !z_fmt.dwSize)
+        {
+            skip("No depth buffer formats available, skipping Z buffer restore test.\n");
+        }
+        else
+        {
+            memset(&surface_desc, 0, sizeof(surface_desc));
+            surface_desc.dwSize = sizeof(surface_desc);
+            hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &surface_desc);
+            ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+            surface_desc.dwFlags = DDSD_CAPS | DDSD_PIXELFORMAT | DDSD_WIDTH | DDSD_HEIGHT;
+            surface_desc.ddsCaps.dwCaps = DDSCAPS_ZBUFFER;
+            U4(surface_desc).ddpfPixelFormat = z_fmt;
+            hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &ds, NULL);
+            ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+
+            hr = IDirectDrawSurface7_AddAttachedSurface(surface, ds);
+            ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+        }
+        IDirect3D7_Release(d3d);
+    }
 
     hr = IDirectDraw7_SetCooperativeLevel(ddraw, window1, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
@@ -10382,10 +10395,29 @@ static void test_lost_device(void)
     ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDirectDrawSurface7_GetAttachedSurface(surface, &caps, &back_buffer);
     ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(back_buffer != surface, "Got the same surface.\n");
     hr = IDirectDrawSurface7_IsLost(back_buffer);
     ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
-
     IDirectDrawSurface7_Release(back_buffer);
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(back_buffer, &caps, &back_buffer2);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(back_buffer2 != back_buffer, "Got the same surface.\n");
+    ok(back_buffer2 != surface, "Got the same surface.\n");
+    hr = IDirectDrawSurface7_IsLost(back_buffer2);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    IDirectDrawSurface7_Release(back_buffer2);
+
+    if (ds)
+    {
+        hr = IDirectDrawSurface7_IsLost(ds);
+        ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#lx.\n", hr);
+        hr = IDirectDrawSurface7_Restore(ds);
+        ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = IDirectDrawSurface7_IsLost(ds);
+        ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+        IDirectDrawSurface7_Release(ds);
+    }
 
     if (vidmem_surface)
         IDirectDrawSurface7_Release(vidmem_surface);
@@ -19358,6 +19390,67 @@ static void test_filling_convention(void)
     DestroyWindow(window);
 }
 
+static HRESULT WINAPI test_enum_devices_caps_callback(char *device_desc, char *device_name,
+        D3DDEVICEDESC7 *device_desc7, void *ctx)
+{
+    if (IsEqualGUID(&device_desc7->deviceGUID, &IID_IDirect3DTnLHalDevice))
+    {
+        ok(device_desc7->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT,
+           "TnLHal Device device caps does not have D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok(device_desc7->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX,
+           "TnLHal Device device caps does not have D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else if (IsEqualGUID(&device_desc7->deviceGUID, &IID_IDirect3DHALDevice))
+    {
+        ok((device_desc7->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "HAL Device device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok(device_desc7->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX,
+           "HAL Device device caps does not have D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else if (IsEqualGUID(&device_desc7->deviceGUID, &IID_IDirect3DRGBDevice))
+    {
+        ok((device_desc7->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "RGB Device device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((device_desc7->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "RGB Device device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else
+    {
+        ok(FALSE, "Unexpected device enumerated: \"%s\" \"%s\"\n", device_desc, device_name);
+    }
+
+    return DDENUMRET_OK;
+}
+
+static void test_enum_devices(void)
+{
+    IDirectDraw7 *ddraw;
+    IDirect3D7 *d3d;
+    ULONG refcount;
+    HRESULT hr;
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+
+    hr = IDirectDraw7_QueryInterface(ddraw, &IID_IDirect3D7, (void **)&d3d);
+    if (FAILED(hr))
+    {
+        skip("D3D interface is not available, skipping test.\n");
+        IDirectDraw7_Release(ddraw);
+        return;
+    }
+
+    hr = IDirect3D7_EnumDevices(d3d, NULL, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Got hr %#lx.\n", hr);
+
+    hr = IDirect3D7_EnumDevices(d3d, test_enum_devices_caps_callback, NULL);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+
+    IDirect3D7_Release(d3d);
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
 static void run_for_each_device_type(void (*test_func)(const GUID *))
 {
     test_func(hw_device_guid);
@@ -19536,4 +19629,5 @@ START_TEST(ddraw7)
     test_get_display_mode();
     run_for_each_device_type(test_texture_wrong_caps);
     test_filling_convention();
+    test_enum_devices();
 }

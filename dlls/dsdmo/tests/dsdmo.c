@@ -335,12 +335,12 @@ static void test_compressor_parameters(void)
 
     hr = CoCreateInstance(&GUID_DSFX_STANDARD_COMPRESSOR, NULL, CLSCTX_INPROC_SERVER,
             &IID_IDirectSoundFXCompressor, (void **)&compressor);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirectSoundFXCompressor_GetAllParameters(compressor, &params);
     todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
         return;
-
-    hr = IDirectSoundFXCompressor_GetAllParameters(compressor, &params);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(params.fGain == 0.0f, "Got gain %.8e dB.\n", params.fGain);
     ok(params.fAttack == 10.0f, "Got attack time %.8e ms.\n", params.fAttack);
     ok(params.fThreshold == -20.0f, "Got threshold %.8e dB.\n", params.fThreshold);
@@ -385,12 +385,14 @@ static void test_echo_parameters(void)
 
     hr = CoCreateInstance(&GUID_DSFX_STANDARD_ECHO, NULL, CLSCTX_INPROC_SERVER,
             &IID_IDirectSoundFXEcho, (void **)&echo);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
         return;
 
     hr = IDirectSoundFXEcho_GetAllParameters(echo, &params);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    if (hr != S_OK)
+        return;
     ok(params.fWetDryMix == 50.0f, "Got %.8e%% wetness.\n", params.fWetDryMix);
     ok(params.fFeedback == 50.0f, "Got %.8e%% feedback.\n", params.fFeedback);
     ok(params.fLeftDelay == 500.0f, "Got left delay %.8e ms.\n", params.fLeftDelay);
@@ -543,9 +545,9 @@ START_TEST(dsdmo)
     tests[] =
     {
         {&GUID_DSFX_STANDARD_CHORUS,        &IID_IDirectSoundFXChorus, TRUE},
-        {&GUID_DSFX_STANDARD_COMPRESSOR,    &IID_IDirectSoundFXCompressor, TRUE},
+        {&GUID_DSFX_STANDARD_COMPRESSOR,    &IID_IDirectSoundFXCompressor},
         {&GUID_DSFX_STANDARD_DISTORTION,    &IID_IDirectSoundFXDistortion, TRUE},
-        {&GUID_DSFX_STANDARD_ECHO,          &IID_IDirectSoundFXEcho, TRUE},
+        {&GUID_DSFX_STANDARD_ECHO,          &IID_IDirectSoundFXEcho},
         {&GUID_DSFX_STANDARD_FLANGER,       &IID_IDirectSoundFXFlanger, TRUE},
         {&GUID_DSFX_STANDARD_GARGLE,        &IID_IDirectSoundFXGargle, TRUE},
         {&GUID_DSFX_STANDARD_I3DL2REVERB,   &IID_IDirectSoundFXI3DL2Reverb},

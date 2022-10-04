@@ -101,7 +101,7 @@ struct surface_readback
     D3DLOCKED_RECT locked_rect;
 };
 
-static void get_rt_readback(IDirect3DSurface8 *surface, struct surface_readback *rb)
+static void get_surface_readback(IDirect3DSurface8 *surface, struct surface_readback *rb)
 {
     IDirect3DTexture8 *tex = NULL;
     IDirect3DDevice8 *device;
@@ -113,15 +113,24 @@ static void get_rt_readback(IDirect3DSurface8 *surface, struct surface_readback 
     ok(SUCCEEDED(hr), "Failed to get device, hr %#lx.\n", hr);
     hr = IDirect3DSurface8_GetDesc(surface, &desc);
     ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#lx.\n", hr);
-    hr = IDirect3DDevice8_CreateTexture(device, desc.Width, desc.Height, 1, 0, desc.Format, D3DPOOL_SYSTEMMEM, &tex);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IDirect3DTexture8_GetSurfaceLevel(tex, 0, &rb->surface);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IDirect3DDevice8_CopyRects(device, surface, NULL, 0, rb->surface, NULL);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    if (desc.Pool == D3DPOOL_DEFAULT || (desc.Usage & D3DUSAGE_WRITEONLY))
+    {
+        hr = IDirect3DDevice8_CreateTexture(device, desc.Width, desc.Height, 1, 0, desc.Format, D3DPOOL_SYSTEMMEM, &tex);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        hr = IDirect3DTexture8_GetSurfaceLevel(tex, 0, &rb->surface);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        hr = IDirect3DDevice8_CopyRects(device, surface, NULL, 0, rb->surface, NULL);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        IDirect3DTexture8_Release(tex);
+    }
+    else
+    {
+        IDirect3DSurface8_AddRef(surface);
+        rb->surface = surface;
+    }
     hr = IDirect3DSurface8_LockRect(rb->surface, &rb->locked_rect, NULL, D3DLOCK_READONLY);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    IDirect3DTexture8_Release(tex);
     IDirect3DDevice8_Release(device);
 }
 
@@ -149,7 +158,7 @@ static DWORD getPixelColor(IDirect3DDevice8 *device, UINT x, UINT y)
     hr = IDirect3DDevice8_GetRenderTarget(device, &rt);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-    get_rt_readback(rt, &rb);
+    get_surface_readback(rt, &rb);
     /* Remove the X channel for now. DirectX and OpenGL have different ideas how to treat it apparently, and it isn't
      * really important for these tests
      */
@@ -242,7 +251,7 @@ static void check_rt_color_(unsigned int line, IDirect3DSurface8 *rt, D3DCOLOR e
     hr = IDirect3DSurface8_GetDesc(rt, &desc);
     ok_(__FILE__, line)(hr == S_OK, "Failed to get surface desc, hr %#lx.\n", hr);
 
-    get_rt_readback(rt, &rb);
+    get_surface_readback(rt, &rb);
     for (y = 0; y < desc.Height; ++y)
     {
         for (x = 0; x < desc.Width; ++x)
@@ -3868,7 +3877,7 @@ static void intz_test(void)
     hr = IDirect3DDevice8_EndScene(device);
     ok(SUCCEEDED(hr), "EndScene failed, hr %#lx.\n", hr);
 
-    get_rt_readback(original_rt, &rb);
+    get_surface_readback(original_rt, &rb);
     for (i = 0; i < ARRAY_SIZE(expected_colors); ++i)
     {
         unsigned int color = get_readback_color(&rb, expected_colors[i].x, expected_colors[i].y);
@@ -3926,7 +3935,7 @@ static void intz_test(void)
     hr = IDirect3DDevice8_EndScene(device);
     ok(SUCCEEDED(hr), "EndScene failed, hr %#lx.\n", hr);
 
-    get_rt_readback(original_rt, &rb);
+    get_surface_readback(original_rt, &rb);
     for (i = 0; i < ARRAY_SIZE(expected_colors); ++i)
     {
         unsigned int color = get_readback_color(&rb, expected_colors[i].x, expected_colors[i].y);
@@ -3994,7 +4003,7 @@ static void intz_test(void)
     hr = IDirect3DDevice8_EndScene(device);
     ok(SUCCEEDED(hr), "EndScene failed, hr %#lx.\n", hr);
 
-    get_rt_readback(original_rt, &rb);
+    get_surface_readback(original_rt, &rb);
     for (i = 0; i < ARRAY_SIZE(expected_colors); ++i)
     {
         unsigned int color = get_readback_color(&rb, expected_colors[i].x, expected_colors[i].y);
@@ -4210,7 +4219,7 @@ static void shadow_test(void)
         ok(SUCCEEDED(hr), "SetTexture failed, hr %#lx.\n", hr);
         IDirect3DTexture8_Release(texture);
 
-        get_rt_readback(original_rt, &rb);
+        get_surface_readback(original_rt, &rb);
         for (j = 0; j < ARRAY_SIZE(expected_colors); ++j)
         {
             unsigned int color = get_readback_color(&rb, expected_colors[j].x, expected_colors[j].y);
@@ -5175,7 +5184,7 @@ static void volume_dxtn_test(void)
         hr = IDirect3DDevice8_EndScene(device);
         ok(SUCCEEDED(hr), "Failed to end scene, hr %#lx.\n", hr);
 
-        get_rt_readback(rt, &rb);
+        get_surface_readback(rt, &rb);
         for (j = 0; j < ARRAY_SIZE(dxt1_expected_colours); ++j)
         {
             colour = get_readback_color(&rb, 40 + 80 * j, 240);
@@ -5419,6 +5428,7 @@ static void add_dirty_rect_test(void)
         *tex_managed, *tex_dynamic;
     IDirect3DSurface8 *surface_dst2, *surface_src_green, *surface_src_red,
         *surface_managed0, *surface_managed1, *surface_dynamic;
+    struct surface_readback rb;
     D3DLOCKED_RECT locked_rect;
     IDirect3DDevice8 *device;
     unsigned int color, i;
@@ -5695,6 +5705,29 @@ static void add_dirty_rect_test(void)
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to present, hr %#lx.\n", hr);
 
+    fill_surface(surface_src_green, 0x000000ff, D3DLOCK_NO_DIRTY_UPDATE);
+
+    /* So does drawing directly from the sysmem texture. */
+    hr = IDirect3DDevice8_SetTexture(device, 0, (IDirect3DBaseTexture8 *)tex_src_green);
+    ok(hr == S_OK, "Failed to set texture, hr %#lx.\n", hr);
+    add_dirty_rect_test_draw(device);
+    color = getPixelColor(device, 320, 240);
+    ok(color_match(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+
+    /* Blitting to the sysmem texture adds a dirty rect. */
+    fill_surface(surface_src_red, 0x00000000, D3DLOCK_NO_DIRTY_UPDATE);
+    fill_surface(surface_src_green, 0x00ff00ff, D3DLOCK_NO_DIRTY_UPDATE);
+    hr = IDirect3DDevice8_SetTexture(device, 0, (IDirect3DBaseTexture8 *)tex_dst1);
+    ok(hr == S_OK, "Failed to set texture, hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_CopyRects(device, surface_src_green, NULL, 0, surface_src_red, NULL);
+    ok(hr == S_OK, "Failed to update surface, hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_UpdateTexture(device, (IDirect3DBaseTexture8 *)tex_src_red,
+            (IDirect3DBaseTexture8 *)tex_dst1);
+    ok(hr == S_OK, "Failed to update texture, hr %#lx.\n", hr);
+    add_dirty_rect_test_draw(device);
+    color = getPixelColor(device, 320, 240);
+    todo_wine ok(color_match(color, 0x00ff00ff, 1), "Got unexpected color 0x%08x.\n", color);
+
     /* Tests with managed textures. */
     fill_surface(surface_managed0, 0x00ff0000, 0);
     fill_surface(surface_managed1, 0x00ff0000, 0);
@@ -5792,6 +5825,24 @@ static void add_dirty_rect_test(void)
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "Failed to present, hr %#lx.\n", hr);
 
+    /* Test blitting to a managed texture. */
+    fill_surface(surface_managed0, 0x000000ff, 0);
+    /* Draw so that both the CPU and GPU copies are blue. */
+    hr = IDirect3DDevice8_SetTexture(device, 0, (IDirect3DBaseTexture8 *)tex_managed);
+    ok(SUCCEEDED(hr), "Failed to set texture, hr %#lx.\n", hr);
+    add_dirty_rect_test_draw(device);
+    color = getPixelColor(device, 320, 240);
+    ok(color_match(color, 0x000000ff, 0), "Got unexpected colour 0x%08x.\n", color);
+    hr = IDirect3DDevice8_CopyRects(device, surface_dst2, NULL, 0, surface_managed0, NULL);
+    ok(hr == D3D_OK, "Failed to update surface, hr %#lx.\n", hr);
+    add_dirty_rect_test_draw(device);
+    color = getPixelColor(device, 320, 240);
+    ok(color_match(color, 0x0000ff00, 0), "Got unexpected colour 0x%08x.\n", color);
+    get_surface_readback(surface_managed0, &rb);
+    color = get_readback_color(&rb, 320, 240) & 0x00ffffff;
+    ok(color_match(color, 0x0000ff00, 0), "Got unexpected colour 0x%08x.\n", color);
+    release_surface_readback(&rb);
+
     /* Tests with dynamic textures */
     fill_surface(surface_dynamic, 0x0000ffff, 0);
     hr = IDirect3DDevice8_SetTexture(device, 0, (IDirect3DBaseTexture8 *)tex_dynamic);
@@ -5885,6 +5936,93 @@ static void add_dirty_rect_test(void)
 
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
+done:
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_buffer_no_dirty_update(void)
+{
+    unsigned int refcount, colour;
+    IDirect3DVertexBuffer8 *vb;
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d;
+    HWND window;
+    HRESULT hr;
+    BYTE *data;
+
+    static const struct
+    {
+        struct vec3 position;
+        DWORD diffuse;
+    }
+    green_quad[] =
+    {
+        {{-1.0f, -1.0f, 0.1f}, 0xff00ff00},
+        {{-1.0f,  1.0f, 0.1f}, 0xff00ff00},
+        {{ 1.0f, -1.0f, 0.1f}, 0xff00ff00},
+
+        {{ 1.0f, -1.0f, 0.1f}, 0xff00ff00},
+        {{-1.0f,  1.0f, 0.1f}, 0xff00ff00},
+        {{ 1.0f,  1.0f, 0.1f}, 0xff00ff00},
+    },
+    red_quad[] =
+    {
+        {{-1.0f, -1.0f, 0.1f}, 0xffff0000},
+        {{-1.0f,  1.0f, 0.1f}, 0xffff0000},
+        {{ 1.0f, -1.0f, 0.1f}, 0xffff0000},
+
+        {{ 1.0f, -1.0f, 0.1f}, 0xffff0000},
+        {{-1.0f,  1.0f, 0.1f}, 0xffff0000},
+        {{ 1.0f,  1.0f, 0.1f}, 0xffff0000},
+    };
+
+    window = create_window();
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, window, TRUE)))
+    {
+        skip("Failed to create a D3D device.\n");
+        goto done;
+    }
+
+    hr = IDirect3DDevice8_CreateVertexBuffer(device, sizeof(green_quad), 0, 0, D3DPOOL_MANAGED, &vb);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirect3DVertexBuffer8_Lock(vb, 0, 0, &data, 0);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    memcpy(data, red_quad, sizeof(red_quad));
+    hr = IDirect3DVertexBuffer8_Unlock(vb);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirect3DVertexBuffer8_Lock(vb, 0, 0, &data, D3DLOCK_NO_DIRTY_UPDATE);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    memcpy(data, green_quad, sizeof(green_quad));
+    hr = IDirect3DVertexBuffer8_Unlock(vb);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice8_BeginScene(device);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_SetRenderState(device, D3DRS_ZENABLE, FALSE);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0f, 0);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, vb, sizeof(*green_quad));
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_DrawPrimitive(device, D3DPT_TRIANGLELIST, 0, 2);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_EndScene(device);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    colour = getPixelColor(device, 320, 240);
+    ok(color_match(colour, 0x0000ff00, 1), "Got unexpected colour 0x%08x.\n", colour);
+
+    IDirect3DVertexBuffer8_Release(vb);
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
 done:
     IDirect3D8_Release(d3d);
     DestroyWindow(window);
@@ -7591,7 +7729,7 @@ static void test_pointsize(void)
             {
                 struct surface_readback rb;
 
-                get_rt_readback(rt, &rb);
+                get_surface_readback(rt, &rb);
                 color = get_readback_color(&rb, 64 - size / 2 + 1, 64 - size / 2 + 1);
                 ok(color_match(color, 0x00ff0000, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
@@ -8686,7 +8824,7 @@ static void test_uninitialized_varyings(void)
         hr = IDirect3DDevice8_EndScene(device);
         ok(SUCCEEDED(hr), "Failed to end scene, hr %#lx.\n", hr);
 
-        get_rt_readback(backbuffer, &rb);
+        get_surface_readback(backbuffer, &rb);
         color = get_readback_color(&rb, 320, 240);
         ok(color_match(color, tests[i].expected, 1)
                 || (tests[i].allow_zero_alpha && color_match(color, tests[i].expected & 0x00ffffff, 1))
@@ -8973,7 +9111,7 @@ static void test_multisample_init(void)
     hr = IDirect3DDevice8_CopyRects(device, multi, NULL, 0, back, NULL);
     ok(SUCCEEDED(hr), "CopyRects failed, hr %#lx.\n", hr);
 
-    get_rt_readback(back, &rb);
+    get_surface_readback(back, &rb);
     for (y = 0; y < 480; ++y)
     {
         for (x = 0; x < 640; ++x)
@@ -9543,7 +9681,7 @@ static void test_texture_blending(void)
         hr = IDirect3DDevice8_EndScene(device);
         ok(SUCCEEDED(hr), "Test %u: EndScene failed, hr %#lx.\n", i, hr);
 
-        get_rt_readback(backbuffer, &rb);
+        get_surface_readback(backbuffer, &rb);
         color = get_readback_color(&rb, 320, 240);
         ok(color_match(color, current_test->expected_color, 1),
                 "Test %u: Got color 0x%08x, expected 0x%08x.\n", i, color, current_test->expected_color);
@@ -10528,7 +10666,7 @@ static void test_viewport(void)
             hr = IDirect3DDevice8_EndScene(device);
             ok(SUCCEEDED(hr), "Failed to end scene, hr %#lx (i %u, j %u).\n", hr, i, j);
 
-            get_rt_readback(rt, &rb);
+            get_surface_readback(rt, &rb);
             check_rect(&rb, tests[j].expected_rect, tests[j].message);
             release_surface_readback(&rb);
         }
@@ -11227,7 +11365,7 @@ static void test_sample_mask(void)
 
     hr = IDirect3DDevice8_CopyRects(device, ms_rt, NULL, 0, rt, NULL);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
-    get_rt_readback(rt, &rb);
+    get_surface_readback(rt, &rb);
     colour = get_readback_color(&rb, 64, 64);
     /* Multiple generations of Nvidia cards return broken results.
      * A mask with no bits or all bits set produce the expected results (0x00 / 0xff),
@@ -11781,7 +11919,7 @@ static void test_filling_convention(void)
             hr = IDirect3DDevice8_EndScene(device);
             ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
 
-            get_rt_readback(cur, &rb);
+            get_surface_readback(cur, &rb);
             for (y = 0; y < 8; y++)
             {
                 for (x = 0; x < 8; x++)
@@ -11891,6 +12029,7 @@ START_TEST(visual)
     volume_dxtn_test();
     volume_v16u16_test();
     add_dirty_rect_test();
+    test_buffer_no_dirty_update();
     test_3dc_formats();
     test_fog_interpolation();
     test_negative_fixedfunction_fog();

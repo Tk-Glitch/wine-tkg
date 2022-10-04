@@ -35,7 +35,64 @@ struct evr
     struct strmbase_renderer renderer;
     IEVRFilterConfig IEVRFilterConfig_iface;
     IAMFilterMiscFlags IAMFilterMiscFlags_iface;
+    IMFGetService IMFGetService_iface;
+    IMFVideoRenderer IMFVideoRenderer_iface;
+
+    IMFTransform *mixer;
+    IMFVideoPresenter *presenter;
 };
+
+static void evr_uninitialize(struct evr *filter)
+{
+    if (filter->mixer)
+    {
+        IMFTransform_Release(filter->mixer);
+        filter->mixer = NULL;
+    }
+
+    if (filter->presenter)
+    {
+        IMFVideoPresenter_Release(filter->presenter);
+        filter->presenter = NULL;
+    }
+}
+
+static HRESULT evr_initialize(struct evr *filter, IMFTransform *mixer, IMFVideoPresenter *presenter)
+{
+    HRESULT hr = S_OK;
+
+    if (mixer)
+    {
+        IMFTransform_AddRef(mixer);
+    }
+    else if (FAILED(hr = CoCreateInstance(&CLSID_MFVideoMixer9, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMFTransform, (void **)&mixer)))
+    {
+        WARN("Failed to create default mixer instance, hr %#lx.\n", hr);
+        return hr;
+    }
+
+    if (presenter)
+    {
+        IMFVideoPresenter_AddRef(presenter);
+    }
+    else if (FAILED(hr = CoCreateInstance(&CLSID_MFVideoPresenter9, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMFVideoPresenter, (void **)&presenter)))
+    {
+        WARN("Failed to create default presenter instance, hr %#lx.\n", hr);
+        IMFTransform_Release(mixer);
+        return hr;
+    }
+
+    evr_uninitialize(filter);
+
+    filter->mixer = mixer;
+    filter->presenter = presenter;
+
+    /* FIXME: configure mixer and presenter */
+
+    return hr;
+}
 
 static struct evr *impl_from_strmbase_renderer(struct strmbase_renderer *iface)
 {
@@ -50,6 +107,10 @@ static HRESULT evr_query_interface(struct strmbase_renderer *iface, REFIID iid, 
         *out = &filter->IEVRFilterConfig_iface;
     else if (IsEqualGUID(iid, &IID_IAMFilterMiscFlags))
         *out = &filter->IAMFilterMiscFlags_iface;
+    else if (IsEqualGUID(iid, &IID_IMFGetService))
+        *out = &filter->IMFGetService_iface;
+    else if (IsEqualGUID(iid, &IID_IMFVideoRenderer))
+        *out = &filter->IMFVideoRenderer_iface;
     else
         return E_NOINTERFACE;
 
@@ -61,6 +122,7 @@ static void evr_destroy(struct strmbase_renderer *iface)
 {
     struct evr *filter = impl_from_strmbase_renderer(iface);
 
+    evr_uninitialize(filter);
     strmbase_renderer_cleanup(&filter->renderer);
     free(filter);
 }
@@ -173,6 +235,119 @@ static const IAMFilterMiscFlagsVtbl filter_misc_flags_vtbl =
     filter_misc_flags_GetMiscFlags,
 };
 
+static struct evr *impl_from_IMFGetService(IMFGetService *iface)
+{
+    return CONTAINING_RECORD(iface, struct evr, IMFGetService_iface);
+}
+
+static HRESULT WINAPI filter_get_service_QueryInterface(IMFGetService *iface, REFIID riid, void **obj)
+{
+    struct evr *filter = impl_from_IMFGetService(iface);
+    return IUnknown_QueryInterface(filter->renderer.filter.outer_unk, riid, obj);
+}
+
+static ULONG WINAPI filter_get_service_AddRef(IMFGetService *iface)
+{
+    struct evr *filter = impl_from_IMFGetService(iface);
+    return IUnknown_AddRef(filter->renderer.filter.outer_unk);
+}
+
+static ULONG WINAPI filter_get_service_Release(IMFGetService *iface)
+{
+    struct evr *filter = impl_from_IMFGetService(iface);
+    return IUnknown_Release(filter->renderer.filter.outer_unk);
+}
+
+static HRESULT WINAPI filter_get_service_GetService(IMFGetService *iface, REFGUID service, REFIID riid, void **obj)
+{
+    struct evr *filter = impl_from_IMFGetService(iface);
+    HRESULT hr = E_NOINTERFACE;
+    IMFGetService *gs;
+
+    TRACE("iface %p, service %s, riid %s, obj %p.\n", iface, debugstr_guid(service), debugstr_guid(riid), obj);
+
+    EnterCriticalSection(&filter->renderer.filter.filter_cs);
+
+    if (IsEqualGUID(service, &MR_VIDEO_RENDER_SERVICE))
+    {
+        if (!filter->presenter)
+            hr = evr_initialize(filter, NULL, NULL);
+
+        if (filter->presenter)
+            hr = IMFVideoPresenter_QueryInterface(filter->presenter, &IID_IMFGetService, (void **)&gs);
+    }
+    else
+    {
+        FIXME("Unsupported service %s.\n", debugstr_guid(service));
+    }
+
+    LeaveCriticalSection(&filter->renderer.filter.filter_cs);
+
+    if (gs)
+    {
+        hr = IMFGetService_GetService(gs, service, riid, obj);
+        IMFGetService_Release(gs);
+    }
+
+    return hr;
+}
+
+static const IMFGetServiceVtbl filter_get_service_vtbl =
+{
+    filter_get_service_QueryInterface,
+    filter_get_service_AddRef,
+    filter_get_service_Release,
+    filter_get_service_GetService,
+};
+
+static struct evr *impl_from_IMFVideoRenderer(IMFVideoRenderer *iface)
+{
+    return CONTAINING_RECORD(iface, struct evr, IMFVideoRenderer_iface);
+}
+
+static HRESULT WINAPI filter_video_renderer_QueryInterface(IMFVideoRenderer *iface, REFIID riid, void **obj)
+{
+    struct evr *filter = impl_from_IMFVideoRenderer(iface);
+    return IUnknown_QueryInterface(filter->renderer.filter.outer_unk, riid, obj);
+}
+
+static ULONG WINAPI filter_video_renderer_AddRef(IMFVideoRenderer *iface)
+{
+    struct evr *filter = impl_from_IMFVideoRenderer(iface);
+    return IUnknown_AddRef(filter->renderer.filter.outer_unk);
+}
+
+static ULONG WINAPI filter_video_renderer_Release(IMFVideoRenderer *iface)
+{
+    struct evr *filter = impl_from_IMFVideoRenderer(iface);
+    return IUnknown_Release(filter->renderer.filter.outer_unk);
+}
+
+static HRESULT WINAPI filter_video_renderer_InitializeRenderer(IMFVideoRenderer *iface, IMFTransform *mixer,
+        IMFVideoPresenter *presenter)
+{
+    struct evr *filter = impl_from_IMFVideoRenderer(iface);
+    HRESULT hr;
+
+    TRACE("iface %p, mixer %p, presenter %p.\n", iface, mixer, presenter);
+
+    EnterCriticalSection(&filter->renderer.filter.filter_cs);
+
+    hr = evr_initialize(filter, mixer, presenter);
+
+    LeaveCriticalSection(&filter->renderer.filter.filter_cs);
+
+    return hr;
+}
+
+static const IMFVideoRendererVtbl filter_video_renderer_vtbl =
+{
+    filter_video_renderer_QueryInterface,
+    filter_video_renderer_AddRef,
+    filter_video_renderer_Release,
+    filter_video_renderer_InitializeRenderer,
+};
+
 HRESULT evr_filter_create(IUnknown *outer, void **out)
 {
     struct evr *object;
@@ -184,6 +359,8 @@ HRESULT evr_filter_create(IUnknown *outer, void **out)
             &CLSID_EnhancedVideoRenderer, L"EVR Input0", &renderer_ops);
     object->IEVRFilterConfig_iface.lpVtbl = &filter_config_vtbl;
     object->IAMFilterMiscFlags_iface.lpVtbl = &filter_misc_flags_vtbl;
+    object->IMFGetService_iface.lpVtbl = &filter_get_service_vtbl;
+    object->IMFVideoRenderer_iface.lpVtbl = &filter_video_renderer_vtbl;
 
     TRACE("Created EVR %p.\n", object);
     *out = &object->renderer.filter.IUnknown_inner;

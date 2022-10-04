@@ -357,6 +357,7 @@
 @ stdcall IoCreateDeviceSecure(ptr long ptr long long long ptr ptr ptr)
 @ stub IoCreateDisk
 @ stdcall IoCreateDriver(ptr ptr)
+@ stdcall IoCreateFileEx(ptr long ptr ptr ptr long long long long ptr long long ptr long ptr)
 @ stdcall IoCreateFile(ptr long ptr ptr ptr long long long long ptr long long ptr long)
 @ stub IoCreateFileSpecifyDeviceObjectHint
 @ stdcall IoCreateNotificationEvent(ptr ptr)
@@ -532,6 +533,7 @@
 @ stdcall -arch=!i386 KeAcquireSpinLockRaiseToDpc(ptr)
 @ stub KeAddSystemServiceTable
 @ stdcall KeAlertThread(ptr long)
+@ stdcall KeAreAllApcsDisabled()
 @ stdcall KeAreApcsDisabled()
 @ stub KeAttachProcess
 @ stdcall KeBugCheck(long)

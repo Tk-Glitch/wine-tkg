@@ -27,9 +27,160 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
+static inline const char *debugstr_time(REFERENCE_TIME time)
+{
+    ULONGLONG abstime = time >= 0 ? time : -time;
+    unsigned int i = 0, j = 0;
+    char buffer[23], rev[23];
+
+    while (abstime || i <= 8)
+    {
+        buffer[i++] = '0' + (abstime % 10);
+        abstime /= 10;
+        if (i == 7) buffer[i++] = '.';
+    }
+    if (time < 0) buffer[i++] = '-';
+
+    while (i--) rev[j++] = buffer[i];
+    while (rev[j-1] == '0' && rev[j-2] != '.') --j;
+    rev[j] = 0;
+
+    return wine_dbg_sprintf("%s", rev);
+}
+
+struct buffer
+{
+    INSSBuffer INSSBuffer_iface;
+    LONG refcount;
+    IMediaSample *sample;
+};
+
+static struct buffer *impl_from_INSSBuffer(INSSBuffer *iface)
+{
+    return CONTAINING_RECORD(iface, struct buffer, INSSBuffer_iface);
+}
+
+static HRESULT WINAPI buffer_QueryInterface(INSSBuffer *iface, REFIID iid, void **out)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+
+    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+
+    if (IsEqualGUID(iid, &IID_IUnknown)
+            || IsEqualGUID(iid, &IID_INSSBuffer))
+        *out = &impl->INSSBuffer_iface;
+    else
+    {
+        *out = NULL;
+        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static ULONG WINAPI buffer_AddRef(INSSBuffer *iface)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    ULONG ref = InterlockedIncrement(&impl->refcount);
+    TRACE("iface %p increasing refcount to %lu.\n", iface, ref);
+    return ref;
+}
+
+static ULONG WINAPI buffer_Release(INSSBuffer *iface)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    ULONG ref = InterlockedDecrement(&impl->refcount);
+
+    TRACE("iface %p decreasing refcount to %lu.\n", iface, ref);
+
+    if (!ref)
+    {
+        IMediaSample_Release(impl->sample);
+        free(impl);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI buffer_GetLength(INSSBuffer *iface, DWORD *size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, size %p.\n", iface, size);
+    *size = IMediaSample_GetActualDataLength(impl->sample);
+    return S_OK;
+}
+
+static HRESULT WINAPI buffer_SetLength(INSSBuffer *iface, DWORD size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, size %lu.\n", iface, size);
+    return IMediaSample_SetActualDataLength(impl->sample, size);
+}
+
+static HRESULT WINAPI buffer_GetMaxLength(INSSBuffer *iface, DWORD *size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, size %p.\n", iface, size);
+    *size = IMediaSample_GetSize(impl->sample);
+    return S_OK;
+}
+
+static HRESULT WINAPI buffer_GetBuffer(INSSBuffer *iface, BYTE **data)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, data %p.\n", iface, data);
+    return IMediaSample_GetPointer(impl->sample, data);
+}
+
+static HRESULT WINAPI buffer_GetBufferAndLength(INSSBuffer *iface, BYTE **data, DWORD *size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, data %p, size %p.\n", iface, data, size);
+    *size = IMediaSample_GetSize(impl->sample);
+    return IMediaSample_GetPointer(impl->sample, data);
+}
+
+static const INSSBufferVtbl buffer_vtbl =
+{
+    buffer_QueryInterface,
+    buffer_AddRef,
+    buffer_Release,
+    buffer_GetLength,
+    buffer_SetLength,
+    buffer_GetMaxLength,
+    buffer_GetBuffer,
+    buffer_GetBufferAndLength,
+};
+
+static HRESULT buffer_create(IMediaSample *sample, INSSBuffer **out)
+{
+    struct buffer *buffer;
+
+    if (!(buffer = calloc(1, sizeof(struct buffer))))
+        return E_OUTOFMEMORY;
+
+    buffer->INSSBuffer_iface.lpVtbl = &buffer_vtbl;
+    buffer->refcount = 1;
+    buffer->sample = sample;
+
+    *out = &buffer->INSSBuffer_iface;
+    TRACE("Created buffer %p for sample %p\n", *out, sample);
+
+    return S_OK;
+}
+
+static struct buffer *unsafe_impl_from_INSSBuffer(INSSBuffer *iface)
+{
+    if (iface->lpVtbl != &buffer_vtbl) return NULL;
+    return impl_from_INSSBuffer(iface);
+}
+
 struct asf_stream
 {
     struct strmbase_source source;
+    struct SourceSeeking seek;
     DWORD index;
 };
 
@@ -137,6 +288,93 @@ static HRESULT asf_stream_get_media_type(struct strmbase_pin *iface, unsigned in
     return hr;
 }
 
+static HRESULT asf_stream_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    struct asf_stream *stream = impl_from_strmbase_pin(iface);
+
+    if (IsEqualGUID(iid, &IID_IMediaSeeking))
+        *out = &stream->seek.IMediaSeeking_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static inline struct asf_stream *impl_from_IMediaSeeking(IMediaSeeking *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_stream, seek.IMediaSeeking_iface);
+}
+
+static HRESULT WINAPI media_seeking_ChangeCurrent(IMediaSeeking *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI media_seeking_ChangeStop(IMediaSeeking *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI media_seeking_ChangeRate(IMediaSeeking *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI media_seeking_QueryInterface(IMediaSeeking *iface, REFIID riid, void **ppv)
+{
+    struct asf_stream *impl = impl_from_IMediaSeeking(iface);
+    return IUnknown_QueryInterface(&impl->source.pin.IPin_iface, riid, ppv);
+}
+
+static ULONG WINAPI media_seeking_AddRef(IMediaSeeking *iface)
+{
+    struct asf_stream *impl = impl_from_IMediaSeeking(iface);
+    return IUnknown_AddRef(&impl->source.pin.IPin_iface);
+}
+
+static ULONG WINAPI media_seeking_Release(IMediaSeeking *iface)
+{
+    struct asf_stream *impl = impl_from_IMediaSeeking(iface);
+    return IUnknown_Release(&impl->source.pin.IPin_iface);
+}
+
+static HRESULT WINAPI media_seeking_SetPositions(IMediaSeeking *iface,
+        LONGLONG *current, DWORD current_flags, LONGLONG *stop, DWORD stop_flags)
+{
+    FIXME("iface %p, current %s, current_flags %#lx, stop %s, stop_flags %#lx stub!\n",
+            iface, current ? debugstr_time(*current) : "<null>", current_flags,
+            stop ? debugstr_time(*stop) : "<null>", stop_flags);
+    return SourceSeekingImpl_SetPositions(iface, current, current_flags, stop, stop_flags);
+}
+
+static const IMediaSeekingVtbl media_seeking_vtbl =
+{
+    media_seeking_QueryInterface,
+    media_seeking_AddRef,
+    media_seeking_Release,
+    SourceSeekingImpl_GetCapabilities,
+    SourceSeekingImpl_CheckCapabilities,
+    SourceSeekingImpl_IsFormatSupported,
+    SourceSeekingImpl_QueryPreferredFormat,
+    SourceSeekingImpl_GetTimeFormat,
+    SourceSeekingImpl_IsUsingTimeFormat,
+    SourceSeekingImpl_SetTimeFormat,
+    SourceSeekingImpl_GetDuration,
+    SourceSeekingImpl_GetStopPosition,
+    SourceSeekingImpl_GetCurrentPosition,
+    SourceSeekingImpl_ConvertTimeFormat,
+    media_seeking_SetPositions,
+    SourceSeekingImpl_GetPositions,
+    SourceSeekingImpl_GetAvailable,
+    SourceSeekingImpl_SetRate,
+    SourceSeekingImpl_GetRate,
+    SourceSeekingImpl_GetPreroll,
+};
+
 static inline struct asf_reader *impl_from_strmbase_filter(struct strmbase_filter *iface)
 {
     return CONTAINING_RECORD(iface, struct asf_reader, filter);
@@ -225,6 +463,12 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
         if (FAILED(hr = IMemAllocator_Commit(stream->source.pAllocator)))
         {
             WARN("Failed to commit stream %u allocator, hr %#lx\n", i, hr);
+            break;
+        }
+
+        if (FAILED(hr = IWMReaderAdvanced_SetAllocateForOutput(reader_advanced, i, TRUE)))
+        {
+            WARN("Failed to enable allocation for stream %u, hr %#lx\n", i, hr);
             break;
         }
 
@@ -357,6 +601,7 @@ static const struct strmbase_source_ops source_ops =
 {
     .base.pin_query_accept = asf_stream_query_accept,
     .base.pin_get_media_type = asf_stream_get_media_type,
+    .base.pin_query_interface = asf_stream_query_interface,
     .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
     .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
     .pfnDecideBufferSize = asf_reader_DecideBufferSize,
@@ -471,6 +716,7 @@ static const IFileSourceFilterVtbl file_source_vtbl =
 struct asf_callback
 {
     IWMReaderCallback IWMReaderCallback_iface;
+    IWMReaderCallbackAdvanced IWMReaderCallbackAdvanced_iface;
     LONG ref;
 
     struct asf_reader *filter;
@@ -491,6 +737,8 @@ static HRESULT WINAPI reader_callback_QueryInterface(IWMReaderCallback *iface, c
             || IsEqualGUID(iid, &IID_IWMStatusCallback)
             || IsEqualGUID(iid, &IID_IWMReaderCallback))
         *out = &callback->IWMReaderCallback_iface;
+    else if (IsEqualGUID(iid, &IID_IWMReaderCallbackAdvanced))
+        *out = &callback->IWMReaderCallbackAdvanced_iface;
     else
     {
         *out = NULL;
@@ -530,8 +778,10 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
 {
     struct asf_reader *filter = impl_from_IWMReaderCallback(iface)->filter;
     AM_MEDIA_TYPE stream_media_type = {{0}};
+    IWMHeaderInfo *header_info;
     DWORD i, stream_count;
     WCHAR name[MAX_PATH];
+    QWORD duration;
     HRESULT hr;
 
     TRACE("iface %p, status %d, result %#lx, type %d, value %p, context %p.\n",
@@ -551,6 +801,20 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
                 stream_count = ARRAY_SIZE(filter->streams);
             }
 
+            if (FAILED(hr = IWMReader_QueryInterface(filter->reader, &IID_IWMHeaderInfo,
+                    (void **)&header_info)))
+                duration = 0;
+            else
+            {
+                WMT_ATTR_DATATYPE type = WMT_TYPE_QWORD;
+                WORD index = 0, size = sizeof(duration);
+
+                if (FAILED(IWMHeaderInfo_GetAttributeByName(header_info, &index, L"Duration",
+                        &type, (BYTE *)&duration, &size )))
+                    duration = 0;
+                IWMHeaderInfo_Release(header_info);
+            }
+
             for (i = 0; i < stream_count; ++i)
             {
                 struct asf_stream *stream = filter->streams + i;
@@ -564,6 +828,11 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
                 FreeMediaType(&stream_media_type);
 
                 strmbase_source_init(&stream->source, &filter->filter, name, &source_ops);
+                strmbase_seeking_init(&stream->seek, &media_seeking_vtbl, media_seeking_ChangeStop,
+                        media_seeking_ChangeCurrent, media_seeking_ChangeRate);
+                stream->seek.llCurrent = 0;
+                stream->seek.llDuration = duration;
+                stream->seek.llStop = duration;
             }
             filter->stream_count = stream_count;
             BaseFilterImpl_IncrementPinVersion(&filter->filter);
@@ -614,9 +883,35 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
 static HRESULT WINAPI reader_callback_OnSample(IWMReaderCallback *iface, DWORD output, QWORD time,
         QWORD duration, DWORD flags, INSSBuffer *sample, void *context)
 {
-    FIXME("iface %p, output %lu, time %I64u, duration %I64u, flags %#lx, sample %p, context %p stub!\n",
+    struct asf_reader *filter = impl_from_IWMReaderCallback(iface)->filter;
+    REFERENCE_TIME start_time = time, end_time = time + duration;
+    struct asf_stream *stream = filter->streams + output;
+    struct buffer *buffer;
+    HRESULT hr = S_OK;
+
+    TRACE("iface %p, output %lu, time %I64u, duration %I64u, flags %#lx, sample %p, context %p.\n",
             iface, output, time, duration, flags, sample, context);
-    return E_NOTIMPL;
+
+    if (!stream->source.pin.peer)
+    {
+        WARN("Output %lu pin is not connected, discarding %p.\n", output, sample);
+        return S_OK;
+    }
+
+    if (!(buffer = unsafe_impl_from_INSSBuffer(sample)))
+        WARN("Unexpected buffer iface %p, discarding.\n", sample);
+    else
+    {
+        IMediaSample_SetTime(buffer->sample, &start_time, &end_time);
+        IMediaSample_SetDiscontinuity(buffer->sample, !!(flags & WM_SF_DISCONTINUITY));
+        IMediaSample_SetSyncPoint(buffer->sample, !!(flags & WM_SF_CLEANPOINT));
+
+        hr = IMemInputPin_Receive(stream->source.pMemInputPin, buffer->sample);
+
+        TRACE("Receive returned hr %#lx.\n", hr);
+    }
+
+    return hr;
 }
 
 static const IWMReaderCallbackVtbl reader_callback_vtbl =
@@ -628,6 +923,109 @@ static const IWMReaderCallbackVtbl reader_callback_vtbl =
     reader_callback_OnSample,
 };
 
+static inline struct asf_callback *impl_from_IWMReaderCallbackAdvanced(IWMReaderCallbackAdvanced *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_callback, IWMReaderCallbackAdvanced_iface);
+}
+
+static HRESULT WINAPI reader_callback_advanced_QueryInterface(IWMReaderCallbackAdvanced *iface, REFIID riid, LPVOID * ppv)
+{
+    struct asf_callback *impl = impl_from_IWMReaderCallbackAdvanced(iface);
+    return IUnknown_QueryInterface(&impl->IWMReaderCallback_iface, riid, ppv);
+}
+
+static ULONG WINAPI reader_callback_advanced_AddRef(IWMReaderCallbackAdvanced *iface)
+{
+    struct asf_callback *impl = impl_from_IWMReaderCallbackAdvanced(iface);
+    return IUnknown_AddRef(&impl->IWMReaderCallback_iface);
+}
+
+static ULONG WINAPI reader_callback_advanced_Release(IWMReaderCallbackAdvanced *iface)
+{
+    struct asf_callback *impl = impl_from_IWMReaderCallbackAdvanced(iface);
+    return IUnknown_Release(&impl->IWMReaderCallback_iface);
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnStreamSample(IWMReaderCallbackAdvanced *iface,
+        WORD stream, QWORD time, QWORD duration, DWORD flags, INSSBuffer *sample, void *context)
+{
+    FIXME("iface %p, stream %u, time %I64u, duration %I64u, flags %#lx, sample %p, context %p stub!\n",
+            iface, stream, time, duration, flags, sample, context);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnTime(IWMReaderCallbackAdvanced *iface,
+        QWORD time, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnStreamSelection(IWMReaderCallbackAdvanced *iface,
+        WORD count, WORD *stream_numbers, WMT_STREAM_SELECTION *selections, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnOutputPropsChanged(IWMReaderCallbackAdvanced *iface,
+        DWORD output, WM_MEDIA_TYPE *mt, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_AllocateForStream(IWMReaderCallbackAdvanced *iface,
+        WORD stream, DWORD size, INSSBuffer **out, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_AllocateForOutput(IWMReaderCallbackAdvanced *iface,
+        DWORD output, DWORD size, INSSBuffer **out, void *context)
+{
+    struct asf_reader *filter = impl_from_IWMReaderCallbackAdvanced(iface)->filter;
+    struct asf_stream *stream = filter->streams + output;
+    IMediaSample *sample;
+    HRESULT hr;
+
+    TRACE("iface %p, output %lu, size %lu, out %p, context %p.\n", iface, output, size, out, context);
+
+    *out = NULL;
+
+    if (!stream->source.pin.peer)
+        return VFW_E_NOT_CONNECTED;
+
+    if (FAILED(hr = IMemAllocator_GetBuffer(stream->source.pAllocator, &sample, NULL, NULL, 0)))
+    {
+        WARN("Failed to get a sample, hr %#lx.\n", hr);
+        return hr;
+    }
+
+    if (size > IMediaSample_GetSize(sample))
+    {
+        WARN("Allocated media sample is too small, size %lu.\n", size);
+        IMediaSample_Release(sample);
+        return VFW_E_BUFFER_OVERFLOW;
+    }
+
+    return buffer_create(sample, out);
+}
+
+static const IWMReaderCallbackAdvancedVtbl reader_callback_advanced_vtbl =
+{
+    reader_callback_advanced_QueryInterface,
+    reader_callback_advanced_AddRef,
+    reader_callback_advanced_Release,
+    reader_callback_advanced_OnStreamSample,
+    reader_callback_advanced_OnTime,
+    reader_callback_advanced_OnStreamSelection,
+    reader_callback_advanced_OnOutputPropsChanged,
+    reader_callback_advanced_AllocateForStream,
+    reader_callback_advanced_AllocateForOutput,
+};
+
 static HRESULT asf_callback_create(struct asf_reader *filter, IWMReaderCallback **out)
 {
     struct asf_callback *callback;
@@ -636,6 +1034,7 @@ static HRESULT asf_callback_create(struct asf_reader *filter, IWMReaderCallback 
         return E_OUTOFMEMORY;
 
     callback->IWMReaderCallback_iface.lpVtbl = &reader_callback_vtbl;
+    callback->IWMReaderCallbackAdvanced_iface.lpVtbl = &reader_callback_advanced_vtbl;
     callback->filter = filter;
     callback->ref = 1;
 

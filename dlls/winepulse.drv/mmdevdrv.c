@@ -2,6 +2,7 @@
  * Copyright 2011-2012 Maarten Lankhorst
  * Copyright 2010-2011 Maarten Lankhorst for CodeWeavers
  * Copyright 2011 Andrew Eikum for CodeWeavers
+ * Copyright 2022 Huw Davies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,6 +29,7 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/list.h"
+#include "wine/unixlib.h"
 
 #include "ole2.h"
 #include "mimeole.h"
@@ -44,11 +46,13 @@
 #include "endpointvolume.h"
 #include "audiopolicy.h"
 
-#include "unixlib.h"
+#include "../mmdevapi/unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(pulse);
 
 static unixlib_handle_t pulse_handle;
+
+#define MAX_PULSE_NAME_LEN 256
 
 #define NULL_PTR_ERR MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, RPC_X_NULL_REF_POINTER)
 
@@ -229,8 +233,8 @@ static void pulse_call(enum unix_funcs code, void *params)
 static void pulse_release_stream(stream_handle stream, HANDLE timer)
 {
     struct release_stream_params params;
-    params.stream = stream;
-    params.timer  = timer;
+    params.stream       = stream;
+    params.timer_thread = timer;
     pulse_call(release_stream, &params);
 }
 
@@ -456,7 +460,7 @@ HRESULT WINAPI AUDDRV_GetEndpointIDs(EDataFlow flow, WCHAR ***ids_out, GUID **ke
 
     for (i = 0; i < params.num; i++) {
         WCHAR *name = (WCHAR *)((char *)params.endpoints + params.endpoints[i].name);
-        char *pulse_name = (char *)params.endpoints + params.endpoints[i].pulse_name;
+        char *pulse_name = (char *)params.endpoints + params.endpoints[i].device;
         unsigned int size = (wcslen(name) + 1) * sizeof(WCHAR);
 
         if (!(ids[i] = HeapAlloc(GetProcessHeap(), 0, size))) {
@@ -875,11 +879,12 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
     }
 
     params.name = name = get_application_name(TRUE);
-    params.pulse_name  = This->pulse_name;
-    params.dataflow = This->dataflow;
-    params.mode     = mode;
+    params.device   = This->pulse_name;
+    params.flow     = This->dataflow;
+    params.share    = mode;
     params.flags    = flags;
     params.duration = duration;
+    params.period   = period;
     params.fmt      = fmt;
     params.stream   = &stream;
     params.channel_count = &channel_count;
@@ -1141,7 +1146,7 @@ static HRESULT WINAPI AudioClient_GetMixFormat(IAudioClient3 *iface,
         return E_POINTER;
     *pwfx = NULL;
 
-    params.pulse_name = This->pulse_name;
+    params.device = This->pulse_name;
     params.flow = This->dataflow;
     params.fmt = CoTaskMemAlloc(sizeof(WAVEFORMATEXTENSIBLE));
     if (!params.fmt)
@@ -1171,7 +1176,7 @@ static HRESULT WINAPI AudioClient_GetDevicePeriod(IAudioClient3 *iface,
         return E_POINTER;
 
     params.flow = This->dataflow;
-    params.pulse_name = This->pulse_name;
+    params.device = This->pulse_name;
     params.def_period = defperiod;
     params.min_period = minperiod;
 
@@ -1562,7 +1567,7 @@ static HRESULT WINAPI AudioCaptureClient_GetBuffer(IAudioCaptureClient *iface,
     params.stream = This->pulse_stream;
     params.data   = data;
     params.frames = frames;
-    params.flags  = flags;
+    params.flags  = (UINT*)flags;
     params.devpos = devpos;
     params.qpcpos = qpcpos;
     pulse_call(get_capture_buffer, &params);
@@ -2020,7 +2025,7 @@ static HRESULT WINAPI AudioSessionControl_GetState(IAudioSessionControl2 *iface,
 
         params.stream = client->pulse_stream;
         pulse_call(is_started, &params);
-        if (params.started) {
+        if (params.result == S_OK) {
             *state = AudioSessionStateActive;
             goto out;
         }
@@ -2659,35 +2664,33 @@ HRESULT WINAPI AUDDRV_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARI
 {
     struct get_prop_value_params params;
     char pulse_name[MAX_PULSE_NAME_LEN];
-    DWORD size;
+    unsigned int size = 0;
 
     TRACE("%s, (%s,%lu), %p\n", wine_dbgstr_guid(guid), wine_dbgstr_guid(&prop->fmtid), prop->pid, out);
 
     if (!get_pulse_name_by_guid(guid, pulse_name, &params.flow))
         return E_FAIL;
 
-    params.pulse_name = pulse_name;
+    params.device = pulse_name;
     params.guid = guid;
     params.prop = prop;
-    pulse_call(get_prop_value, &params);
+    params.value = out;
+    params.buffer = NULL;
+    params.buffer_size = &size;
 
-    if (params.result != S_OK)
-        return params.result;
+    while(1) {
+        pulse_call(get_prop_value, &params);
 
-    switch (params.vt) {
-    case VT_LPWSTR:
-        size = (wcslen(params.wstr) + 1) * sizeof(WCHAR);
-        if (!(out->pwszVal = CoTaskMemAlloc(size)))
+        if(params.result != E_NOT_SUFFICIENT_BUFFER)
+            break;
+
+        CoTaskMemFree(params.buffer);
+        params.buffer = CoTaskMemAlloc(*params.buffer_size);
+        if(!params.buffer)
             return E_OUTOFMEMORY;
-        memcpy(out->pwszVal, params.wstr, size);
-        break;
-    case VT_UI4:
-        out->ulVal = params.ulVal;
-        break;
-    default:
-        assert(0);
     }
-    out->vt = params.vt;
+    if(FAILED(params.result))
+        CoTaskMemFree(params.buffer);
 
-    return S_OK;
+    return params.result;
 }

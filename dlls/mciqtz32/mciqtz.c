@@ -211,9 +211,14 @@ static bool create_window(WINE_MCIQTZ *wma, DWORD flags, const MCI_DGV_OPEN_PARM
     IVideoWindow_put_Owner(wma->vidwin, (OAHWND)wma->window);
     IVideoWindow_put_WindowStyle(wma->vidwin, WS_CHILD); /* reset window style */
 
-    GetClientRect(wma->window, &rc);
-    width = rc.right;
-    height = rc.bottom;
+    if (style & (WS_POPUP | WS_CHILD))
+        IBasicVideo_GetVideoSize(wma->vidbasic, &width, &height);
+    else
+    {
+        GetClientRect(wma->window, &rc);
+        width = rc.right;
+        height = rc.bottom;
+    }
 
     IVideoWindow_SetWindowPosition(wma->vidwin, 0, 0, width, height);
     IVideoWindow_put_Visible(wma->vidwin, OATRUE);
@@ -995,8 +1000,13 @@ static DWORD MCIQTZ_mciWindow(UINT wDevID, DWORD dwFlags, LPMCI_DGV_WINDOW_PARMS
     if (dwFlags & MCI_TEST)
         return 0;
 
-    if (dwFlags & MCI_DGV_WINDOW_HWND && (IsWindow(lpParms->hWnd) || !lpParms->hWnd)) {
-        HWND hwnd = lpParms->hWnd ? lpParms->hWnd : wma->window;
+    if (dwFlags & MCI_DGV_WINDOW_HWND) {
+        HWND hwnd;
+        if (lpParms->hWnd && !IsWindow(lpParms->hWnd))
+            return MCIERR_NO_WINDOW;
+        if (!wma->parent)
+            return MCIERR_INTERNAL;
+        hwnd = lpParms->hWnd ? lpParms->hWnd : wma->window;
         TRACE("Setting parent window to %p.\n", hwnd);
         if (wma->parent != hwnd)
         {
@@ -1017,12 +1027,16 @@ static DWORD MCIQTZ_mciWindow(UINT wDevID, DWORD dwFlags, LPMCI_DGV_WINDOW_PARMS
         }
     }
     if (dwFlags & MCI_DGV_WINDOW_STATE) {
+        if (!wma->parent)
+            return MCIERR_NO_WINDOW;
         TRACE("Setting nCmdShow to %d\n", lpParms->nCmdShow);
-        IVideoWindow_put_WindowState(wma->vidwin, lpParms->nCmdShow);
+        ShowWindow(wma->parent, lpParms->nCmdShow);
     }
     if (dwFlags & MCI_DGV_WINDOW_TEXT) {
+        if (!wma->parent)
+            return MCIERR_NO_WINDOW;
         TRACE("Setting caption to %s\n", debugstr_w(lpParms->lpstrText));
-        IVideoWindow_put_Caption(wma->vidwin, lpParms->lpstrText);
+        SetWindowTextW(wma->parent, lpParms->lpstrText);
     }
     return 0;
 }

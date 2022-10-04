@@ -2947,11 +2947,17 @@ static HRESULT get_date_from_filetime(const FILETIME *ft, DATE *date)
     return S_OK;
 }
 
-static HRESULT WINAPI file_get_DateCreated(IFile *iface, DATE *pdate)
+static HRESULT WINAPI file_get_DateCreated(IFile *iface, DATE *date)
 {
     struct file *This = impl_from_IFile(iface);
-    FIXME("(%p)->(%p)\n", This, pdate);
-    return E_NOTIMPL;
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+
+    TRACE("(%p)->(%p)\n", This, date);
+
+    if (GetFileAttributesExW(This->path, GetFileExInfoStandard, &attrs))
+        return get_date_from_filetime(&attrs.ftCreationTime, date);
+
+    return E_FAIL;
 }
 
 static HRESULT WINAPI file_get_DateLastModified(IFile *iface, DATE *date)
@@ -3449,11 +3455,15 @@ static HRESULT WINAPI filesys_GetTempName(IFileSystem3 *iface, BSTR *result)
     if (!result)
         return E_POINTER;
 
-    if (!(*result = SysAllocStringLen(NULL, 13)))
+    if (!(*result = SysAllocStringLen(NULL, 12)))
         return E_OUTOFMEMORY;
 
     if(!RtlGenRandom(&random, sizeof(random)))
+    {
+        SysFreeString(*result);
         return E_FAIL;
+    }
+
     swprintf(*result, 13, L"rad%05X.tmp", random & 0xfffff);
     return S_OK;
 }

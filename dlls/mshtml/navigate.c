@@ -1677,9 +1677,11 @@ static void handle_extern_mime_navigation(nsChannelBSC *This)
         hres = IUnknown_QueryInterface(doc_obj->webbrowser, &IID_IWebBrowserPriv, (void**)&webbrowser_priv_old);
         if(SUCCEEDED(hres)) {
             V_VT(&uriv) = VT_BSTR;
-            IUri_GetDisplayUri(uri, &V_BSTR(&uriv));
+            V_BSTR(&uriv) = NULL;
+            hres = IUri_GetDisplayUri(uri, &V_BSTR(&uriv));
 
-            hres = IWebBrowserPriv_NavigateWithBindCtx(webbrowser_priv_old, &uriv, &flags, NULL, NULL, NULL, bind_ctx, NULL);
+            if(hres == S_OK)
+                hres = IWebBrowserPriv_NavigateWithBindCtx(webbrowser_priv_old, &uriv, &flags, NULL, NULL, NULL, bind_ctx, NULL);
 
             SysFreeString(V_BSTR(&uriv));
             IWebBrowserPriv_Release(webbrowser_priv_old);
@@ -2031,15 +2033,17 @@ static void navigate_javascript_proc(task_t *_task)
 {
     navigate_javascript_task_t *task = (navigate_javascript_task_t*)_task;
     HTMLOuterWindow *window = task->window;
+    BSTR code = NULL;
     VARIANT v;
-    BSTR code;
     HRESULT hres;
 
     task->window->readystate = READYSTATE_COMPLETE;
 
     hres = IUri_GetPath(task->uri, &code);
-    if(FAILED(hres))
+    if(hres != S_OK) {
+        SysFreeString(code);
         return;
+    }
 
     hres = UrlUnescapeW(code, NULL, NULL, URL_UNESCAPE_INPLACE);
     if(FAILED(hres)) {
@@ -2107,8 +2111,8 @@ static HRESULT navigate_fragment(HTMLOuterWindow *window, IUri *uri)
 {
     nsIDOMLocation *nslocation;
     nsAString nsfrag_str;
+    BSTR frag = NULL;
     WCHAR *selector;
-    BSTR frag;
     nsresult nsres;
     HRESULT hres;
     static const WCHAR selector_formatW[] = L"a[id=\"%s\"]";
@@ -2120,9 +2124,10 @@ static HRESULT navigate_fragment(HTMLOuterWindow *window, IUri *uri)
         return E_FAIL;
 
     hres = IUri_GetFragment(uri, &frag);
-    if(FAILED(hres)) {
+    if(hres != S_OK) {
+        SysFreeString(frag);
         nsIDOMLocation_Release(nslocation);
-        return hres;
+        return FAILED(hres) ? hres : S_OK;
     }
 
     nsAString_InitDepend(&nsfrag_str, frag);
@@ -2234,7 +2239,7 @@ HRESULT super_navigate(HTMLOuterWindow *window, IUri *uri, DWORD flags, const WC
     prepare_for_binding(&window->browser->doc->basedoc, mon, flags);
 
     hres = IUri_GetScheme(uri, &scheme);
-    if(SUCCEEDED(hres) && scheme == URL_SCHEME_JAVASCRIPT) {
+    if(hres == S_OK && scheme == URL_SCHEME_JAVASCRIPT) {
         navigate_javascript_task_t *task;
 
         IBindStatusCallback_Release(&bsc->bsc.IBindStatusCallback_iface);

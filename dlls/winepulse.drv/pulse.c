@@ -2,6 +2,7 @@
  * Copyright 2011-2012 Maarten Lankhorst
  * Copyright 2010-2011 Maarten Lankhorst for CodeWeavers
  * Copyright 2011 Andrew Eikum for CodeWeavers
+ * Copyright 2022 Huw Davies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -37,11 +38,19 @@
 #include "initguid.h"
 #include "audioclient.h"
 
-#include "unixlib.h"
-
 #include "wine/debug.h"
+#include "wine/list.h"
+#include "wine/unixlib.h"
+
+#include "../mmdevapi/unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(pulse);
+
+enum phys_device_bus_type {
+    phys_device_bus_invalid = -1,
+    phys_device_bus_pci,
+    phys_device_bus_usb
+};
 
 struct pulse_stream
 {
@@ -268,7 +277,7 @@ static NTSTATUS pulse_get_endpoint_ids(void *args)
             endpoint->name = offset;
             memcpy((char *)params->endpoints + offset, dev->name, name_len * sizeof(WCHAR));
             offset += name_len * sizeof(WCHAR);
-            endpoint->pulse_name = offset;
+            endpoint->device = offset;
             memcpy((char *)params->endpoints + offset, dev->pulse_name, len);
             offset += (len + 1) & ~1;
             endpoint++;
@@ -1110,7 +1119,7 @@ static NTSTATUS pulse_create_stream(void *args)
         return STATUS_SUCCESS;
     }
 
-    stream->dataflow = params->dataflow;
+    stream->dataflow = params->flow;
     for (i = 0; i < ARRAY_SIZE(stream->vol); ++i)
         stream->vol[i] = 1.f;
 
@@ -1121,7 +1130,7 @@ static NTSTATUS pulse_create_stream(void *args)
         goto exit;
 
     period = 0;
-    hr = get_device_period_helper(params->dataflow, params->pulse_name, &period, NULL);
+    hr = get_device_period_helper(params->flow, params->device, &period, NULL);
     if (FAILED(hr))
         goto exit;
 
@@ -1136,9 +1145,9 @@ static NTSTATUS pulse_create_stream(void *args)
     bufsize_bytes = stream->bufsize_frames * pa_frame_size(&stream->ss);
     stream->mmdev_period_usec = period / 10;
 
-    stream->share = params->mode;
+    stream->share = params->share;
     stream->flags = params->flags;
-    hr = pulse_stream_connect(stream, params->pulse_name, stream->period_bytes);
+    hr = pulse_stream_connect(stream, params->device, stream->period_bytes);
     if (SUCCEEDED(hr)) {
         UINT32 unalign;
         const pa_buffer_attr *attr = pa_stream_get_buffer_attr(stream->stream);
@@ -1205,10 +1214,10 @@ static NTSTATUS pulse_release_stream(void *args)
     struct pulse_stream *stream = handle_get_stream(params->stream);
     SIZE_T size;
 
-    if(params->timer) {
+    if(params->timer_thread) {
         stream->please_quit = TRUE;
-        NtWaitForSingleObject(params->timer, FALSE, NULL);
-        NtClose(params->timer);
+        NtWaitForSingleObject(params->timer_thread, FALSE, NULL);
+        NtClose(params->timer_thread);
     }
 
     pulse_lock();
@@ -2057,7 +2066,7 @@ static NTSTATUS pulse_get_mix_format(void *args)
     PhysDevice *dev;
 
     LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
-        if (strcmp(params->pulse_name, dev->pulse_name))
+        if (strcmp(params->device, dev->pulse_name))
             continue;
 
         *params->fmt = dev->fmt;
@@ -2074,7 +2083,7 @@ static NTSTATUS pulse_get_device_period(void *args)
 {
     struct get_device_period_params *params = args;
 
-    params->result = get_device_period_helper(params->flow, params->pulse_name, params->def_period, params->min_period);
+    params->result = get_device_period_helper(params->flow, params->device, params->def_period, params->min_period);
     return STATUS_SUCCESS;
 }
 
@@ -2260,7 +2269,7 @@ static NTSTATUS pulse_is_started(void *args)
     struct pulse_stream *stream = handle_get_stream(params->stream);
 
     pulse_lock();
-    params->started = pulse_stream_valid(stream) && stream->started;
+    params->result = pulse_stream_valid(stream) && stream->started ? S_OK : S_FALSE;
     pulse_unlock();
 
     return STATUS_SUCCESS;
@@ -2269,6 +2278,7 @@ static NTSTATUS pulse_is_started(void *args)
 static BOOL get_device_path(PhysDevice *dev, struct get_prop_value_params *params)
 {
     const GUID *guid = params->guid;
+    PROPVARIANT *out = params->value;
     UINT serial_number;
     char path[128];
     int len;
@@ -2290,9 +2300,19 @@ static BOOL get_device_path(PhysDevice *dev, struct get_prop_value_params *param
         break;
     }
 
-    ntdll_umbstowcs(path, len + 1, params->wstr, ARRAY_SIZE(params->wstr));
+    if (*params->buffer_size < ++len * sizeof(WCHAR)) {
+        params->result = E_NOT_SUFFICIENT_BUFFER;
+        *params->buffer_size = len * sizeof(WCHAR);
+        return FALSE;
+    }
 
-    params->vt = VT_LPWSTR;
+    out->vt = VT_LPWSTR;
+    out->pwszVal = params->buffer;
+
+    ntdll_umbstowcs(path, len, out->pwszVal, len);
+
+    params->result = S_OK;
+
     return TRUE;
 }
 
@@ -2310,7 +2330,7 @@ static NTSTATUS pulse_get_prop_value(void *args)
 
     params->result = S_OK;
     LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
-        if (strcmp(params->pulse_name, dev->pulse_name))
+        if (strcmp(params->device, dev->pulse_name))
             continue;
         if (IsEqualPropertyKey(*params->prop, devicepath_key)) {
             if (!get_device_path(dev, params))
@@ -2319,20 +2339,20 @@ static NTSTATUS pulse_get_prop_value(void *args)
         } else if (IsEqualGUID(&params->prop->fmtid, &PKEY_AudioEndpoint_GUID)) {
             switch (params->prop->pid) {
             case 0:   /* FormFactor */
-                params->vt = VT_UI4;
-                params->ulVal = dev->form;
+                params->value->vt = VT_UI4;
+                params->value->ulVal = dev->form;
                 return STATUS_SUCCESS;
             case 3:   /* PhysicalSpeakers */
                 if (!dev->channel_mask)
                     goto fail;
-                params->vt = VT_UI4;
-                params->ulVal = dev->channel_mask;
+                params->value->vt = VT_UI4;
+                params->value->ulVal = dev->channel_mask;
                 return STATUS_SUCCESS;
             default:
-                break;
+                params->result = E_NOTIMPL;
             }
         }
-        params->result = E_NOTIMPL;
+
         return STATUS_SUCCESS;
     }
 
@@ -2357,6 +2377,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_release_render_buffer,
     pulse_get_capture_buffer,
     pulse_release_capture_buffer,
+    NULL,
     pulse_get_mix_format,
     pulse_get_device_period,
     pulse_get_buffer_size,
@@ -2370,6 +2391,10 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_test_connect,
     pulse_is_started,
     pulse_get_prop_value,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 #ifdef _WIN64
@@ -2419,11 +2444,12 @@ static NTSTATUS pulse_wow64_create_stream(void *args)
     struct
     {
         PTR32 name;
-        PTR32 pulse_name;
-        EDataFlow dataflow;
-        AUDCLNT_SHAREMODE mode;
+        PTR32 device;
+        EDataFlow flow;
+        AUDCLNT_SHAREMODE share;
         DWORD flags;
         REFERENCE_TIME duration;
+        REFERENCE_TIME period;
         PTR32 fmt;
         HRESULT result;
         PTR32 channel_count;
@@ -2432,11 +2458,12 @@ static NTSTATUS pulse_wow64_create_stream(void *args)
     struct create_stream_params params =
     {
         .name = ULongToPtr(params32->name),
-        .pulse_name = ULongToPtr(params32->pulse_name),
-        .dataflow = params32->dataflow,
-        .mode = params32->mode,
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .share = params32->share,
         .flags = params32->flags,
         .duration = params32->duration,
+        .period = params32->period,
         .fmt = ULongToPtr(params32->fmt),
         .channel_count = ULongToPtr(params32->channel_count),
         .stream = ULongToPtr(params32->stream)
@@ -2451,13 +2478,13 @@ static NTSTATUS pulse_wow64_release_stream(void *args)
     struct
     {
         stream_handle stream;
-        PTR32 timer;
+        PTR32 timer_thread;
         HRESULT result;
     } *params32 = args;
     struct release_stream_params params =
     {
         .stream = params32->stream,
-        .timer = ULongToHandle(params32->timer)
+        .timer_thread = ULongToHandle(params32->timer_thread)
     };
     pulse_release_stream(&params);
     params32->result = params.result;
@@ -2518,14 +2545,14 @@ static NTSTATUS pulse_wow64_get_mix_format(void *args)
 {
     struct
     {
-        PTR32 pulse_name;
+        PTR32 device;
         EDataFlow flow;
         PTR32 fmt;
         HRESULT result;
     } *params32 = args;
     struct get_mix_format_params params =
     {
-        .pulse_name = ULongToPtr(params32->pulse_name),
+        .device = ULongToPtr(params32->device),
         .flow = params32->flow,
         .fmt = ULongToPtr(params32->fmt),
     };
@@ -2538,7 +2565,7 @@ static NTSTATUS pulse_wow64_get_device_period(void *args)
 {
     struct
     {
-        PTR32 pulse_name;
+        PTR32 device;
         EDataFlow flow;
         HRESULT result;
         PTR32 def_period;
@@ -2546,7 +2573,7 @@ static NTSTATUS pulse_wow64_get_device_period(void *args)
     } *params32 = args;
     struct get_device_period_params params =
     {
-        .pulse_name = ULongToPtr(params32->pulse_name),
+        .device = ULongToPtr(params32->device),
         .flow = params32->flow,
         .def_period = ULongToPtr(params32->def_period),
         .min_period = ULongToPtr(params32->min_period),
@@ -2723,42 +2750,55 @@ static NTSTATUS pulse_wow64_test_connect(void *args)
 
 static NTSTATUS pulse_wow64_get_prop_value(void *args)
 {
-    struct
+    struct propvariant32
     {
-        PTR32 pulse_name;
-        PTR32 guid;
-        PTR32 prop;
-        EDataFlow flow;
-        HRESULT result;
-        VARTYPE vt;
+        WORD vt;
+        WORD pad1, pad2, pad3;
         union
         {
-            WCHAR wstr[128];
             ULONG ulVal;
+            PTR32 ptr;
+            ULARGE_INTEGER uhVal;
         };
+    } *value32;
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        PTR32 guid;
+        PTR32 prop;
+        HRESULT result;
+        PTR32 value;
+        PTR32 buffer; /* caller allocated buffer to hold value's strings */
+        PTR32 buffer_size;
     } *params32 = args;
+    PROPVARIANT value;
     struct get_prop_value_params params =
     {
-        .pulse_name = ULongToPtr(params32->pulse_name),
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
         .guid = ULongToPtr(params32->guid),
         .prop = ULongToPtr(params32->prop),
-        .flow = params32->flow,
+        .value = &value,
+        .buffer = ULongToPtr(params32->buffer),
+        .buffer_size = ULongToPtr(params32->buffer_size)
     };
     pulse_get_prop_value(&params);
     params32->result = params.result;
-    params32->vt = params.vt;
     if (SUCCEEDED(params.result))
     {
-        switch (params.vt)
+        value32 = UlongToPtr(params32->value);
+        value32->vt = value.vt;
+        switch (value.vt)
         {
         case VT_UI4:
-            params32->ulVal = params.ulVal;
+            value32->ulVal = value.ulVal;
             break;
         case VT_LPWSTR:
-            wcscpy(params32->wstr, params.wstr);
+            value32->ptr = params32->buffer;
             break;
         default:
-            FIXME("Unhandled vt %04x\n", params.vt);
+            FIXME("Unhandled vt %04x\n", value.vt);
         }
     }
     return STATUS_SUCCESS;
@@ -2780,6 +2820,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_release_render_buffer,
     pulse_wow64_get_capture_buffer,
     pulse_release_capture_buffer,
+    NULL,
     pulse_wow64_get_mix_format,
     pulse_wow64_get_device_period,
     pulse_wow64_get_buffer_size,
@@ -2793,6 +2834,10 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_test_connect,
     pulse_is_started,
     pulse_wow64_get_prop_value,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 #endif /* _WIN64 */

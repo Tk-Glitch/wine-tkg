@@ -1,5 +1,6 @@
 /*
  * Copyright 2021 Jacek Caban for CodeWeavers
+ * Copyright 2022 Huw Davies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,23 +17,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wine/list.h"
-#include "wine/unixlib.h"
-
-#define MAX_PULSE_NAME_LEN 256
+#include "audioclient.h"
+#include "mmdeviceapi.h"
 
 typedef UINT64 stream_handle;
-
-enum phys_device_bus_type {
-    phys_device_bus_invalid = -1,
-    phys_device_bus_pci,
-    phys_device_bus_usb
-};
 
 struct endpoint
 {
     unsigned int name;
-    unsigned int pulse_name;
+    unsigned int device;
 };
 
 struct main_loop_params
@@ -53,11 +46,12 @@ struct get_endpoint_ids_params
 struct create_stream_params
 {
     const char *name;
-    const char *pulse_name;
-    EDataFlow dataflow;
-    AUDCLNT_SHAREMODE mode;
+    const char *device;
+    EDataFlow flow;
+    AUDCLNT_SHAREMODE share;
     DWORD flags;
     REFERENCE_TIME duration;
+    REFERENCE_TIME period;
     const WAVEFORMATEX *fmt;
     HRESULT result;
     UINT32 *channel_count;
@@ -67,7 +61,7 @@ struct create_stream_params
 struct release_stream_params
 {
     stream_handle stream;
-    HANDLE timer;
+    HANDLE timer_thread;
     HRESULT result;
 };
 
@@ -106,7 +100,7 @@ struct release_render_buffer_params
 {
     stream_handle stream;
     UINT32 written_frames;
-    DWORD flags;
+    UINT flags;
     HRESULT result;
 };
 
@@ -116,7 +110,7 @@ struct get_capture_buffer_params
     HRESULT result;
     BYTE **data;
     UINT32 *frames;
-    DWORD *flags;
+    UINT *flags;
     UINT64 *devpos;
     UINT64 *qpcpos;
 };
@@ -128,9 +122,19 @@ struct release_capture_buffer_params
     HRESULT result;
 };
 
+struct is_format_supported_params
+{
+    const char *device;
+    EDataFlow flow;
+    AUDCLNT_SHAREMODE share;
+    const WAVEFORMATEX *fmt_in;
+    WAVEFORMATEXTENSIBLE *fmt_out;
+    HRESULT result;
+};
+
 struct get_mix_format_params
 {
-    const char *pulse_name;
+    const char *device;
     EDataFlow flow;
     WAVEFORMATEXTENSIBLE *fmt;
     HRESULT result;
@@ -138,7 +142,7 @@ struct get_mix_format_params
 
 struct get_device_period_params
 {
-    const char *pulse_name;
+    const char *device;
     EDataFlow flow;
     HRESULT result;
     REFERENCE_TIME *def_period;
@@ -213,22 +217,60 @@ struct test_connect_params
 struct is_started_params
 {
     stream_handle stream;
-    BOOL started;
+    HRESULT result;
 };
 
 struct get_prop_value_params
 {
-    const char *pulse_name;
+    const char *device;
+    EDataFlow flow;
     const GUID *guid;
     const PROPERTYKEY *prop;
-    EDataFlow flow;
     HRESULT result;
-    VARTYPE vt;
-    union
-    {
-        WCHAR wstr[128];
-        ULONG ulVal;
-    };
+    PROPVARIANT *value;
+    void *buffer; /* caller allocated buffer to hold value's strings */
+    unsigned int *buffer_size;
+};
+
+struct notify_context
+{
+    BOOL send_notify;
+    WORD dev_id;
+    WORD msg;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT_PTR callback;
+    UINT flags;
+    HANDLE device;
+    UINT_PTR instance;
+};
+
+struct midi_out_message_params
+{
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
+    struct notify_context *notify;
+};
+
+struct midi_in_message_params
+{
+    UINT dev_id;
+    UINT msg;
+    UINT_PTR user;
+    UINT_PTR param_1;
+    UINT_PTR param_2;
+    UINT *err;
+    struct notify_context *notify;
+};
+
+struct midi_notify_wait_params
+{
+    BOOL *quit;
+    struct notify_context *notify;
 };
 
 enum unix_funcs
@@ -247,6 +289,7 @@ enum unix_funcs
     release_render_buffer,
     get_capture_buffer,
     release_capture_buffer,
+    is_format_supported,
     get_mix_format,
     get_device_period,
     get_buffer_size,
@@ -260,4 +303,8 @@ enum unix_funcs
     test_connect,
     is_started,
     get_prop_value,
+    midi_release,
+    midi_out_message,
+    midi_in_message,
+    midi_notify_wait,
 };
