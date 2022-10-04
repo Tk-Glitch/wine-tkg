@@ -98,9 +98,14 @@ static inline const char *debugstr_tag(DWORD tag)
 
 const char *debugstr_sa_script(UINT16) DECLSPEC_HIDDEN;
 
-static inline unsigned short get_table_entry(const unsigned short *table, WCHAR ch)
+static inline unsigned short get_table_entry_16(const unsigned short *table, WCHAR ch)
 {
     return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
+}
+
+static inline unsigned short get_table_entry_32(const unsigned short *table, UINT ch)
+{
+    return table[table[table[table[ch >> 12] + ((ch >> 8) & 0x0f)] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
 static inline BOOL is_simulation_valid(DWRITE_FONT_SIMULATIONS simulations)
@@ -530,7 +535,16 @@ enum gasp_flags {
 extern unsigned int opentype_get_gasp_flags(const struct dwrite_fonttable *gasp, float emsize) DECLSPEC_HIDDEN;
 
 /* BiDi helpers */
-extern HRESULT bidi_computelevels(const WCHAR*,UINT32,UINT8,UINT8*,UINT8*) DECLSPEC_HIDDEN;
+struct bidi_char
+{
+    unsigned int ch;
+    UINT8 explicit;
+    UINT8 resolved;
+    UINT8 nominal_bidi_class;
+    UINT8 bidi_class;
+};
+
+extern HRESULT bidi_computelevels(struct bidi_char *chars, unsigned int count, UINT8 baselevel) DECLSPEC_HIDDEN;
 
 struct dwrite_glyphbitmap
 {

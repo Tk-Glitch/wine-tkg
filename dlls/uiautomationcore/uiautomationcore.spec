@@ -66,11 +66,11 @@
 @ stdcall UiaGetReservedMixedAttributeValue(ptr)
 @ stdcall UiaGetReservedNotSupportedValue(ptr)
 @ stub UiaGetRootNode
-@ stub UiaGetRuntimeId
+@ stdcall UiaGetRuntimeId(ptr ptr)
 @ stub UiaGetUpdatedCache
 @ stub UiaHPatternObjectFromVariant
 @ stub UiaHTextRangeFromVariant
-@ stub UiaHUiaNodeFromVariant
+@ stdcall UiaHUiaNodeFromVariant(ptr ptr)
 @ stub UiaHasServerSideProvider
 @ stdcall UiaHostProviderFromHwnd(long ptr)
 #@ stub UiaIAccessibleFromProvider

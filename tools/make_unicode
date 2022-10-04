@@ -2748,7 +2748,7 @@ sub dump_linebreak($)
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
-    dump_two_level_mapping( "wine_linebreak_table", $break_types{'XX'}, 16, @break_table );
+    dump_three_level_mapping( "wine_linebreak_table", $break_types{'XX'}, 16, @break_table );
 
     close OUTPUT;
     save_file($filename);
@@ -2993,7 +2993,7 @@ sub dump_scripts($)
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
-    dump_two_level_mapping( "wine_scripts_table", 0, 16, @scripts_table );
+    dump_three_level_mapping( "wine_scripts_table", 0, 16, @scripts_table );
     close OUTPUT;
     save_file($filename);
 }
@@ -3157,7 +3157,7 @@ sub dump_arabic_shaping($)
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
-    dump_two_level_mapping( "arabic_shaping_table", 0, 16, @joining_table );
+    dump_three_level_mapping( "arabic_shaping_table", 0, 16, @joining_table );
 
     close OUTPUT;
     save_file($filename);
@@ -3257,7 +3257,7 @@ sub compress_array($$@)
 }
 
 ################################################################
-# dump a char -> 16-bit value mapping table using two-level tables
+# dump a char -> value mapping table using two-level tables
 sub dump_two_level_mapping($$$@)
 {
     my $name = shift;
@@ -3378,12 +3378,12 @@ sub dump_bidi_dir_table($)
 
     my @table;
 
-    for (my $i = 0; $i < 65536; $i++)
+    for (my $i = 0; $i < @direction_table; $i++)
     {
         $table[$i] = $bidi_types{$direction_table[$i]} if defined $direction_table[$i];
     }
 
-    dump_two_level_mapping( "bidi_direction_table", $bidi_types{"L"}, 16, @table );
+    dump_three_level_mapping( "bidi_direction_table", $bidi_types{"L"}, 16, @table );
 
     close OUTPUT;
     save_file($filename);

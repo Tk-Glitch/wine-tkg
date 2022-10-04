@@ -142,7 +142,7 @@ static HKEY reg_open_hkcu_key( const WCHAR *name, ULONG name_len )
     return key;
 }
 
-ULONG reg_query_value( HKEY hkey, const WCHAR *name,
+static ULONG reg_query_value( HKEY hkey, const WCHAR *name,
                        KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size )
 {
     unsigned int name_size = name ? wcslen( name ) * sizeof(WCHAR) : 0;
@@ -2463,6 +2463,7 @@ unixlib_entry_t __wine_unix_call_funcs[] =
     alsa_midi_out_message,
     alsa_midi_in_message,
     alsa_midi_notify_wait,
+    NULL,
 };
 
 #ifdef _WIN64
@@ -2880,6 +2881,7 @@ unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     alsa_wow64_midi_out_message,
     alsa_wow64_midi_in_message,
     alsa_wow64_midi_notify_wait,
+    NULL,
 };
 
 #endif /* _WIN64 */

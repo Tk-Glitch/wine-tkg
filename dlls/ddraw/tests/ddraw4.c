@@ -3209,8 +3209,19 @@ static HRESULT CALLBACK test_coop_level_mode_set_enum_cb(DDSURFACEDESC2 *surface
     if (surface_desc->dwWidth == param->ddraw_width && surface_desc->dwHeight == param->ddraw_height)
         return DDENUMRET_OK;
 
-    param->user32_width = surface_desc->dwWidth;
-    param->user32_height = surface_desc->dwHeight;
+    /* The docs say the DDENUMRET_CANCEL below cancels the enumeration, so the check should be
+     * redundant. However, since Windows 10 this no longer works and the enumeration continues
+     * until all supported modes are enumerated. Win8 and earlier do cancel.
+     *
+     * Unrelatedly, some testbot machines report high res modes like 1920x1080, but suffer from
+     * some problems when we actually try to set them (w10pro64 and its localization siblings).
+     * Try to stay below the registry mode if possible. */
+    if (!param->user32_width || (surface_desc->dwWidth < registry_mode.dmPelsWidth
+            && surface_desc->dwHeight < registry_mode.dmPelsHeight))
+    {
+        param->user32_width = surface_desc->dwWidth;
+        param->user32_height = surface_desc->dwHeight;
+    }
     return DDENUMRET_CANCEL;
 }
 
@@ -18244,10 +18255,15 @@ static HRESULT CALLBACK find_different_mode_callback(DDSURFACEDESC2 *surface_des
     if (surface_desc->dwWidth != param->old_width && surface_desc->dwHeight != param->old_height &&
             (!compare_uint(surface_desc->dwRefreshRate, param->old_frequency, 1) || !param->old_frequency))
     {
-        param->new_width = surface_desc->dwWidth;
-        param->new_height = surface_desc->dwHeight;
-        param->new_frequency = surface_desc->dwRefreshRate;
-        param->new_bpp = surface_desc->ddpfPixelFormat.dwRGBBitCount;
+        /* See test_coop_level_mode_set_enum_cb() for why enumeration might accidentally continue. */
+        if (!param->new_width || (param->new_width < registry_mode.dmPelsWidth
+                && param->new_height < registry_mode.dmPelsHeight))
+        {
+            param->new_width = surface_desc->dwWidth;
+            param->new_height = surface_desc->dwHeight;
+            param->new_frequency = surface_desc->dwRefreshRate;
+            param->new_bpp = surface_desc->ddpfPixelFormat.dwRGBBitCount;
+        }
         return DDENUMRET_CANCEL;
     }
 

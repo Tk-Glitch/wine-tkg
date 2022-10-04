@@ -72,7 +72,8 @@
 
 #define NSAPI WINAPI
 
-#define MSHTML_E_NODOC    0x800a025c
+#define MSHTML_E_INVALID_ACTION   0x800a01bd
+#define MSHTML_E_NODOC            0x800a025c
 
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
@@ -332,7 +333,10 @@ typedef struct DispatchEx DispatchEx;
 typedef struct {
     HRESULT (*value)(DispatchEx*,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     HRESULT (*get_dispid)(DispatchEx*,BSTR,DWORD,DISPID*);
+    HRESULT (*get_name)(DispatchEx*,DISPID,BSTR*);
     HRESULT (*invoke)(DispatchEx*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
+    HRESULT (*delete)(DispatchEx*,DISPID);
+    HRESULT (*next_dispid)(DispatchEx*,DISPID,DISPID*);
     compat_mode_t (*get_compat_mode)(DispatchEx*);
     HRESULT (*populate_props)(DispatchEx*);
 } dispex_static_data_vtbl_t;
@@ -802,6 +806,7 @@ typedef struct {
     HRESULT (*get_document)(HTMLDOMNode*,IDispatch**);
     HRESULT (*get_readystate)(HTMLDOMNode*,BSTR*);
     HRESULT (*get_dispid)(HTMLDOMNode*,BSTR,DWORD,DISPID*);
+    HRESULT (*get_name)(HTMLDOMNode*,DISPID,BSTR*);
     HRESULT (*invoke)(HTMLDOMNode*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     HRESULT (*bind_to_tree)(HTMLDOMNode*);
     void (*traverse)(HTMLDOMNode*,nsCycleCollectionTraversalCallback*);
@@ -1421,6 +1426,11 @@ static inline VARIANT_BOOL variant_bool(BOOL b)
 static inline BOOL is_digit(WCHAR c)
 {
     return '0' <= c && c <= '9';
+}
+
+static inline BOOL is_power_of_2(unsigned x)
+{
+    return !(x & (x - 1));
 }
 
 #ifdef __i386__

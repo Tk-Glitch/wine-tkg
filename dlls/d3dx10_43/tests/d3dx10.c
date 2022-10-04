@@ -365,6 +365,26 @@ static const BYTE test_dds_dxt1_data[] =
     0x2a, 0x31, 0xf5, 0xbc, 0xe3, 0x6e, 0x2a, 0x3a
 };
 
+/* 4x8 DXT1 dds image */
+static const BYTE test_dds_dxt1_4x8[] =
+{
+    0x44, 0x44, 0x53, 0x20, 0x7c, 0x00, 0x00, 0x00, 0x07, 0x10, 0x0a, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x44, 0x58, 0x54, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x10, 0x40, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x92, 0xce, 0x09, 0x7a, 0x5d, 0xdd, 0xa7, 0x26, 0x55, 0xde, 0xaf, 0x52, 0xbc, 0xf8, 0x6c, 0x44,
+    0x53, 0xbd, 0x8b, 0x72, 0x55, 0x33, 0x88, 0xaa, 0xb2, 0x9c, 0x6c, 0x93, 0x55, 0x00, 0x55, 0x00,
+    0x0f, 0x9c, 0x0f, 0x9c, 0x00, 0x00, 0x00, 0x00,
+};
+static const BYTE test_dds_dxt1_4x8_data[] =
+{
+    0x92, 0xce, 0x09, 0x7a, 0x5d, 0xdd, 0xa7, 0x26, 0x55, 0xde, 0xaf, 0x52, 0xbc, 0xf8, 0x6c, 0x44,
+};
+
 /* 4x4 DXT2 dds image */
 static const BYTE test_dds_dxt2[] =
 {
@@ -446,6 +466,33 @@ static const BYTE test_dds_dxt5_data[] =
 
 };
 
+/* 8x8 DXT5 dds image */
+static const BYTE test_dds_dxt5_8x8[] =
+{
+    0x44, 0x44, 0x53, 0x20, 0x7c, 0x00, 0x00, 0x00, 0x07, 0x10, 0x0a, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x44, 0x58, 0x54, 0x35, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x10, 0x40, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4b, 0x8a, 0x72, 0x39, 0x5e, 0x5e, 0xfa, 0xa8,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0xd7, 0xd5, 0x4a, 0x2d, 0x2d, 0xad, 0xfd,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x47, 0x9a, 0x73, 0x83, 0xa0, 0xf0, 0x78, 0x78,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x5b, 0x06, 0x19, 0x00, 0xe8, 0x78, 0x58,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39, 0xbe, 0x8c, 0x49, 0x35, 0xb5, 0xff, 0x7f,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0x84, 0xab, 0x59, 0x11, 0xff, 0x11, 0xff,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x6a, 0xf0, 0x6a, 0x00, 0x00, 0x00, 0x00,
+};
+static const BYTE test_dds_dxt5_8x8_data[] =
+{
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4b, 0x8a, 0x72, 0x39, 0x5e, 0x5e, 0xfa, 0xa8,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0xd7, 0xd5, 0x4a, 0x2d, 0x2d, 0xad, 0xfd,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x47, 0x9a, 0x73, 0x83, 0xa0, 0xf0, 0x78, 0x78,
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x5b, 0x06, 0x19, 0x00, 0xe8, 0x78, 0x58,
+};
+
 /* 4x4 BC4 dds image */
 static const BYTE test_dds_bc4[] =
 {
@@ -511,6 +558,11 @@ static const BYTE test_dds_cube[] =
 };
 static const BYTE test_dds_cube_data[] =
 {
+    0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7,
+    0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7,
+    0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7,
+    0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7,
+    0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7,
     0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7
 };
 
@@ -539,6 +591,34 @@ static const BYTE test_wmp[] =
 static const BYTE test_wmp_data[] =
 {
     0xff, 0xff, 0xff, 0xff
+};
+
+static const char *test_fx_source =
+"cbuffer cb : register(b1)\n"
+"{\n"
+"    float f1 : SV_POSITION;\n"
+"    float f2 : COLOR0;\n"
+"}\n";
+
+static const BYTE test_fx[] =
+{
+    0x44, 0x58, 0x42, 0x43, 0x95, 0x89, 0xe1, 0xa2, 0xcc, 0x97, 0x05, 0x54, 0x73, 0x9d, 0x0b, 0x67,
+    0x90, 0xe1, 0x7f, 0x77, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x24, 0x00, 0x00, 0x00, 0x46, 0x58, 0x31, 0x30, 0xde, 0x00, 0x00, 0x00, 0x01, 0x10, 0xff, 0xfe,
+    0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x63, 0x62, 0x00, 0x66,
+    0x6c, 0x6f, 0x61, 0x74, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x09, 0x09, 0x00,
+    0x00, 0x66, 0x31, 0x00, 0x53, 0x56, 0x5f, 0x50, 0x4f, 0x53, 0x49, 0x54, 0x49, 0x4f, 0x4e, 0x00,
+    0x66, 0x32, 0x00, 0x43, 0x4f, 0x4c, 0x4f, 0x52, 0x30, 0x00, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00,
+    0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x3b, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
 static const struct test_image
@@ -631,6 +711,10 @@ test_image[] =
         {4, 4, 1, 1, 1, 0,   DXGI_FORMAT_BC1_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
+        test_dds_dxt1_4x8,   sizeof(test_dds_dxt1_4x8),      test_dds_dxt1_4x8_data,
+        {4, 8, 1, 1, 4, 0,   DXGI_FORMAT_BC1_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
+    },
+    {
         test_dds_dxt2,       sizeof(test_dds_dxt2),          test_dds_dxt2_data,
         {4, 4, 1, 1, 3, 0,   DXGI_FORMAT_BC2_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
@@ -645,6 +729,10 @@ test_image[] =
     {
         test_dds_dxt5,       sizeof(test_dds_dxt5),          test_dds_dxt5_data,
         {4, 2, 1, 1, 1, 0,   DXGI_FORMAT_BC3_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
+    },
+    {
+        test_dds_dxt5_8x8,   sizeof(test_dds_dxt5_8x8),      test_dds_dxt5_8x8_data,
+        {8, 8, 1, 1, 4, 0,   DXGI_FORMAT_BC3_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
         test_dds_bc4,        sizeof(test_dds_bc4),           test_dds_bc4_data,
@@ -1138,7 +1226,7 @@ static void check_resource_info(ID3D10Resource *resource, const struct test_imag
             ok_(__FILE__, line)(desc_2d.Height == expected_height,
                     "Got unexpected Height %u, expected %u.\n",
                      desc_2d.Height, expected_height);
-            todo_wine_if(expected_mip_levels != 1)
+            todo_wine_if(expected_mip_levels != image->expected_info.MipLevels)
             ok_(__FILE__, line)(desc_2d.MipLevels == expected_mip_levels,
                     "Got unexpected MipLevels %u, expected %u.\n",
                      desc_2d.MipLevels, expected_mip_levels);
@@ -1211,10 +1299,11 @@ static void check_resource_info(ID3D10Resource *resource, const struct test_imag
 
 static void check_resource_data(ID3D10Resource *resource, const struct test_image *image, unsigned int line)
 {
-    unsigned int width, height, stride, i;
+    unsigned int width, height, stride, i, array_slice;
     D3D10_MAPPED_TEXTURE2D map;
     D3D10_TEXTURE2D_DESC desc;
     ID3D10Texture2D *readback;
+    const BYTE *expected_data;
     BOOL line_match;
     HRESULT hr;
 
@@ -1230,29 +1319,35 @@ static void check_resource_data(ID3D10Resource *resource, const struct test_imag
     if (is_block_compressed(desc.Format))
     {
         stride *= 4;
-        height = (height + 3) / 4;
+        height /= 4;
     }
 
-    hr = ID3D10Texture2D_Map(readback, 0, D3D10_MAP_READ, 0, &map);
-    ok_(__FILE__, line)(hr == S_OK, "Map failed, hr %#lx.\n", hr);
-    if (hr != S_OK)
+    expected_data = image->expected_data;
+    for (array_slice = 0; array_slice < desc.ArraySize; ++array_slice)
     {
-        ID3D10Texture2D_Release(readback);
-        return;
+        hr = ID3D10Texture2D_Map(readback, array_slice * desc.MipLevels, D3D10_MAP_READ, 0, &map);
+        ok_(__FILE__, line)(hr == S_OK, "Map failed, hr %#lx.\n", hr);
+        if (hr != S_OK)
+        {
+            ID3D10Texture2D_Release(readback);
+            return;
+        }
+
+        for (i = 0; i < height; ++i)
+        {
+            line_match = !memcmp(expected_data + stride * i,
+                    (BYTE *)map.pData + map.RowPitch * i, stride);
+            todo_wine_if(is_block_compressed(image->expected_info.Format)
+                    && (image->expected_info.Width % 4 != 0 || image->expected_info.Height % 4 != 0))
+                ok_(__FILE__, line)(line_match, "Data mismatch for line %u, array slice %u.\n", i, array_slice);
+            if (!line_match)
+                break;
+        }
+        expected_data += stride * height;
+
+        ID3D10Texture2D_Unmap(readback, 0);
     }
 
-    for (i = 0; i < height; ++i)
-    {
-        line_match = !memcmp(image->expected_data + stride * i,
-                (BYTE *)map.pData + map.RowPitch * i, stride);
-        todo_wine_if(is_block_compressed(image->expected_info.Format)
-                && (image->expected_info.Width % 4 != 0 || image->expected_info.Height % 4 != 0))
-        ok_(__FILE__, line)(line_match, "Data mismatch for line %u.\n", i);
-        if (!line_match)
-            break;
-    }
-
-    ID3D10Texture2D_Unmap(readback, 0);
     ID3D10Texture2D_Release(readback);
 }
 
@@ -2059,7 +2154,6 @@ static void test_D3DX10CreateAsyncTextureProcessor(void)
         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         hr = ID3DX10DataProcessor_Process(dp, (void *)test_image[i].data, test_image[i].size);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", hr);
         if (hr == S_OK)
@@ -2434,7 +2528,6 @@ static void test_D3DX10CreateThreadPump(void)
         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         hr = ID3DX10ThreadPump_WaitForAllItems(pump);
         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(work_item_hr == S_OK || (work_item_hr == E_FAIL
                     && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", work_item_hr);
@@ -2665,7 +2758,6 @@ static void test_create_texture(void)
         hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromMemory(device, test_image[i].data, test_image[i].size, NULL, NULL, &resource, &hr2);
         ok(hr == hr2, "Got unexpected hr2 %#lx.\n", hr2);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", hr);
         if (hr == S_OK)
@@ -2716,7 +2808,6 @@ static void test_create_texture(void)
         hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromFileW(device, path, NULL, NULL, &resource, &hr2);
         ok(hr == hr2, "Got unexpected hr2 %#lx.\n", hr2);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", hr);
         if (hr == S_OK)
@@ -2729,7 +2820,6 @@ static void test_create_texture(void)
         hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromFileA(device, get_str_a(path), NULL, NULL, &resource, &hr2);
         ok(hr == hr2, "Got unexpected hr2 %#lx.\n", hr2);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", hr);
         if (hr == S_OK)
@@ -2775,7 +2865,6 @@ static void test_create_texture(void)
         hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromResourceW(device, resource_module,
                 test_resource_name, NULL, NULL, &resource, &hr2);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", hr);
         ok(hr == hr2, "Got unexpected hr2 %#lx.\n", hr2);
@@ -2789,7 +2878,6 @@ static void test_create_texture(void)
         hr2 = 0xdeadbeef;
         hr = D3DX10CreateTextureFromResourceA(device, resource_module,
                 get_str_a(test_resource_name), NULL, NULL, &resource, &hr2);
-        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
                 "Got unexpected hr %#lx.\n", hr);
         ok(hr == hr2, "Got unexpected hr2 %#lx.\n", hr2);
@@ -3932,10 +4020,11 @@ todo_wine {
     ok(!refcount, "Unexpected refcount.\n");
 }
 
-static void test_create_effect_from_resource(void)
+static void test_create_effect_from_memory(void)
 {
     ID3D10Device *device;
     ID3D10Effect *effect;
+    ID3D10Blob *errors;
     ULONG refcount;
     HRESULT hr;
 
@@ -3945,12 +4034,313 @@ static void test_create_effect_from_resource(void)
         return;
     }
 
-    hr = D3DX10CreateEffectFromResourceA(GetModuleHandleA(NULL), "resource", NULL, NULL, NULL,
-            "fx_4_0", 0, 0, device, NULL, NULL, &effect, NULL, NULL);
-    ok(hr == D3DX10_ERR_INVALID_DATA, "Unexpected hr %#lx.\n", hr);
+    /* Test NULL data. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromMemory(NULL, 0, NULL, NULL, NULL, NULL,
+            0x0, 0x0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test NULL device. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromMemory(test_fx, sizeof(test_fx), NULL, NULL, NULL, NULL,
+            0x0, 0x0, NULL, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test creating effect from compiled shader. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromMemory(test_fx, sizeof(test_fx), NULL, NULL, NULL, NULL,
+            0x0, 0x0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(!!effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    effect->lpVtbl->Release(effect);
+
+    /* Test creating effect from source without setting profile. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromMemory(test_fx_source, strlen(test_fx_source) + 1, NULL, NULL, NULL, NULL,
+            0x0, 0x0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!!errors && errors != (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    if (errors && errors != (ID3D10Blob *)0xdeadbeef)
+        ID3D10Blob_Release(errors);
+
+    /* Test creating effect from source. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromMemory(test_fx_source, strlen(test_fx_source) + 1, NULL, NULL, NULL, "fx_4_0",
+            0x0, 0x0, device, NULL, NULL, &effect, &errors, NULL);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    todo_wine ok(!!effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    if (hr == S_OK)
+        effect->lpVtbl->Release(effect);
 
     refcount = ID3D10Device_Release(device);
-    ok(!refcount, "Unexpected refcount.\n");
+    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+}
+
+static void test_create_effect_from_file(void)
+{
+    static const WCHAR *test_file_name = L"test.fx";
+    WCHAR path[MAX_PATH];
+    ID3D10Device *device;
+    ID3D10Effect *effect;
+    ID3D10Blob *errors;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    /* Test NULL file name. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileW(NULL, NULL, NULL, NULL, 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileA(NULL, NULL, NULL, NULL, 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test non-existent file. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileW(L"deadbeef", NULL, NULL, NULL, 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileA("deadbeef", NULL, NULL, NULL, 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test creating effect from compiled shader file. */
+    create_file(test_file_name, test_fx, sizeof(test_fx), path);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileW(path, NULL, NULL, NULL, 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(!!effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    effect->lpVtbl->Release(effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileA(get_str_a(path), NULL, NULL, NULL, 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(!!effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    effect->lpVtbl->Release(effect);
+
+    delete_file(test_file_name);
+
+    /* Test creating effect from source file. */
+    create_file(test_file_name, test_fx_source, strlen(test_fx_source) + 1, path);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileW(path, NULL, NULL, "fx_4_0", 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    todo_wine ok(effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    if (hr == S_OK)
+        effect->lpVtbl->Release(effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromFileA(get_str_a(path), NULL, NULL, "fx_4_0", 0x0, 0x0,
+            device, NULL, NULL, &effect, &errors, NULL);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    todo_wine ok(effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    if (hr == S_OK)
+        effect->lpVtbl->Release(effect);
+
+    delete_file(test_file_name);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+}
+
+static void test_create_effect_from_resource(void)
+{
+    static const WCHAR *test_resource_name = L"test.fx";
+    HMODULE resource_module;
+    ID3D10Device *device;
+    ID3D10Effect *effect;
+    ID3D10Blob *errors;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    /* Test NULL module. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceW(NULL, NULL, NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceA(NULL, NULL, NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test NULL resource name. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceW(GetModuleHandleW(NULL), NULL, NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceA(GetModuleHandleA(NULL), NULL, NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test non-existent resource name. */
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceW(GetModuleHandleW(NULL), L"deadbeef", NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceA(GetModuleHandleA(NULL), "deadbeef", NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#lx.\n", hr);
+    ok(errors == (ID3D10Blob *)0xdeadbeef, "Got unexpected errors %p.\n", errors);
+    ok(effect == (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+
+    /* Test creating effect from compiled shader resource. */
+    resource_module = create_resource_module(test_resource_name, test_fx, sizeof(test_fx));
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceW(resource_module, test_resource_name, NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(!!effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    effect->lpVtbl->Release(effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceA(resource_module, get_str_a(test_resource_name), NULL, NULL, NULL, NULL,
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!errors, "Got unexpected errors %p.\n", errors);
+    ok(!!effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    effect->lpVtbl->Release(effect);
+
+    delete_resource_module(test_resource_name, resource_module);
+
+    /* Test creating effect from source resource. */
+    resource_module = create_resource_module(test_resource_name, test_fx_source, strlen(test_fx_source) + 1);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceW(resource_module, test_resource_name, NULL, NULL, NULL, "fx_4_0",
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    todo_wine ok(effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    if (hr == S_OK)
+        effect->lpVtbl->Release(effect);
+
+    errors = (ID3D10Blob *)0xdeadbeef;
+    effect = (ID3D10Effect *)0xdeadbeef;
+    hr = D3DX10CreateEffectFromResourceA(resource_module, get_str_a(test_resource_name), NULL, NULL, NULL, "fx_4_0",
+            0, 0, device, NULL, NULL, &effect, &errors, NULL);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!errors, "Got unexpected errors %p.\n", errors);
+    todo_wine ok(effect && effect != (ID3D10Effect *)0xdeadbeef, "Got unexpected effect %p.\n", effect);
+    if (hr == S_OK)
+        effect->lpVtbl->Release(effect);
+
+    delete_resource_module(test_resource_name, resource_module);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+}
+
+static void test_preprocess_shader(void)
+{
+    static const char shader_source[] =
+        "float4 main()\n"
+        "{\n"
+        "    return float4(1.0);\n"
+        "}\n";
+    ID3D10Blob *preprocessed, *errors;
+    HRESULT hr, hr2;
+
+    hr2 = 0xdeadbeef;
+    hr = D3DX10PreprocessShaderFromMemory(NULL, 0, NULL, NULL, NULL,
+            NULL, &preprocessed, &errors, &hr2);
+    ok(hr == E_FAIL, "Unexpected hr %#lx.\n", hr);
+    ok(hr2 == 0xdeadbeef, "Unexpected hr2 %#lx.\n", hr2);
+
+    hr2 = 0xdeadbeef;
+    hr = D3DX10PreprocessShaderFromMemory(shader_source, strlen(shader_source), NULL, NULL, NULL,
+            NULL, &preprocessed, &errors, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!preprocessed, "Unexpected preprocessed %p.\n", preprocessed);
+    ok(!errors, "Unexpected errors %p.\n", errors);
+    ID3D10Blob_Release(preprocessed);
+
+    hr2 = 0xdeadbeef;
+    hr = D3DX10PreprocessShaderFromMemory(shader_source, strlen(shader_source), NULL, NULL, NULL,
+            NULL, &preprocessed, &errors, &hr2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(hr == hr2, "Unexpected hr2 %#lx.\n", hr2);
+    ok(!!preprocessed, "Unexpected preprocessed %p.\n", preprocessed);
+    ok(!errors, "Unexpected errors %p.\n", errors);
+    ID3D10Blob_Release(preprocessed);
 }
 
 START_TEST(d3dx10)
@@ -3966,5 +4356,8 @@ START_TEST(d3dx10)
     test_create_texture();
     test_font();
     test_sprite();
+    test_create_effect_from_memory();
+    test_create_effect_from_file();
     test_create_effect_from_resource();
+    test_preprocess_shader();
 }

@@ -39,6 +39,8 @@ typedef struct {
     DispatchEx dispex;
     IHTMLStorage IHTMLStorage_iface;
     LONG ref;
+    unsigned num_props;
+    BSTR *props;
     struct session_map_entry *session_storage;
     WCHAR *filename;
     HANDLE mutex;
@@ -178,6 +180,16 @@ void destroy_session_storage(thread_data_t *thread_data)
     }
 }
 
+static void release_props(HTMLStorage *This)
+{
+    BSTR *prop = This->props, *end = prop + This->num_props;
+    while(prop != end) {
+        SysFreeString(*prop);
+        prop++;
+    }
+    heap_free(This->props);
+}
+
 static inline HTMLStorage *impl_from_IHTMLStorage(IHTMLStorage *iface)
 {
     return CONTAINING_RECORD(iface, HTMLStorage, IHTMLStorage_iface);
@@ -227,6 +239,7 @@ static ULONG WINAPI HTMLStorage_Release(IHTMLStorage *iface)
         release_dispex(&This->dispex);
         heap_free(This->filename);
         CloseHandle(This->mutex);
+        release_props(This);
         heap_free(This);
     }
 
@@ -835,13 +848,272 @@ static const IHTMLStorageVtbl HTMLStorageVtbl = {
     HTMLStorage_clear
 };
 
+static inline HTMLStorage *impl_from_DispatchEx(DispatchEx *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLStorage, dispex);
+}
+
+static HRESULT check_item(HTMLStorage *This, const WCHAR *key)
+{
+    struct session_entry *session_entry;
+    IXMLDOMNode *root, *node;
+    IXMLDOMDocument *doc;
+    HRESULT hres;
+    BSTR query;
+
+    if(!This->filename) {
+        hres = get_session_entry(This->session_storage, key, FALSE, &session_entry);
+        if(SUCCEEDED(hres))
+            hres = (session_entry && session_entry->value) ? S_OK : S_FALSE;
+        return hres;
+    }
+
+    WaitForSingleObject(This->mutex, INFINITE);
+
+    hres = open_document(This->filename, &doc);
+    if(hres == S_OK) {
+        hres = get_root_node(doc, &root);
+        IXMLDOMDocument_Release(doc);
+        if(hres == S_OK) {
+            if(!(query = build_query(key)))
+                hres = E_OUTOFMEMORY;
+            else {
+                hres = IXMLDOMNode_selectSingleNode(root, query, &node);
+                SysFreeString(query);
+                if(hres == S_OK)
+                    IXMLDOMNode_Release(node);
+            }
+            IXMLDOMNode_Release(root);
+        }
+    }
+
+    ReleaseMutex(This->mutex);
+
+    return hres;
+}
+
+static HRESULT get_prop(HTMLStorage *This, const WCHAR *name, DISPID *dispid)
+{
+    UINT name_len = wcslen(name);
+    BSTR p, *prop, *end;
+
+    for(prop = This->props, end = prop + This->num_props; prop != end; prop++) {
+        if(SysStringLen(*prop) == name_len && !memcmp(*prop, name, name_len * sizeof(WCHAR))) {
+            *dispid = MSHTML_DISPID_CUSTOM_MIN + (prop - This->props);
+            return S_OK;
+        }
+    }
+
+    if(is_power_of_2(This->num_props)) {
+        BSTR *new_props = heap_realloc(This->props, max(This->num_props * 2 * sizeof(BSTR*), 1));
+        if(!new_props)
+            return E_OUTOFMEMORY;
+        This->props = new_props;
+    }
+
+    if(!(p = SysAllocStringLen(name, name_len)))
+        return E_OUTOFMEMORY;
+
+    This->props[This->num_props] = p;
+    *dispid = MSHTML_DISPID_CUSTOM_MIN + This->num_props++;
+    return S_OK;
+}
+
+static HRESULT HTMLStorage_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags, DISPID *dispid)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    HRESULT hres;
+
+    if(flags & fdexNameCaseInsensitive)
+        FIXME("case insensitive not supported\n");
+
+    if(!(flags & fdexNameEnsure)) {
+        hres = check_item(This, name);
+        if(hres != S_OK)
+            return FAILED(hres) ? hres : DISP_E_UNKNOWNNAME;
+    }
+
+    return get_prop(This, name, dispid);
+}
+
+static HRESULT HTMLStorage_get_name(DispatchEx *dispex, DISPID id, BSTR *name)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
+
+    if(idx >= This->num_props)
+        return DISP_E_MEMBERNOTFOUND;
+
+    return (*name = SysAllocString(This->props[idx])) ? S_OK : E_OUTOFMEMORY;
+}
+
+static HRESULT HTMLStorage_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
+        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
+    HRESULT hres;
+    BSTR bstr;
+
+    if(idx >= This->num_props)
+        return DISP_E_MEMBERNOTFOUND;
+
+    switch(flags) {
+    case DISPATCH_PROPERTYGET:
+        hres = HTMLStorage_getItem(&This->IHTMLStorage_iface, This->props[idx], res);
+        if(FAILED(hres))
+            return hres;
+        if(V_VT(res) == VT_NULL)
+            return DISP_E_MEMBERNOTFOUND;
+        break;
+    case DISPATCH_PROPERTYPUTREF:
+    case DISPATCH_PROPERTYPUT:
+        if(params->cArgs != 1 || (params->cNamedArgs && params->rgdispidNamedArgs[0] != DISPID_PROPERTYPUT)) {
+            FIXME("unimplemented args %u %u\n", params->cArgs, params->cNamedArgs);
+            return E_NOTIMPL;
+        }
+
+        bstr = V_BSTR(params->rgvarg);
+        if(V_VT(params->rgvarg) != VT_BSTR) {
+            VARIANT var;
+            hres = change_type(&var, params->rgvarg, VT_BSTR, caller);
+            if(FAILED(hres))
+                return hres;
+            bstr = V_BSTR(&var);
+        }
+
+        hres = HTMLStorage_setItem(&This->IHTMLStorage_iface, This->props[idx], bstr);
+
+        if(V_VT(params->rgvarg) != VT_BSTR)
+            SysFreeString(bstr);
+        return hres;
+
+    default:
+        FIXME("unimplemented flags %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+static HRESULT HTMLStorage_delete(DispatchEx *dispex, DISPID id)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
+
+    if(idx >= This->num_props)
+        return DISP_E_MEMBERNOTFOUND;
+
+    if(dispex_compat_mode(dispex) < COMPAT_MODE_IE8)
+        return MSHTML_E_INVALID_ACTION;
+
+    return HTMLStorage_removeItem(&This->IHTMLStorage_iface, This->props[idx]);
+}
+
+static HRESULT HTMLStorage_next_dispid(DispatchEx *dispex, DISPID id, DISPID *pid)
+{
+    DWORD idx = (id == DISPID_STARTENUM) ? 0 : id - MSHTML_DISPID_CUSTOM_MIN + 1;
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+    HRESULT hres;
+    DISPID tmp;
+
+    if(idx > MSHTML_CUSTOM_DISPID_CNT)
+        return S_FALSE;
+
+    while(idx < This->num_props) {
+        hres = check_item(This, This->props[idx]);
+        if(hres == S_OK) {
+            *pid = idx + MSHTML_DISPID_CUSTOM_MIN;
+            return S_OK;
+        }
+        if(FAILED(hres))
+            return hres;
+        idx++;
+    }
+
+    /* Populate possibly missing DISPIDs */
+    if(!This->filename) {
+        struct session_entry *session_entry;
+
+        LIST_FOR_EACH_ENTRY(session_entry, &This->session_storage->data_list, struct session_entry, list_entry) {
+            hres = get_prop(This, session_entry->key, &tmp);
+            if(FAILED(hres))
+                return hres;
+        }
+    }else {
+        IXMLDOMNodeList *node_list;
+        IXMLDOMElement *elem;
+        IXMLDOMNode *node;
+        LONG index = 0;
+        HRESULT hres;
+        VARIANT key;
+
+        hres = get_node_list(This->filename, &node_list);
+        if(FAILED(hres))
+            return hres;
+
+        for(;;) {
+            hres = IXMLDOMNodeList_get_item(node_list, index++, &node);
+            if(hres != S_OK) {
+                IXMLDOMNodeList_Release(node_list);
+                if(FAILED(hres))
+                    return hres;
+                break;
+            }
+
+            hres = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMElement, (void**)&elem);
+            IXMLDOMNode_Release(node);
+            if(hres != S_OK)
+                continue;
+
+            hres = IXMLDOMElement_getAttribute(elem, (BSTR)L"name", &key);
+            IXMLDOMElement_Release(elem);
+            if(hres != S_OK) {
+                if(SUCCEEDED(hres))
+                    continue;
+                IXMLDOMNodeList_Release(node_list);
+                return hres;
+            }
+
+            if(V_VT(&key) != VT_BSTR) {
+                FIXME("non-string key %s\n", debugstr_variant(&key));
+                VariantClear(&key);
+                continue;
+            }
+
+            hres = get_prop(This, V_BSTR(&key), &tmp);
+            SysFreeString(V_BSTR(&key));
+            if(FAILED(hres)) {
+                IXMLDOMNodeList_Release(node_list);
+                return hres;
+            }
+        }
+    }
+
+    if(idx >= This->num_props)
+        return S_FALSE;
+
+    *pid = idx + MSHTML_DISPID_CUSTOM_MIN;
+    return S_OK;
+}
+
+static const dispex_static_data_vtbl_t HTMLStorage_dispex_vtbl = {
+    NULL,
+    HTMLStorage_get_dispid,
+    HTMLStorage_get_name,
+    HTMLStorage_invoke,
+    HTMLStorage_delete,
+    HTMLStorage_next_dispid,
+    NULL
+};
+
 static const tid_t HTMLStorage_iface_tids[] = {
     IHTMLStorage_tid,
     0
 };
 static dispex_static_data_t HTMLStorage_dispex = {
     L"Storage",
-    NULL,
+    &HTMLStorage_dispex_vtbl,
     IHTMLStorage_tid,
     HTMLStorage_iface_tids
 };

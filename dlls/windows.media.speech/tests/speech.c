@@ -59,6 +59,7 @@
 
 HRESULT WINAPI (*pDllGetActivationFactory)(HSTRING, IActivationFactory **);
 static BOOL is_win10_1507 = FALSE;
+static BOOL is_win10_1709 = FALSE;
 
 static inline LONG get_ref(IUnknown *obj)
 {
@@ -73,8 +74,9 @@ static inline void check_refcount_(unsigned int line, void *obj, LONG exp)
     ok_(__FILE__, line)(exp == ref, "Unexpected refcount %lu, expected %lu\n", ref, exp);
 }
 
-#define check_interface(obj, iid, exp) check_interface_(__LINE__, obj, iid, exp)
-static void check_interface_(unsigned int line, void *obj, const IID *iid, BOOL supported)
+#define check_interface(obj, iid, exp) check_interface_(__LINE__, obj, iid, exp, FALSE)
+#define check_optional_interface(obj, iid, exp) check_interface_(__LINE__, obj, iid, exp, TRUE)
+static void check_interface_(unsigned int line, void *obj, const IID *iid, BOOL supported, BOOL optional)
 {
     IUnknown *iface = obj;
     HRESULT hr, expected_hr;
@@ -83,7 +85,7 @@ static void check_interface_(unsigned int line, void *obj, const IID *iid, BOOL 
     expected_hr = supported ? S_OK : E_NOINTERFACE;
 
     hr = IUnknown_QueryInterface(iface, iid, (void **)&unk);
-    ok_(__FILE__, line)(hr == expected_hr, "Got hr %#lx, expected %#lx.\n", hr, expected_hr);
+    ok_(__FILE__, line)(hr == expected_hr || broken(hr == E_NOINTERFACE && optional), "Got hr %#lx, expected %#lx.\n", hr, expected_hr);
     if (SUCCEEDED(hr))
         IUnknown_Release(unk);
 }
@@ -1017,11 +1019,39 @@ static void test_SpeechSynthesizer(void)
     hr = IInspectable_QueryInterface(inspectable, &IID_IClosable, (void **)&closable);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+    /* Test ISpeechSynthesizer2 iface */
     hr = IInspectable_QueryInterface(inspectable, &IID_ISpeechSynthesizer2, (void **)&synthesizer2);
     ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#lx.\n", hr); /* Requires Win10 >= 1703 */
 
     if (hr == S_OK)
     {
+        ISpeechSynthesizerOptions *options;
+
+        hr = ISpeechSynthesizer2_get_Options(synthesizer2, &options);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        if (hr == S_OK)
+        {
+            ISpeechSynthesizerOptions3 *options3;
+
+            check_interface(options, &IID_IAgileObject, TRUE);
+            check_optional_interface(options, &IID_ISpeechSynthesizerOptions2, TRUE); /* Requires Win10 >= 1709 */
+
+            hr = ISpeechSynthesizerOptions_QueryInterface(options, &IID_ISpeechSynthesizerOptions3, (void **)&options3);
+            ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#lx.\n", hr); /* Requires Win10 >= 1803 */
+
+            if (hr == S_OK)
+            {
+                ref = ISpeechSynthesizerOptions3_Release(options3);
+                ok(ref == 2, "Got unexpected ref %lu.\n", ref);
+            }
+            else
+                is_win10_1709 = TRUE;
+
+            ref = ISpeechSynthesizerOptions_Release(options);
+            ok(ref == 1, "Got unexpected ref %lu.\n", ref);
+        }
+
         ref = ISpeechSynthesizer2_Release(synthesizer2);
         ok(ref == 3, "Got unexpected ref %lu.\n", ref);
     }
@@ -1450,10 +1480,14 @@ static void test_SpeechRecognitionListConstraint(void)
     hr = ISpeechRecognitionListConstraintFactory_CreateWithTag(listconstraint_factory, NULL, NULL, &listconstraint);
     ok(hr == E_POINTER, "ISpeechRecognitionListConstraintFactory_Create failed, hr %#lx.\n", hr);
 
-    /* The create functions on Win10 1507 x32 break when handling the given iterator. Seems like a Windows bug. Skipping these tests. */
-    if (broken(is_win10_1507 && (sizeof(void*) == 4)))
+    /*
+     * The create functions break on Win10 <= 1709 x32 with the given iterator.
+     * Seems like a Windows bug, but if you see an issue in the test's code, please FIXME.
+     * Skipping these tests.
+     */
+    if (broken((is_win10_1507 || is_win10_1709) && (sizeof(void*) == 4)))
     {
-        win_skip("SpeechRecognitionListConstraint object creation broken on Win10 1507 x32!\n");
+        win_skip("SpeechRecognitionListConstraint object creation broken on Win10 <= 1709 x32!\n");
         goto skip_create;
     }
 
@@ -1601,10 +1635,14 @@ static void test_Recognition(void)
         ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
     }
 
-    /* The create functions for ListConstraint are broken on Win10 1507 x32 - abort early.*/
-    if (broken(is_win10_1507 && (sizeof(void*) == 4)))
+    /*
+     * The create functions break on Win10 <= 1709 x32 with the given iterator.
+     * Seems like a Windows bug, but if you see an issue in the test's code, please FIXME.
+     * Skipping these tests.
+     */
+    if (broken((is_win10_1507 || is_win10_1709) && (sizeof(void*) == 4)))
     {
-        win_skip("SpeechRecognitionListConstraint object creation broken on Win10 1507 x32!\n");
+        win_skip("SpeechRecognitionListConstraint object creation broken on Win10 <= 1709 x32!\n");
         goto done;
     }
 
@@ -1777,17 +1815,10 @@ skip_action:
     hr = ISpeechContinuousRecognitionSession_remove_ResultGenerated(session, token);
     ok(hr == S_OK, "ISpeechContinuousRecognitionSession_remove_ResultGenerated failed, hr %#lx.\n", hr);
 
-    ref = ISpeechContinuousRecognitionSession_Release(session);
-    ok(ref == 1, "Got unexpected ref %lu.\n", ref);
-
-    ref = ISpeechRecognizer2_Release(recognizer2);
-    ok(ref == 2, "Got unexpected ref %lu.\n", ref);
-
-    ref = ISpeechRecognizer_Release(recognizer);
-    ok(ref == 1, "Got unexpected ref %lu.\n", ref);
-
-    ref = IInspectable_Release(inspectable);
-    ok(!ref, "Got unexpected ref %lu.\n", ref);
+    ISpeechContinuousRecognitionSession_Release(session);
+    ISpeechRecognizer2_Release(recognizer2);
+    ISpeechRecognizer_Release(recognizer);
+    IInspectable_Release(inspectable);
 
 done:
     for (i = 0; i < ARRAY_SIZE(commands); i++)

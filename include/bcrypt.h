@@ -428,6 +428,9 @@ typedef PVOID BCRYPT_HANDLE;
 typedef PVOID BCRYPT_HASH_HANDLE;
 typedef PVOID BCRYPT_SECRET_HANDLE;
 
+/* Pseudo handles for BCryptGenRandom */
+#define BCRYPT_RNG_ALG_HANDLE       ((BCRYPT_ALG_HANDLE)0x00000081)
+
 #define BCRYPT_NO_KEY_VALIDATION 0x00000008
 
 /* Flags for BCryptGenRandom */

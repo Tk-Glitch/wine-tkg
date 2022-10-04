@@ -23,6 +23,32 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(uiautomation);
 
+static HRESULT get_safearray_bounds(SAFEARRAY *sa, LONG *lbound, LONG *elems)
+{
+    LONG ubound;
+    HRESULT hr;
+    UINT dims;
+
+    *lbound = *elems = 0;
+    dims = SafeArrayGetDim(sa);
+    if (dims != 1)
+    {
+        WARN("Invalid dimensions %d for safearray.\n", dims);
+        return E_FAIL;
+    }
+
+    hr = SafeArrayGetLBound(sa, 1, lbound);
+    if (FAILED(hr))
+        return hr;
+
+    hr = SafeArrayGetUBound(sa, 1, &ubound);
+    if (FAILED(hr))
+        return hr;
+
+    *elems = (ubound - (*lbound)) + 1;
+    return S_OK;
+}
+
 static void clear_uia_node_ptr_safearray(SAFEARRAY *sa, LONG elems)
 {
     HUIANODE node;
@@ -40,28 +66,14 @@ static void clear_uia_node_ptr_safearray(SAFEARRAY *sa, LONG elems)
 
 static void create_uia_node_safearray(VARIANT *in, VARIANT *out)
 {
-    LONG i, idx, lbound, ubound, elems;
+    LONG i, idx, lbound, elems;
     HUIANODE node;
     SAFEARRAY *sa;
     HRESULT hr;
-    UINT dims;
 
-    dims = SafeArrayGetDim(V_ARRAY(in));
-    if (!dims || (dims > 1))
-    {
-        WARN("Invalid dimensions %d for element safearray.\n", dims);
-        return;
-    }
-
-    hr = SafeArrayGetLBound(V_ARRAY(in), 1, &lbound);
-    if (FAILED(hr))
+    if (FAILED(get_safearray_bounds(V_ARRAY(in), &lbound, &elems)))
         return;
 
-    hr = SafeArrayGetUBound(V_ARRAY(in), 1, &ubound);
-    if (FAILED(hr))
-        return;
-
-    elems = (ubound - lbound) + 1;
     if (!(sa = SafeArrayCreateVector(VT_UINT_PTR, 0, elems)))
         return;
 
@@ -160,6 +172,100 @@ static HRESULT get_global_interface_table(IGlobalInterfaceTable **git)
     return hr;
 }
 
+static HWND get_hwnd_from_provider(IRawElementProviderSimple *elprov)
+{
+    IRawElementProviderSimple *host_prov;
+    HRESULT hr;
+    VARIANT v;
+    HWND hwnd;
+
+    hwnd = NULL;
+    VariantInit(&v);
+    hr = IRawElementProviderSimple_get_HostRawElementProvider(elprov, &host_prov);
+    if (SUCCEEDED(hr) && host_prov)
+    {
+        hr = IRawElementProviderSimple_GetPropertyValue(host_prov, UIA_NativeWindowHandlePropertyId, &v);
+        if (SUCCEEDED(hr) && (V_VT(&v) == VT_I4))
+            hwnd = UlongToHandle(V_I4(&v));
+
+        VariantClear(&v);
+        IRawElementProviderSimple_Release(host_prov);
+    }
+
+    if (!IsWindow(hwnd))
+    {
+        hr = IRawElementProviderSimple_GetPropertyValue(elprov, UIA_NativeWindowHandlePropertyId, &v);
+        if (SUCCEEDED(hr) && (V_VT(&v) == VT_I4))
+            hwnd = UlongToHandle(V_I4(&v));
+        VariantClear(&v);
+    }
+
+    return hwnd;
+}
+
+static IRawElementProviderSimple *get_provider_hwnd_fragment_root(IRawElementProviderSimple *elprov, HWND *hwnd)
+{
+    IRawElementProviderFragmentRoot *elroot, *elroot2;
+    IRawElementProviderSimple *elprov2, *ret;
+    IRawElementProviderFragment *elfrag;
+    HRESULT hr;
+    int depth;
+
+    *hwnd = NULL;
+
+    hr = IRawElementProviderSimple_QueryInterface(elprov, &IID_IRawElementProviderFragment, (void **)&elfrag);
+    if (FAILED(hr) || !elfrag)
+        return NULL;
+
+    depth = 0;
+    ret = NULL;
+    elroot = elroot2 = NULL;
+
+    /*
+     * Recursively walk up the fragment root chain until:
+     * We get a fragment root that has an HWND associated with it.
+     * We get a NULL fragment root.
+     * We get the same fragment root as the current fragment root.
+     * We've gone up the chain ten times.
+     */
+    while (depth < 10)
+    {
+        hr = IRawElementProviderFragment_get_FragmentRoot(elfrag, &elroot);
+        IRawElementProviderFragment_Release(elfrag);
+        if (FAILED(hr) || !elroot || (elroot == elroot2))
+            break;
+
+        hr = IRawElementProviderFragmentRoot_QueryInterface(elroot, &IID_IRawElementProviderSimple, (void **)&elprov2);
+        if (FAILED(hr) || !elprov2)
+            break;
+
+        *hwnd = get_hwnd_from_provider(elprov2);
+        if (IsWindow(*hwnd))
+        {
+            ret = elprov2;
+            break;
+        }
+
+        hr = IRawElementProviderSimple_QueryInterface(elprov2, &IID_IRawElementProviderFragment, (void **)&elfrag);
+        IRawElementProviderSimple_Release(elprov2);
+        if (FAILED(hr) || !elfrag)
+            break;
+
+        if (elroot2)
+            IRawElementProviderFragmentRoot_Release(elroot2);
+        elroot2 = elroot;
+        elroot = NULL;
+        depth++;
+    }
+
+    if (elroot)
+        IRawElementProviderFragmentRoot_Release(elroot);
+    if (elroot2)
+        IRawElementProviderFragmentRoot_Release(elroot2);
+
+    return ret;
+}
+
 /*
  * IWineUiaNode interface.
  */
@@ -169,6 +275,8 @@ struct uia_node {
 
     IWineUiaProvider *prov;
     DWORD git_cookie;
+
+    HWND hwnd;
 };
 
 static inline struct uia_node *impl_from_IWineUiaNode(IWineUiaNode *iface)
@@ -335,14 +443,11 @@ static void get_variant_for_node(HUIANODE node, VARIANT *v)
 #endif
 }
 
-static HRESULT WINAPI uia_provider_get_prop_val(IWineUiaProvider *iface,
+static HRESULT uia_provider_get_elem_prop_val(struct uia_provider *prov,
         const struct uia_prop_info *prop_info, VARIANT *ret_val)
 {
-    struct uia_provider *prov = impl_from_IWineUiaProvider(iface);
     HRESULT hr;
     VARIANT v;
-
-    TRACE("%p, %p, %p\n", iface, prop_info, ret_val);
 
     VariantInit(&v);
     hr = IRawElementProviderSimple_GetPropertyValue(prov->elprov, prop_info->prop_id, &v);
@@ -453,6 +558,100 @@ exit:
     return S_OK;
 }
 
+static SAFEARRAY *append_uia_runtime_id(SAFEARRAY *sa, HWND hwnd, enum ProviderOptions root_opts);
+static HRESULT uia_provider_get_special_prop_val(struct uia_provider *prov,
+        const struct uia_prop_info *prop_info, VARIANT *ret_val)
+{
+    HRESULT hr;
+
+    switch (prop_info->prop_id)
+    {
+    case UIA_RuntimeIdPropertyId:
+    {
+        IRawElementProviderFragment *elfrag;
+        SAFEARRAY *sa;
+        LONG lbound;
+        int val;
+
+        hr = IRawElementProviderSimple_QueryInterface(prov->elprov, &IID_IRawElementProviderFragment, (void **)&elfrag);
+        if (FAILED(hr) || !elfrag)
+            break;
+
+        hr = IRawElementProviderFragment_GetRuntimeId(elfrag, &sa);
+        IRawElementProviderFragment_Release(elfrag);
+        if (FAILED(hr) || !sa)
+            break;
+
+        hr = SafeArrayGetLBound(sa, 1, &lbound);
+        if (FAILED(hr))
+        {
+            SafeArrayDestroy(sa);
+            break;
+        }
+
+        hr = SafeArrayGetElement(sa, &lbound, &val);
+        if (FAILED(hr))
+        {
+            SafeArrayDestroy(sa);
+            break;
+        }
+
+        if (val == UiaAppendRuntimeId)
+        {
+            enum ProviderOptions prov_opts = 0;
+            IRawElementProviderSimple *elprov;
+            HWND hwnd;
+
+            elprov = get_provider_hwnd_fragment_root(prov->elprov, &hwnd);
+            if (!elprov)
+            {
+                SafeArrayDestroy(sa);
+                return E_FAIL;
+            }
+
+            hr = IRawElementProviderSimple_get_ProviderOptions(elprov, &prov_opts);
+            IRawElementProviderSimple_Release(elprov);
+            if (FAILED(hr))
+                WARN("get_ProviderOptions for root provider failed with %#lx\n", hr);
+
+            if (!(sa = append_uia_runtime_id(sa, hwnd, prov_opts)))
+                break;
+        }
+
+        V_VT(ret_val) = VT_I4 | VT_ARRAY;
+        V_ARRAY(ret_val) = sa;
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI uia_provider_get_prop_val(IWineUiaProvider *iface,
+        const struct uia_prop_info *prop_info, VARIANT *ret_val)
+{
+    struct uia_provider *prov = impl_from_IWineUiaProvider(iface);
+
+    TRACE("%p, %p, %p\n", iface, prop_info, ret_val);
+
+    switch (prop_info->prop_type)
+    {
+    case PROP_TYPE_ELEM_PROP:
+        return uia_provider_get_elem_prop_val(prov, prop_info, ret_val);
+
+    case PROP_TYPE_SPECIAL:
+        return uia_provider_get_special_prop_val(prov, prop_info, ret_val);
+
+    default:
+        break;
+    }
+
+    return S_OK;
+}
+
 static const IWineUiaProviderVtbl uia_provider_vtbl = {
     uia_provider_QueryInterface,
     uia_provider_AddRef,
@@ -482,6 +681,7 @@ static HRESULT create_wine_uia_provider(struct uia_node *node, IRawElementProvid
     prov->elprov = elprov;
     prov->ref = 1;
     node->prov = &prov->IWineUiaProvider_iface;
+    node->hwnd = get_hwnd_from_provider(elprov);
 
     /*
      * If the UseComThreading ProviderOption is specified, all calls to the
@@ -563,6 +763,23 @@ BOOL WINAPI UiaNodeRelease(HUIANODE huianode)
     return TRUE;
 }
 
+static HRESULT get_prop_val_from_node_provider(struct uia_node *node,
+        const struct uia_prop_info *prop_info, VARIANT *v)
+{
+    IWineUiaProvider *prov;
+    HRESULT hr;
+
+    hr = IWineUiaNode_get_provider(&node->IWineUiaNode_iface, &prov);
+    if (FAILED(hr))
+        return hr;
+
+    VariantInit(v);
+    hr = IWineUiaProvider_get_prop_val(prov, prop_info, v);
+    IWineUiaProvider_Release(prov);
+
+    return hr;
+}
+
 /***********************************************************************
  *          UiaGetPropertyValue (uiautomationcore.@)
  */
@@ -570,7 +787,6 @@ HRESULT WINAPI UiaGetPropertyValue(HUIANODE huianode, PROPERTYID prop_id, VARIAN
 {
     struct uia_node *node = unsafe_impl_from_IWineUiaNode((IWineUiaNode *)huianode);
     const struct uia_prop_info *prop_info;
-    IWineUiaProvider *prov;
     HRESULT hr;
     VARIANT v;
 
@@ -592,12 +808,26 @@ HRESULT WINAPI UiaGetPropertyValue(HUIANODE huianode, PROPERTYID prop_id, VARIAN
         return E_NOTIMPL;
     }
 
-    hr = IWineUiaNode_get_provider(&node->IWineUiaNode_iface, &prov);
-    if (FAILED(hr))
-        return hr;
+    switch (prop_id)
+    {
+    case UIA_RuntimeIdPropertyId:
+    {
+        SAFEARRAY *sa;
 
-    VariantInit(&v);
-    hr = IWineUiaProvider_get_prop_val(prov, prop_info, &v);
+        hr = UiaGetRuntimeId(huianode, &sa);
+        if (SUCCEEDED(hr) && sa)
+        {
+            V_VT(out_val) = VT_I4 | VT_ARRAY;
+            V_ARRAY(out_val) = sa;
+        }
+        return S_OK;
+    }
+
+    default:
+        break;
+    }
+
+    hr = get_prop_val_from_node_provider(node, prop_info, &v);
     if (SUCCEEDED(hr) && V_VT(&v) != VT_EMPTY)
     {
         /*
@@ -615,7 +845,174 @@ HRESULT WINAPI UiaGetPropertyValue(HUIANODE huianode, PROPERTYID prop_id, VARIAN
             *out_val = v;
     }
 
-    IWineUiaProvider_Release(prov);
+    return hr;
+}
+
+#define UIA_RUNTIME_ID_PREFIX 42
+
+enum fragment_root_prov_type_ids {
+    FRAGMENT_ROOT_NONCLIENT_TYPE_ID = 0x03,
+    FRAGMENT_ROOT_MAIN_TYPE_ID      = 0x04,
+    FRAGMENT_ROOT_OVERRIDE_TYPE_ID  = 0x05,
+};
+
+static HRESULT write_runtime_id_base(SAFEARRAY *sa, HWND hwnd)
+{
+    const int rt_id[2] = { UIA_RUNTIME_ID_PREFIX, HandleToUlong(hwnd) };
+    HRESULT hr;
+    LONG idx;
+
+    for (idx = 0; idx < ARRAY_SIZE(rt_id); idx++)
+    {
+        hr = SafeArrayPutElement(sa, &idx, (void *)&rt_id[idx]);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    return S_OK;
+}
+
+static SAFEARRAY *append_uia_runtime_id(SAFEARRAY *sa, HWND hwnd, enum ProviderOptions root_opts)
+{
+    LONG i, idx, lbound, elems;
+    SAFEARRAY *sa2, *ret;
+    HRESULT hr;
+    int val;
+
+    ret = sa2 = NULL;
+    hr = get_safearray_bounds(sa, &lbound, &elems);
+    if (FAILED(hr))
+        goto exit;
+
+    /* elems includes the UiaAppendRuntimeId value, so we only add 2. */
+    if (!(sa2 = SafeArrayCreateVector(VT_I4, 0, elems + 2)))
+        goto exit;
+
+    hr = write_runtime_id_base(sa2, hwnd);
+    if (FAILED(hr))
+        goto exit;
+
+    if (root_opts & ProviderOptions_NonClientAreaProvider)
+        val = FRAGMENT_ROOT_NONCLIENT_TYPE_ID;
+    else if (root_opts & ProviderOptions_OverrideProvider)
+        val = FRAGMENT_ROOT_OVERRIDE_TYPE_ID;
+    else
+        val = FRAGMENT_ROOT_MAIN_TYPE_ID;
+
+    idx = 2;
+    hr = SafeArrayPutElement(sa2, &idx, &val);
+    if (FAILED(hr))
+        goto exit;
+
+    for (i = 0; i < (elems - 1); i++)
+    {
+        idx = (lbound + 1) + i;
+        hr = SafeArrayGetElement(sa, &idx, &val);
+        if (FAILED(hr))
+            goto exit;
+
+        idx = (3 + i);
+        hr = SafeArrayPutElement(sa2, &idx, &val);
+        if (FAILED(hr))
+            goto exit;
+    }
+
+    ret = sa2;
+
+exit:
+
+    if (!ret)
+        SafeArrayDestroy(sa2);
+
+    SafeArrayDestroy(sa);
+    return ret;
+}
+
+/***********************************************************************
+ *          UiaGetRuntimeId (uiautomationcore.@)
+ */
+HRESULT WINAPI UiaGetRuntimeId(HUIANODE huianode, SAFEARRAY **runtime_id)
+{
+    const struct uia_prop_info *prop_info = uia_prop_info_from_id(UIA_RuntimeIdPropertyId);
+    struct uia_node *node = unsafe_impl_from_IWineUiaNode((IWineUiaNode *)huianode);
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", huianode, runtime_id);
+
+    if (!node || !runtime_id)
+        return E_INVALIDARG;
+
+    *runtime_id = NULL;
+
+    /* Provide an HWND based runtime ID if the node has an HWND. */
+    if (node->hwnd)
+    {
+        SAFEARRAY *sa;
+
+        if (!(sa = SafeArrayCreateVector(VT_I4, 0, 2)))
+            return E_FAIL;
+
+        hr = write_runtime_id_base(sa, node->hwnd);
+        if (FAILED(hr))
+        {
+            SafeArrayDestroy(sa);
+            return hr;
+        }
+
+        *runtime_id = sa;
+        return S_OK;
+    }
+    else
+    {
+        VARIANT v;
+
+        hr = get_prop_val_from_node_provider(node, prop_info, &v);
+        if (FAILED(hr))
+        {
+            VariantClear(&v);
+            return hr;
+        }
+
+        if (V_VT(&v) == (VT_I4 | VT_ARRAY))
+            *runtime_id = V_ARRAY(&v);
+    }
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *          UiaHUiaNodeFromVariant (uiautomationcore.@)
+ */
+HRESULT WINAPI UiaHUiaNodeFromVariant(VARIANT *in_val, HUIANODE *huianode)
+{
+    const VARTYPE expected_vt = sizeof(void *) == 8 ? VT_I8 : VT_I4;
+
+    TRACE("(%p, %p)\n", in_val, huianode);
+
+    if (!in_val || !huianode)
+        return E_INVALIDARG;
+
+    *huianode = NULL;
+    if ((V_VT(in_val) != expected_vt) && (V_VT(in_val) != VT_UNKNOWN))
+    {
+        WARN("Invalid vt %d\n", V_VT(in_val));
+        return E_INVALIDARG;
+    }
+
+    if (V_VT(in_val) == VT_UNKNOWN)
+    {
+        if (V_UNKNOWN(in_val))
+            IUnknown_AddRef(V_UNKNOWN(in_val));
+        *huianode = (HUIANODE)V_UNKNOWN(in_val);
+    }
+    else
+    {
+#ifdef _WIN64
+        *huianode = (HUIANODE)V_I8(in_val);
+#else
+        *huianode = (HUIANODE)V_I4(in_val);
+#endif
+    }
 
     return S_OK;
 }

@@ -234,6 +234,8 @@ int WINAPI AUDDRV_GetPriority(void)
 {
     struct test_connect_params params;
 
+    params.name = NULL;
+
     OSS_CALL(test_connect, &params);
 
     return params.priority;
@@ -710,6 +712,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
         return AUDCLNT_E_ALREADY_INITIALIZED;
     }
 
+    params.name = NULL;
     params.device = This->devnode;
     params.flow = This->dataflow;
     params.share = mode;
@@ -717,6 +720,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
     params.duration = duration;
     params.period = period;
     params.fmt = fmt;
+    params.channel_count = NULL;
     params.stream = &stream;
 
     OSS_CALL(create_stream, &params);
@@ -1410,7 +1414,7 @@ static HRESULT WINAPI AudioClock_GetFrequency(IAudioClock *iface, UINT64 *freq)
     TRACE("(%p)->(%p)\n", This, freq);
 
     params.stream = This->stream;
-    params.frequency = freq;
+    params.freq = freq;
     OSS_CALL(get_frequency, &params);
 
     return params.result;
@@ -1428,7 +1432,8 @@ static HRESULT WINAPI AudioClock_GetPosition(IAudioClock *iface, UINT64 *pos,
         return E_POINTER;
 
     params.stream = This->stream;
-    params.position = pos;
+    params.device = FALSE;
+    params.pos = pos;
     params.qpctime = qpctime;
     OSS_CALL(get_position, &params);
 

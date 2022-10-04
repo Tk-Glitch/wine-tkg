@@ -1005,12 +1005,14 @@ LONG_PTR CDECL DECLSPEC_HIDDEN ndr_client_call( PMIDL_STUB_DESC pStubDesc, PFORM
 #ifdef __x86_64__
 
 __ASM_GLOBAL_FUNC( NdrClientCall2,
-                   "movq %r8,0x18(%rsp)\n\t"
-                   "movq %r9,0x20(%rsp)\n\t"
-                   "leaq 0x18(%rsp),%r8\n\t"
-                   "xorq %r9,%r9\n\t"
                    "subq $0x28,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   "movq %r8,0x40(%rsp)\n\t"
+                   "movq %r9,0x48(%rsp)\n\t"
+                   "leaq 0x40(%rsp),%r8\n\t"
+                   "xorq %r9,%r9\n\t"
                    "call " __ASM_NAME("ndr_client_call") "\n\t"
                    "addq $0x28,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")
@@ -2246,11 +2248,13 @@ LONG_PTR CDECL DECLSPEC_HIDDEN ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info
 #ifdef __x86_64__
 
 __ASM_GLOBAL_FUNC( NdrClientCall3,
-                   "movq %r9,0x20(%rsp)\n\t"
-                   "leaq 0x20(%rsp),%r9\n\t"
-                   "pushq $0\n\t"
-                   "subq $0x20,%rsp\n\t"
+                   "subq $0x28,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   "movq %r9,0x48(%rsp)\n\t"
+                   "leaq 0x48(%rsp),%r9\n\t"
+                   "movq $0,0x20(%rsp)\n\t"
                    "call " __ASM_NAME("ndr64_client_call") "\n\t"
                    "addq $0x28,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")
@@ -2306,11 +2310,13 @@ LONG_PTR CDECL DECLSPEC_HIDDEN ndr64_async_client_call( MIDL_STUBLESS_PROXY_INFO
 #ifdef __x86_64__
 
 __ASM_GLOBAL_FUNC( Ndr64AsyncClientCall,
-                   "movq %r9,0x20(%rsp)\n\t"
-                   "leaq 0x20(%rsp),%r9\n\t"
-                   "pushq $0\n\t"
-                   "subq $0x20,%rsp\n\t"
+                   "subq $0x28,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   "movq %r9,0x48(%rsp)\n\t"
+                   "leaq 0x48(%rsp),%r9\n\t"
+                   "movq $0,0x20(%rsp)\n\t"
                    "call " __ASM_NAME("ndr64_async_client_call") "\n\t"
                    "addq $0x28,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")

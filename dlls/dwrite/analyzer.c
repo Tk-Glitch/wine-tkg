@@ -30,6 +30,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
 extern const unsigned short wine_linebreak_table[] DECLSPEC_HIDDEN;
 extern const unsigned short wine_scripts_table[] DECLSPEC_HIDDEN;
+extern const unsigned short bidi_direction_table[] DECLSPEC_HIDDEN;
 
 /* Number of characters needed for LOCALE_SNATIVEDIGITS */
 #define NATIVE_DIGITS_LEN 11
@@ -277,7 +278,8 @@ system_fallback_config[] =
     { "1720-173F",              L"Noto Sans Hanunoo" },
     { "1740-175F",              L"Noto Sans Buhid" },
     { "1760-177F",              L"Noto Sans Tagbanwa" },
-    { "1800-18AF, 11660-1167F", L"Noto Sans Mongolian" },
+
+    { "1800-18AF, 202F, 11660-1167F", L"Noto Sans Mongolian" },
 
     { "1900-194F",              L"Noto Sans Limbu" },
     { "1950-197F",              L"Noto Sans Tai Le" },
@@ -373,6 +375,11 @@ struct text_source_context
 
     UINT32 ch;
 };
+
+static inline unsigned int text_source_get_char_length(const struct text_source_context *context)
+{
+    return context->ch > 0xffff ? 2 : 1;
+}
 
 static void text_source_read_more(struct text_source_context *context)
 {
@@ -636,9 +643,9 @@ static inline struct dwrite_fontfallback_builder *impl_from_IDWriteFontFallbackB
     return CONTAINING_RECORD(iface, struct dwrite_fontfallback_builder, IDWriteFontFallbackBuilder_iface);
 }
 
-static inline UINT16 get_char_script(WCHAR c)
+static inline UINT16 get_char_script(UINT32 c)
 {
-    UINT16 script = get_table_entry(wine_scripts_table, c);
+    UINT16 script = get_table_entry_32(wine_scripts_table, c);
     return script == Script_Inherited ? Script_Unknown : script;
 }
 
@@ -648,17 +655,22 @@ static DWRITE_SCRIPT_ANALYSIS get_char_sa(UINT32 c)
 
     sa.script = get_char_script(c);
     sa.shapes = DWRITE_SCRIPT_SHAPES_DEFAULT;
-    if ((c >= 0x0001 && c <= 0x001f) ||
-            (c >= 0x007f && c <= 0x009f) ||
-            (c == 0x00ad) /* SOFT HYPHEN */ ||
-            (c >= 0x200b && c <= 0x200f) ||
-            (c >= 0x2028 && c <= 0x202e) ||
-            (c >= 0x2060 && c <= 0x2064) ||
-            (c >= 0x2066 && c <= 0x206f) ||
-            (c == 0xfeff) ||
-            (c == 0xfff9) ||
-            (c == 0xfffa) ||
-            (c == 0xfffb))
+    if ((c >= 0x0001 && c <= 0x001f)           /* C0 controls */
+            || (c >= 0x007f && c <= 0x009f)    /* DELETE, C1 controls */
+            || (c == 0x00ad)                   /* SOFT HYPHEN */
+            || (c >= 0x200b && c <= 0x200f)    /* ZWSP, ZWNJ, ZWJ, LRM, RLM */
+            || (c >= 0x2028 && c <= 0x202e)    /* Line/paragraph separators, LRE, RLE, PDF, LRO, RLO */
+            || (c >= 0x2060 && c <= 0x2064)    /* WJ, invisible operators */
+            || (c >= 0x2066 && c <= 0x2069)    /* LRI, RLI, FSI, PDI */
+            || (c >= 0x206a && c <= 0x206f)    /* Deprecated control characters */
+            || (c == 0xfeff)                   /* ZWBNSP */
+            || (c == 0xfff9)                   /* Interlinear annotation */
+            || (c == 0xfffa)
+            || (c == 0xfffb)
+            || (c >= 0x1bca0 && c <= 0x1bca3)  /* Shorthand format controls */
+            || (c >= 0x1d173 && c <= 0x1d17a)  /* Musical symbols: beams and slurs */
+            || (c == 0xe0001)                  /* Language tag, deprecated */
+            || (c >= 0xe0020 && c <= 0xe007f)) /* Tag components */
     {
         sa.shapes = DWRITE_SCRIPT_SHAPES_NO_VISUAL;
     }
@@ -673,14 +685,15 @@ static DWRITE_SCRIPT_ANALYSIS get_char_sa(UINT32 c)
 static HRESULT analyze_script(struct text_source_context *context, IDWriteTextAnalysisSink *sink)
 {
     DWRITE_SCRIPT_ANALYSIS sa;
-    UINT32 pos, seq_length;
+    UINT32 pos, length;
+    HRESULT hr;
 
     text_source_get_next_u32_char(context);
 
     sa = get_char_sa(context->ch);
 
     pos = context->position;
-    seq_length = 1;
+    length = text_source_get_char_length(context);
 
     while (!text_source_get_next_u32_char(context))
     {
@@ -704,24 +717,31 @@ static HRESULT analyze_script(struct text_source_context *context, IDWriteTextAn
 
         /* this is a length of a sequence to be reported next */
         if (sa.script == cur_sa.script && sa.shapes == cur_sa.shapes)
-            seq_length++;
-        else {
-            HRESULT hr;
-
-            hr = IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, seq_length, &sa);
+            length += text_source_get_char_length(context);
+        else
+        {
+            hr = IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, length, &sa);
             if (FAILED(hr)) return hr;
-            pos += seq_length;
-            seq_length = 1;
+            pos += length;
+            length = text_source_get_char_length(context);
             sa = cur_sa;
         }
     }
 
     /* one char length case or normal completion call */
-    return IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, seq_length, &sa);
+    return IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, length, &sa);
 }
 
-struct linebreaking_state {
+struct break_index
+{
+    unsigned int index;
+    UINT8 length;
+};
+
+struct linebreaking_state
+{
     DWRITE_LINE_BREAKPOINT *breakpoints;
+    struct break_index *breaks;
     UINT32 count;
 };
 
@@ -792,64 +812,110 @@ static BOOL has_strong_condition(DWRITE_BREAK_CONDITION old_condition, DWRITE_BR
 static inline void set_break_condition(UINT32 pos, enum BreakConditionLocation location, DWRITE_BREAK_CONDITION condition,
     struct linebreaking_state *state)
 {
-    if (location == BreakConditionBefore) {
-        if (has_strong_condition(state->breakpoints[pos].breakConditionBefore, condition))
+    unsigned int index = state->breaks[pos].index;
+
+    if (location == BreakConditionBefore)
+    {
+        if (has_strong_condition(state->breakpoints[index].breakConditionBefore, condition))
             return;
-        state->breakpoints[pos].breakConditionBefore = condition;
-        if (pos > 0)
-            state->breakpoints[pos-1].breakConditionAfter = condition;
+        state->breakpoints[index].breakConditionBefore = condition;
+        if (pos)
+        {
+            --pos;
+
+            index = state->breaks[pos].index;
+            if (state->breaks[pos].length > 1) index++;
+
+            state->breakpoints[index].breakConditionAfter = condition;
+        }
     }
-    else {
-        if (has_strong_condition(state->breakpoints[pos].breakConditionAfter, condition))
+    else
+    {
+        if (state->breaks[pos].length > 1) index++;
+
+        if (has_strong_condition(state->breakpoints[index].breakConditionAfter, condition))
             return;
-        state->breakpoints[pos].breakConditionAfter = condition;
+        state->breakpoints[index].breakConditionAfter = condition;
+
         if (pos + 1 < state->count)
-            state->breakpoints[pos+1].breakConditionBefore = condition;
+        {
+            index = state->breaks[pos + 1].index;
+            state->breakpoints[index].breakConditionBefore = condition;
+        }
     }
 }
 
 BOOL lb_is_newline_char(WCHAR ch)
 {
-    short c = get_table_entry(wine_linebreak_table, ch);
+    short c = get_table_entry_32(wine_linebreak_table, ch);
     return c == b_LF || c == b_NL || c == b_CR || c == b_BK;
 }
 
-static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_BREAKPOINT *breakpoints)
+static HRESULT analyze_linebreaks(IDWriteTextAnalysisSource *source, UINT32 position,
+        UINT32 length, DWRITE_LINE_BREAKPOINT *breakpoints)
 {
+    struct text_source_context context;
     struct linebreaking_state state;
+    struct break_index *breaks;
+    unsigned int count, index;
     short *break_class;
-    int i, j;
+    int i = 0, j;
+    HRESULT hr;
 
-    if (!(break_class = calloc(count, sizeof(*break_class))))
+    if (FAILED(hr = text_source_context_init(&context, source, position, length))) return hr;
+
+    if (!(breaks = calloc(length, sizeof(*breaks))))
         return E_OUTOFMEMORY;
 
-    state.breakpoints = breakpoints;
-    state.count = count;
-
-    for (i = 0; i < count; i++)
+    if (!(break_class = calloc(length, sizeof(*break_class))))
     {
-        break_class[i] = get_table_entry(wine_linebreak_table, text[i]);
+        free(breaks);
+        return E_OUTOFMEMORY;
+    }
 
-        breakpoints[i].breakConditionBefore = DWRITE_BREAK_CONDITION_NEUTRAL;
-        breakpoints[i].breakConditionAfter  = DWRITE_BREAK_CONDITION_NEUTRAL;
-        breakpoints[i].isWhitespace = !!iswspace(text[i]);
-        breakpoints[i].isSoftHyphen = text[i] == 0x00ad /* Unicode Soft Hyphen */;
-        breakpoints[i].padding = 0;
+    count = index = 0;
+    while (!text_source_get_next_u32_char(&context))
+    {
+        break_class[count] = get_table_entry_32(wine_linebreak_table, context.ch);
+        breaks[count].length = text_source_get_char_length(&context);
+        breaks[count].index = index;
 
         /* LB1 - resolve some classes. TODO: use external algorithms for these classes. */
-        switch (break_class[i])
+        switch (break_class[count])
         {
             case b_AI:
             case b_SA:
             case b_SG:
             case b_XX:
-                break_class[i] = b_AL;
+                break_class[count] = b_AL;
                 break;
             case b_CJ:
-                break_class[i] = b_NS;
+                break_class[count] = b_NS;
                 break;
         }
+
+        breakpoints[index].breakConditionBefore = DWRITE_BREAK_CONDITION_NEUTRAL;
+        breakpoints[index].breakConditionAfter  = DWRITE_BREAK_CONDITION_NEUTRAL;
+        breakpoints[index].isWhitespace = context.ch < 0xffff ? !!iswspace(context.ch) : 0;
+        breakpoints[index].isSoftHyphen = context.ch == 0x00ad /* Unicode Soft Hyphen */;
+        breakpoints[index].padding = 0;
+        ++index;
+
+        if (breaks[count].length > 1)
+        {
+            breakpoints[index] = breakpoints[index - 1];
+            /* Never break in surrogate pairs. */
+            breakpoints[index - 1].breakConditionAfter = DWRITE_BREAK_CONDITION_MAY_NOT_BREAK;
+            breakpoints[index].breakConditionBefore = DWRITE_BREAK_CONDITION_MAY_NOT_BREAK;
+            ++index;
+        }
+
+        ++count;
     }
+
+    state.breakpoints = breakpoints;
+    state.breaks = breaks;
+    state.count = count;
 
     /* LB2 - never break at the start */
     set_break_condition(0, BreakConditionBefore, DWRITE_BREAK_CONDITION_MAY_NOT_BREAK, &state);
@@ -1181,6 +1247,8 @@ static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_B
     }
 
     free(break_class);
+    free(breaks);
+
     return S_OK;
 }
 
@@ -1213,50 +1281,6 @@ static ULONG WINAPI dwritetextanalyzer_Release(IDWriteTextAnalyzer2 *iface)
     return 1;
 }
 
-/* This helper tries to get 'length' chars from a source, allocating a buffer only if source failed to provide enough
-   data after a first request. */
-static HRESULT get_text_source_ptr(IDWriteTextAnalysisSource *source, UINT32 position, UINT32 length, const WCHAR **text, WCHAR **buff)
-{
-    HRESULT hr;
-    UINT32 len;
-
-    *buff = NULL;
-    *text = NULL;
-    len = 0;
-    hr = IDWriteTextAnalysisSource_GetTextAtPosition(source, position, text, &len);
-    if (FAILED(hr)) return hr;
-
-    if (len < length) {
-        UINT32 read;
-
-        *buff = calloc(length, sizeof(WCHAR));
-        if (!*buff)
-            return E_OUTOFMEMORY;
-        if (*text)
-            memcpy(*buff, *text, len*sizeof(WCHAR));
-        read = len;
-
-        while (read < length && *text) {
-            *text = NULL;
-            len = 0;
-            hr = IDWriteTextAnalysisSource_GetTextAtPosition(source, position+read, text, &len);
-            if (FAILED(hr))
-            {
-                free(*buff);
-                return hr;
-            }
-            if (!*text)
-                break;
-            memcpy(*buff + read, *text, min(len, length-read)*sizeof(WCHAR));
-            read += len;
-        }
-
-        *text = *buff;
-    }
-
-    return hr;
-}
-
 static HRESULT WINAPI dwritetextanalyzer_AnalyzeScript(IDWriteTextAnalyzer2 *iface,
     IDWriteTextAnalysisSource* source, UINT32 position, UINT32 length, IDWriteTextAnalysisSink* sink)
 {
@@ -1273,14 +1297,24 @@ static HRESULT WINAPI dwritetextanalyzer_AnalyzeScript(IDWriteTextAnalyzer2 *ifa
     return analyze_script(&context, sink);
 }
 
+static inline unsigned int get_bidi_char_length(const struct bidi_char *c)
+{
+    return c->ch > 0xffff ? 2 : 1;
+}
+
+static inline UINT8 get_char_bidi_class(UINT32 ch)
+{
+    return get_table_entry_32(bidi_direction_table, ch);
+}
+
 static HRESULT WINAPI dwritetextanalyzer_AnalyzeBidi(IDWriteTextAnalyzer2 *iface,
     IDWriteTextAnalysisSource* source, UINT32 position, UINT32 length, IDWriteTextAnalysisSink* sink)
 {
-    UINT8 *levels = NULL, *explicit = NULL;
-    UINT8 baselevel, level, explicit_level;
-    UINT32 pos, i, seq_length;
-    WCHAR *buff = NULL;
-    const WCHAR *text;
+    struct text_source_context context;
+    UINT8 baselevel, resolved, explicit;
+    unsigned int i, chars_count = 0;
+    struct bidi_char *chars, *ptr;
+    UINT32 pos, seq_length;
     HRESULT hr;
 
     TRACE("%p, %u, %u, %p.\n", source, position, length, sink);
@@ -1288,49 +1322,57 @@ static HRESULT WINAPI dwritetextanalyzer_AnalyzeBidi(IDWriteTextAnalyzer2 *iface
     if (!length)
         return S_OK;
 
-    hr = get_text_source_ptr(source, position, length, &text, &buff);
-    if (FAILED(hr))
-        return hr;
+    if (!(chars = calloc(length, sizeof(*chars))))
+        return E_OUTOFMEMORY;
 
-    levels = calloc(length, sizeof(*levels));
-    explicit = calloc(length, sizeof(*explicit));
+    ptr = chars;
+    text_source_context_init(&context, source, position, length);
+    while (!text_source_get_next_u32_char(&context))
+    {
+        ptr->ch = context.ch;
+        ptr->nominal_bidi_class = ptr->bidi_class = get_char_bidi_class(context.ch);
+        ptr++;
 
-    if (!levels || !explicit) {
-        hr = E_OUTOFMEMORY;
-        goto done;
+        ++chars_count;
     }
 
+    /* Resolve levels using utf-32 codepoints, size differences are accounted for
+       when levels are reported with SetBidiLevel(). */
+
     baselevel = IDWriteTextAnalysisSource_GetParagraphReadingDirection(source);
-    hr = bidi_computelevels(text, length, baselevel, explicit, levels);
+    hr = bidi_computelevels(chars, chars_count, baselevel);
     if (FAILED(hr))
         goto done;
 
-    level = levels[0];
-    explicit_level = explicit[0];
     pos = position;
-    seq_length = 1;
+    resolved = chars->resolved;
+    explicit = chars->explicit;
+    seq_length = get_bidi_char_length(chars);
 
-    for (i = 1; i < length; i++) {
-        if (levels[i] == level && explicit[i] == explicit_level)
-            seq_length++;
-        else {
-            hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, seq_length, explicit_level, level);
+    for (i = 1, ptr = chars + 1; i < chars_count; ++i, ++ptr)
+    {
+        if (ptr->resolved == resolved && ptr->explicit == explicit)
+        {
+            seq_length += get_bidi_char_length(ptr);
+        }
+        else
+        {
+            hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, seq_length, explicit, resolved);
             if (FAILED(hr))
                 goto done;
 
             pos += seq_length;
-            seq_length = 1;
-            level = levels[i];
-            explicit_level = explicit[i];
+            seq_length = get_bidi_char_length(ptr);
+            resolved = ptr->resolved;
+            explicit = ptr->explicit;
         }
     }
+
     /* one char length case or normal completion call */
-    hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, seq_length, explicit_level, level);
+    hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, seq_length, explicit, resolved);
 
 done:
-    free(explicit);
-    free(levels);
-    free(buff);
+    free(chars);
 
     return hr;
 }
@@ -1346,64 +1388,23 @@ static HRESULT WINAPI dwritetextanalyzer_AnalyzeNumberSubstitution(IDWriteTextAn
 }
 
 static HRESULT WINAPI dwritetextanalyzer_AnalyzeLineBreakpoints(IDWriteTextAnalyzer2 *iface,
-    IDWriteTextAnalysisSource* source, UINT32 position, UINT32 length, IDWriteTextAnalysisSink* sink)
+        IDWriteTextAnalysisSource *source, UINT32 position, UINT32 length, IDWriteTextAnalysisSink *sink)
 {
-    DWRITE_LINE_BREAKPOINT *breakpoints = NULL;
-    WCHAR *buff = NULL;
-    const WCHAR *text;
+    DWRITE_LINE_BREAKPOINT *breakpoints;
     HRESULT hr;
-    UINT32 len;
 
     TRACE("%p, %u, %u, %p.\n", source, position, length, sink);
 
-    if (length == 0)
+    if (!length)
         return S_OK;
 
-    /* get some, check for length */
-    text = NULL;
-    len = 0;
-    hr = IDWriteTextAnalysisSource_GetTextAtPosition(source, position, &text, &len);
-    if (FAILED(hr)) return hr;
-
-    if (len < length) {
-        UINT32 read;
-
-        if (!(buff = calloc(length, sizeof(*buff))))
-            return E_OUTOFMEMORY;
-        if (text)
-            memcpy(buff, text, len*sizeof(WCHAR));
-        read = len;
-
-        while (read < length && text) {
-            text = NULL;
-            len = 0;
-            hr = IDWriteTextAnalysisSource_GetTextAtPosition(source, position+read, &text, &len);
-            if (FAILED(hr))
-                goto done;
-            if (!text)
-                break;
-            memcpy(&buff[read], text, min(len, length-read)*sizeof(WCHAR));
-            read += len;
-        }
-
-        text = buff;
-    }
-
     if (!(breakpoints = calloc(length, sizeof(*breakpoints))))
-    {
-        hr = E_OUTOFMEMORY;
-        goto done;
-    }
+        return E_OUTOFMEMORY;
 
-    hr = analyze_linebreaks(text, length, breakpoints);
-    if (FAILED(hr))
-        goto done;
+    if (SUCCEEDED(hr = analyze_linebreaks(source, position, length, breakpoints)))
+        hr = IDWriteTextAnalysisSink_SetLineBreakpoints(sink, position, length, breakpoints);
 
-    hr = IDWriteTextAnalysisSink_SetLineBreakpoints(sink, position, length, breakpoints);
-
-done:
     free(breakpoints);
-    free(buff);
 
     return hr;
 }
@@ -2367,8 +2368,19 @@ static ULONG WINAPI fontfallback_Release(IDWriteFontFallback1 *iface)
     return IDWriteFactory7_Release(fallback->factory);
 }
 
-static UINT32 fallback_font_get_supported_length(IDWriteFont3 *font, const struct fallback_mapping *mapping,
-        IDWriteTextAnalysisSource *source, UINT32 position, UINT32 length)
+static inline BOOL fallback_is_uvs(const struct text_source_context *context)
+{
+    /* MONGOLIAN FREE VARIATION SELECTOR ONE..THREE */
+    if (context->ch >= 0x180b && context->ch <= 0x180d) return TRUE;
+    /* VARIATION SELECTOR-1..16 */
+    if (context->ch >= 0xfe00 && context->ch <= 0xfe0f) return TRUE;
+    /* VARIATION SELECTOR-17..256 */
+    if (context->ch >= 0xe0100 && context->ch <= 0xe01ef) return TRUE;
+    return FALSE;
+}
+
+static UINT32 fallback_font_get_supported_length(IDWriteFont3 *font, IDWriteTextAnalysisSource *source,
+        UINT32 position, UINT32 length)
 {
     struct text_source_context context;
     UINT32 mapped = 0;
@@ -2376,9 +2388,12 @@ static UINT32 fallback_font_get_supported_length(IDWriteFont3 *font, const struc
     text_source_context_init(&context, source, position, length);
     while (!text_source_get_next_u32_char(&context))
     {
-        if (mapping && !fallback_mapping_contains_character(mapping, context.ch)) break;
-        if (!IDWriteFont3_HasCharacter(font, context.ch)) break;
-        mapped += context.ch > 0xffff ? 2 : 1;
+        /* Ignore selectors that are not leading. */
+        if (!mapped || !fallback_is_uvs(&context))
+        {
+            if (!IDWriteFont3_HasCharacter(font, context.ch)) break;
+        }
+        mapped += text_source_get_char_length(&context);
     }
 
     return mapped;
@@ -2415,17 +2430,20 @@ static HRESULT fallback_map_characters(const struct dwrite_fontfallback *fallbac
 
     /* Find a mapping for given locale. */
     text_source_get_next_u32_char(&context);
-    if (!(mapping = find_fallback_mapping(data, locale, context.ch)))
-    {
-        *ret_font = NULL;
-        *ret_length = 0;
-
-        return S_OK;
-    }
-
+    mapping = find_fallback_mapping(data, locale, context.ch);
+    mapped = text_source_get_char_length(&context);
     while (!text_source_get_next_u32_char(&context))
     {
         if (find_fallback_mapping(data, locale, context.ch) != mapping) break;
+        mapped += text_source_get_char_length(&context);
+    }
+
+    if (!mapping)
+    {
+        *ret_font = NULL;
+        *ret_length = mapped;
+
+        return S_OK;
     }
 
     /* Go through families in the mapping, use first family that supports some of the input. */
@@ -2434,7 +2452,7 @@ static HRESULT fallback_map_characters(const struct dwrite_fontfallback *fallbac
         if (SUCCEEDED(create_matching_font(mapping->collection ? mapping->collection : fallback->systemcollection,
                 mapping->families[i], weight, style, stretch, &IID_IDWriteFont3, (void **)&font)))
         {
-            if (!(mapped = fallback_font_get_supported_length(font, mapping, source, position, length)))
+            if (!(mapped = fallback_font_get_supported_length(font, source, position, mapped)))
             {
                 IDWriteFont3_Release(font);
                 continue;
@@ -2518,7 +2536,7 @@ static HRESULT WINAPI fontfallback_MapCharacters(IDWriteFontFallback1 *iface, ID
         if (SUCCEEDED(create_matching_font(basecollection, basefamily, weight, style, stretch,
                 &IID_IDWriteFont, (void **)&font)))
         {
-            if ((*mapped_length = fallback_font_get_supported_length(font, NULL, source, position, length)))
+            if ((*mapped_length = fallback_font_get_supported_length(font, source, position, length)))
             {
                 *ret_font = (IDWriteFont *)font;
                 *scale = 1.0f;

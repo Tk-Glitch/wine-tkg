@@ -2619,4 +2619,3 @@ HRESULT ServerXMLHTTP_create(void **obj)
 
     return S_OK;
 }
-

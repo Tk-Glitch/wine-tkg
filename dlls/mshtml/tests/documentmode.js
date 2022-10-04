@@ -1201,6 +1201,57 @@ sync_test("map_obj", function() {
     ok(r === 1, "r = " + r);
 });
 
+sync_test("storage", function() {
+    var v = document.documentMode, i, r, list;
+
+    sessionStorage["add-at-end"] = 0;
+    sessionStorage.removeItem("add-at-end");
+
+    sessionStorage.setItem("foobar", "1234");
+    ok("foobar" in sessionStorage, "foobar not in sessionStorage");
+    r = sessionStorage.foobar;
+    ok(r === "1234", "sessionStorage.foobar = " + r);
+    sessionStorage.barfoo = 4321;
+    r = sessionStorage.getItem("barfoo");
+    ok(r === "4321", "sessionStorage.barfoo = " + r);
+    sessionStorage.setItem("abcd", "blah");
+    sessionStorage.dcba = "test";
+
+    // Order isn't consistent, but changes are reflected during the enumeration.
+    // Elements that were already traversed in DISPID (even if removed before
+    // the enumeration) are not enumerated, even if re-added during the enum.
+    i = 0; list = [ "foobar", "barfoo", "abcd", "dcba" ];
+    for(r in sessionStorage) {
+        for(var j = 0; j < list.length; j++)
+            if(r === list[j])
+                break;
+        ok(j < list.length, "got '" + r + "' enumerating");
+        list.splice(j, 1);
+        if(i === 1) {
+            sessionStorage.removeItem(list[0]);
+            sessionStorage.setItem("new", "new");
+            list.splice(0, 1, "new");
+        }
+        if(!list.length)
+            sessionStorage.setItem("add-at-end", "0");
+        i++;
+    }
+    ok(i === 4, "enum did " + i + " iterations");
+
+    try {
+        delete sessionStorage.foobar;
+        ok(v >= 8, "expected exception deleting sessionStorage.foobar");
+        ok(!("foobar" in sessionStorage), "foobar in sessionStorage after deletion");
+        r = sessionStorage.getItem("foobar");
+        ok(r === null, "sessionStorage.foobar after deletion = " + r);
+    }catch(e) {
+        ok(v < 8, "did not expect exception deleting sessionStorage.foobar");
+        ok(e.number === 0xa01bd - 0x80000000, "deleting sessionStorage.foobar threw = " + e.number);
+    }
+
+    sessionStorage.clear();
+});
+
 sync_test("elem_attr", function() {
     var v = document.documentMode;
     var elem = document.createElement("div"), r;

@@ -273,7 +273,9 @@ static void check_service_interface_(unsigned int line, void *iface_ptr, REFGUID
 
 static void test_interfaces(void)
 {
-    IBaseFilter *filter = create_evr();
+    IBaseFilter *filter = create_evr(), *filter2;
+    IUnknown *unk;
+    HRESULT hr;
     ULONG ref;
 
     check_interface(filter, &IID_IAMFilterMiscFlags, TRUE);
@@ -284,6 +286,7 @@ static void test_interfaces(void)
     check_interface(filter, &IID_IMediaFilter, TRUE);
     check_interface(filter, &IID_IMediaPosition, TRUE);
     check_interface(filter, &IID_IMediaSeeking, TRUE);
+    check_interface(filter, &IID_IMediaEventSink, TRUE);
     check_interface(filter, &IID_IPersist, TRUE);
     check_interface(filter, &IID_IUnknown, TRUE);
 
@@ -295,6 +298,15 @@ static void test_interfaces(void)
     check_interface(filter, &IID_IPin, FALSE);
     check_interface(filter, &IID_IReferenceClock, FALSE);
     check_interface(filter, &IID_IVideoWindow, FALSE);
+
+    /* The scope of IMediaEventSink */
+    hr = IBaseFilter_QueryInterface(filter, &IID_IMediaEventSink, (void **)&unk);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IBaseFilter, (void **)&filter2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(filter == filter2, "Unexpected pointer.\n");
+    IBaseFilter_Release(filter2);
+    IUnknown_Release(unk);
 
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got unexpected refcount %ld.\n", ref);
@@ -586,6 +598,93 @@ static void test_display_control(void)
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
     IMFVideoDisplayControl_Release(display_control);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_service_lookup(void)
+{
+    IBaseFilter *filter = create_evr();
+    IMFTopologyServiceLookup *service_lookup;
+    IUnknown *unk;
+    DWORD count;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IBaseFilter_QueryInterface(filter, &IID_IMFTopologyServiceLookup, (void **)&service_lookup);
+    if (FAILED(hr))
+    {
+        win_skip("IMFTopologyServiceLookup is not exposed.\n");
+        IBaseFilter_Release(filter);
+        return;
+    }
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFTopologyServiceLookup_QueryInterface(service_lookup, &IID_IBaseFilter, (void **)&unk);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(unk == (IUnknown *)filter, "Unexpected pointer.\n");
+    IUnknown_Release(unk);
+
+    count = 1;
+    hr = IMFTopologyServiceLookup_LookupService(service_lookup, MF_SERVICE_LOOKUP_GLOBAL, 0,
+            &MR_VIDEO_RENDER_SERVICE, &IID_IMediaEventSink, (void **)&unk, &count);
+    ok(hr == MF_E_NOTACCEPTING, "Unexpected hr %#lx.\n", hr);
+
+    IMFTopologyServiceLookup_Release(service_lookup);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_query_accept(void)
+{
+    IBaseFilter *filter = create_evr();
+    AM_MEDIA_TYPE req_mt = {{0}};
+    VIDEOINFOHEADER vih =
+    {
+        {0}, {0}, 0, 0, 0,
+        {sizeof(BITMAPINFOHEADER), 32, 24, 1, 0, 0xdeadbeef}
+    };
+    unsigned int i;
+    HRESULT hr;
+    ULONG ref;
+    IPin *pin;
+
+    static const GUID *subtype_tests[] =
+    {
+        &MEDIASUBTYPE_RGB32,
+        &MEDIASUBTYPE_YUY2,
+    };
+
+    static const GUID *unsupported_subtype_tests[] =
+    {
+        &MEDIASUBTYPE_RGB8,
+    };
+
+    IBaseFilter_FindPin(filter, L"EVR Input0", &pin);
+
+    req_mt.majortype = MEDIATYPE_Video;
+    req_mt.formattype = FORMAT_VideoInfo;
+    req_mt.cbFormat = sizeof(VIDEOINFOHEADER);
+    req_mt.pbFormat = (BYTE *)&vih;
+
+    for (i = 0; i < ARRAY_SIZE(subtype_tests); ++i)
+    {
+        memcpy(&req_mt.subtype, subtype_tests[i], sizeof(GUID));
+        hr = IPin_QueryAccept(pin, &req_mt);
+        todo_wine_if(i)
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(unsupported_subtype_tests); ++i)
+    {
+        memcpy(&req_mt.subtype, unsupported_subtype_tests[i], sizeof(GUID));
+        hr = IPin_QueryAccept(pin, &req_mt);
+        ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
+    }
+
+    IPin_Release(pin);
 
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
@@ -3264,6 +3363,8 @@ START_TEST(evr)
     test_unconnected_eos();
     test_misc_flags();
     test_display_control();
+    test_service_lookup();
+    test_query_accept();
 
     test_default_mixer();
     test_default_mixer_type_negotiation();
