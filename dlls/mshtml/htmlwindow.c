@@ -3243,7 +3243,7 @@ static HRESULT WINAPI window_private_postMessage(IWineHTMLWindowPrivate *iface, 
     TRACE("iface %p, msg %s, targetOrigin %s, transfer %s\n", iface, debugstr_variant(&msg),
           debugstr_w(targetOrigin), debugstr_variant(&transfer));
 
-    if(V_VT(&transfer) != VT_EMPTY)
+    if(V_VT(&transfer) != VT_EMPTY && V_VT(&transfer) != VT_ERROR)
         FIXME("transfer not implemented, ignoring\n");
 
     hres = check_target_origin(window, targetOrigin);
@@ -3874,6 +3874,20 @@ static HRESULT HTMLWindow_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD 
     return hres;
 }
 
+static HRESULT HTMLWindow_next_dispid(DispatchEx *dispex, DISPID id, DISPID *pid)
+{
+    DWORD idx = (id == DISPID_STARTENUM) ? 0 : id - MSHTML_DISPID_CUSTOM_MIN + 1;
+    HTMLInnerWindow *This = impl_from_DispatchEx(dispex);
+
+    while(idx < This->global_prop_cnt && This->global_props[idx].type != GLOBAL_DISPEXVAR)
+        idx++;
+    if(idx >= This->global_prop_cnt)
+        return S_FALSE;
+
+    *pid = idx + MSHTML_DISPID_CUSTOM_MIN;
+    return S_OK;
+}
+
 static compat_mode_t HTMLWindow_get_compat_mode(DispatchEx *dispex)
 {
     HTMLInnerWindow *This = impl_from_DispatchEx(dispex);
@@ -3971,7 +3985,7 @@ static const event_target_vtbl_t HTMLWindow_event_target_vtbl = {
         HTMLWindow_get_name,
         HTMLWindow_invoke,
         NULL,
-        NULL,
+        HTMLWindow_next_dispid,
         HTMLWindow_get_compat_mode,
         NULL
     },

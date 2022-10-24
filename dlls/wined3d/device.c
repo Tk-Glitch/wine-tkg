@@ -1165,7 +1165,7 @@ bool wined3d_device_gl_create_bo(struct wined3d_device_gl *device_gl, struct win
     GLsizeiptr buffer_offset = 0;
     GLuint id = 0;
 
-    TRACE("device_gl %p, context_gl %p, size %lu, binding %#x, usage %#x, coherent %#x, flags %#x, bo %p.\n",
+    TRACE("device_gl %p, context_gl %p, size %Iu, binding %#x, usage %#x, coherent %#x, flags %#x, bo %p.\n",
             device_gl, context_gl, size, binding, usage, coherent, flags, bo);
 
     if (gl_info->supported[ARB_BUFFER_STORAGE])
@@ -5711,6 +5711,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     struct wined3d_view_desc view_desc;
     BOOL backbuffer_resized, windowed;
     HRESULT hr = WINED3D_OK;
+    HWND device_window;
     unsigned int i;
 
     TRACE("device %p, swapchain_desc %p, mode %p, callback %p, reset_state %#x.\n",
@@ -5787,12 +5788,13 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     current_desc->refresh_rate = swapchain_desc->refresh_rate;
     current_desc->auto_restore_display_mode = swapchain_desc->auto_restore_display_mode;
 
-    if (swapchain_desc->device_window && swapchain_desc->device_window != current_desc->device_window)
+    device_window = swapchain_desc->device_window ? swapchain_desc->device_window : device->create_parms.focus_window;
+    if (device_window && device_window != current_desc->device_window)
     {
         TRACE("Changing the device window from %p to %p.\n",
-                current_desc->device_window, swapchain_desc->device_window);
-        current_desc->device_window = swapchain_desc->device_window;
-        swapchain_state->device_window = swapchain_desc->device_window;
+                current_desc->device_window, device_window);
+        current_desc->device_window = device_window;
+        swapchain_state->device_window = device_window;
         wined3d_swapchain_set_window(swapchain, NULL);
     }
 

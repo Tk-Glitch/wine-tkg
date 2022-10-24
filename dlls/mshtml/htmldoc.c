@@ -4818,30 +4818,72 @@ static inline HTMLDocument *impl_from_IDispatchEx(IDispatchEx *iface)
     return CONTAINING_RECORD(iface, HTMLDocument, IDispatchEx_iface);
 }
 
-static HRESULT dispid_from_elem_name(HTMLDocumentNode *This, BSTR name, DISPID *dispid)
+static HRESULT has_elem_name(nsIDOMHTMLDocument *nsdoc, const WCHAR *name)
 {
-    nsIDOMNodeList *node_list;
-    nsAString name_str;
-    UINT32 len;
-    unsigned i;
+    static const WCHAR fmt[] = L":-moz-any(applet,embed,form,iframe,img,object)[name=\"%s\"]";
+    WCHAR buf[128], *selector = buf;
+    nsAString selector_str;
+    nsIDOMElement *nselem;
     nsresult nsres;
+    size_t len;
 
-    if(!This->nsdoc)
-        return DISP_E_UNKNOWNNAME;
+    len = wcslen(name) + ARRAY_SIZE(fmt) - 2 /* %s */;
+    if(len > ARRAY_SIZE(buf) && !(selector = heap_alloc(len * sizeof(WCHAR))))
+        return E_OUTOFMEMORY;
+    swprintf(selector, len, fmt, name);
 
-    nsAString_InitDepend(&name_str, name);
-    nsres = nsIDOMHTMLDocument_GetElementsByName(This->nsdoc, &name_str, &node_list);
-    nsAString_Finish(&name_str);
+    nsAString_InitDepend(&selector_str, selector);
+    nsres = nsIDOMHTMLDocument_QuerySelector(nsdoc, &selector_str, &nselem);
+    nsAString_Finish(&selector_str);
+    if(selector != buf)
+        heap_free(selector);
     if(NS_FAILED(nsres))
-        return E_FAIL;
+        return map_nsresult(nsres);
 
-    nsres = nsIDOMNodeList_GetLength(node_list, &len);
-    nsIDOMNodeList_Release(node_list);
-    if(NS_FAILED(nsres))
-        return E_FAIL;
-
-    if(!len)
+    if(!nselem)
         return DISP_E_UNKNOWNNAME;
+    nsIDOMElement_Release(nselem);
+    return S_OK;
+}
+
+static HRESULT get_elem_by_name_or_id(nsIDOMHTMLDocument *nsdoc, const WCHAR *name, nsIDOMElement **ret)
+{
+    static const WCHAR fmt[] = L":-moz-any(embed,form,iframe,img):-moz-any([name=\"%s\"],[id=\"%s\"][name]),"
+                               L":-moz-any(applet,object):-moz-any([name=\"%s\"],[id=\"%s\"])";
+    WCHAR buf[384], *selector = buf;
+    nsAString selector_str;
+    nsIDOMElement *nselem;
+    nsresult nsres;
+    size_t len;
+
+    len = wcslen(name) * 4 + ARRAY_SIZE(fmt) - 8 /* %s */;
+    if(len > ARRAY_SIZE(buf) && !(selector = heap_alloc(len * sizeof(WCHAR))))
+        return E_OUTOFMEMORY;
+    swprintf(selector, len, fmt, name, name, name, name);
+
+    nsAString_InitDepend(&selector_str, selector);
+    nsres = nsIDOMHTMLDocument_QuerySelector(nsdoc, &selector_str, &nselem);
+    nsAString_Finish(&selector_str);
+    if(selector != buf)
+        heap_free(selector);
+    if(NS_FAILED(nsres))
+        return map_nsresult(nsres);
+
+    if(ret) {
+        *ret = nselem;
+        return S_OK;
+    }
+
+    if(nselem) {
+        nsIDOMElement_Release(nselem);
+        return S_OK;
+    }
+    return DISP_E_UNKNOWNNAME;
+}
+
+static HRESULT dispid_from_elem_name(HTMLDocumentNode *This, const WCHAR *name, DISPID *dispid)
+{
+    unsigned i;
 
     for(i=0; i < This->elem_vars_cnt; i++) {
         if(!wcscmp(name, This->elem_vars[i])) {
@@ -4939,11 +4981,19 @@ static HRESULT WINAPI DocDispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName,
     HTMLDocument *This = impl_from_IDispatchEx(iface);
     HRESULT hres;
 
-    hres = IDispatchEx_GetDispID(This->dispex, bstrName, grfdex, pid);
+    hres = IDispatchEx_GetDispID(This->dispex, bstrName, grfdex & ~fdexNameEnsure, pid);
     if(hres != DISP_E_UNKNOWNNAME)
         return hres;
 
-    return  dispid_from_elem_name(This->doc_node, bstrName, pid);
+    if(This->doc_node->nsdoc) {
+        hres = get_elem_by_name_or_id(This->doc_node->nsdoc, bstrName, NULL);
+        if(SUCCEEDED(hres))
+            hres = dispid_from_elem_name(This->doc_node, bstrName, pid);
+    }
+
+    if(hres == DISP_E_UNKNOWNNAME && (grfdex & fdexNameEnsure))
+        hres = IDispatchEx_GetDispID(This->dispex, bstrName, grfdex, pid);
+    return hres;
 }
 
 static HRESULT WINAPI DocDispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
@@ -5847,41 +5897,100 @@ static HRESULT HTMLDocumentNode_invoke(DispatchEx *dispex, DISPID id, LCID lcid,
         VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
-    nsIDOMNodeList *node_list;
-    nsAString name_str;
-    nsIDOMNode *nsnode;
+    nsIDOMElement *nselem;
     HTMLDOMNode *node;
     unsigned i;
-    nsresult nsres;
     HRESULT hres;
 
-    if(flags != DISPATCH_PROPERTYGET && flags != (DISPATCH_METHOD|DISPATCH_PROPERTYGET)) {
-        FIXME("unsupported flags %x\n", flags);
-        return E_NOTIMPL;
-    }
+    if(flags != DISPATCH_PROPERTYGET && flags != (DISPATCH_METHOD|DISPATCH_PROPERTYGET))
+        return MSHTML_E_INVALID_PROPERTY;
 
     i = id - MSHTML_DISPID_CUSTOM_MIN;
 
     if(!This->nsdoc || i >= This->elem_vars_cnt)
         return DISP_E_MEMBERNOTFOUND;
 
-    nsAString_InitDepend(&name_str, This->elem_vars[i]);
-    nsres = nsIDOMHTMLDocument_GetElementsByName(This->nsdoc, &name_str, &node_list);
-    nsAString_Finish(&name_str);
-    if(NS_FAILED(nsres))
-        return E_FAIL;
-
-    nsres = nsIDOMNodeList_Item(node_list, 0, &nsnode);
-    nsIDOMNodeList_Release(node_list);
-    if(NS_FAILED(nsres) || !nsnode)
+    hres = get_elem_by_name_or_id(This->nsdoc, This->elem_vars[i], &nselem);
+    if(FAILED(hres))
+        return hres;
+    if(!nselem)
         return DISP_E_MEMBERNOTFOUND;
 
-    hres = get_node(nsnode, TRUE, &node);
+    hres = get_node((nsIDOMNode*)nselem, TRUE, &node);
+    nsIDOMElement_Release(nselem);
     if(FAILED(hres))
         return hres;
 
     V_VT(res) = VT_DISPATCH;
     V_DISPATCH(res) = (IDispatch*)&node->IHTMLDOMNode_iface;
+    return S_OK;
+}
+
+static HRESULT HTMLDocumentNode_next_dispid(DispatchEx *dispex, DISPID id, DISPID *pid)
+{
+    DWORD idx = (id == DISPID_STARTENUM) ? 0 : id - MSHTML_DISPID_CUSTOM_MIN + 1;
+    HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
+    nsIDOMNodeList *node_list;
+    const PRUnichar *name;
+    nsIDOMElement *nselem;
+    nsIDOMNode *nsnode;
+    nsAString nsstr;
+    nsresult nsres;
+    HRESULT hres;
+    UINT32 i;
+
+    if(!This->nsdoc)
+        return S_FALSE;
+
+    while(idx < This->elem_vars_cnt) {
+        hres = has_elem_name(This->nsdoc, This->elem_vars[idx]);
+        if(SUCCEEDED(hres)) {
+            *pid = idx + MSHTML_DISPID_CUSTOM_MIN;
+            return S_OK;
+        }
+        if(hres != DISP_E_UNKNOWNNAME)
+            return hres;
+        idx++;
+    }
+
+    /* Populate possibly missing DISPIDs */
+    nsAString_InitDepend(&nsstr, L":-moz-any(applet,embed,form,iframe,img,object)[name]");
+    nsres = nsIDOMHTMLDocument_QuerySelectorAll(This->nsdoc, &nsstr, &node_list);
+    nsAString_Finish(&nsstr);
+    if(NS_FAILED(nsres))
+        return map_nsresult(nsres);
+
+    for(i = 0, hres = S_OK; SUCCEEDED(hres); i++) {
+        nsres = nsIDOMNodeList_Item(node_list, i, &nsnode);
+        if(NS_FAILED(nsres)) {
+            hres = map_nsresult(nsres);
+            break;
+        }
+        if(!nsnode)
+            break;
+
+        nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMElement, (void**)&nselem);
+        nsIDOMNode_Release(nsnode);
+        if(nsres != S_OK)
+            continue;
+
+        nsres = get_elem_attr_value(nselem, L"name", &nsstr, &name);
+        nsIDOMElement_Release(nselem);
+        if(NS_FAILED(nsres))
+            hres = map_nsresult(nsres);
+        else {
+            hres = dispid_from_elem_name(This, name, &id);
+            nsAString_Finish(&nsstr);
+        }
+    }
+    nsIDOMNodeList_Release(node_list);
+    if(FAILED(hres))
+        return hres;
+
+    if(idx >= This->elem_vars_cnt)
+        return S_FALSE;
+
+    *pid = idx + MSHTML_DISPID_CUSTOM_MIN;
     return S_OK;
 }
 
@@ -5943,7 +6052,7 @@ static const event_target_vtbl_t HTMLDocumentNode_event_target_vtbl = {
         HTMLDocumentNode_get_name,
         HTMLDocumentNode_invoke,
         NULL,
-        NULL,
+        HTMLDocumentNode_next_dispid,
         HTMLDocumentNode_get_compat_mode,
         NULL
     },
@@ -5975,6 +6084,7 @@ static const tid_t HTMLDocumentNode_iface_tids[] = {
 static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 {
     static const dispex_hook_t document2_hooks[] = {
+        {DISPID_IHTMLDOCUMENT2_URL,      NULL, L"URL"},
         {DISPID_IHTMLDOCUMENT2_LOCATION, HTMLDocumentNode_location_hook},
         {DISPID_UNKNOWN}
     };
@@ -6307,6 +6417,7 @@ static const tid_t HTMLDocumentObj_iface_tids[] = {
 static void HTMLDocumentObj_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 {
     static const dispex_hook_t document2_hooks[] = {
+        {DISPID_IHTMLDOCUMENT2_URL,      NULL, L"URL"},
         {DISPID_IHTMLDOCUMENT2_LOCATION, HTMLDocumentObj_location_hook},
         {DISPID_UNKNOWN}
     };

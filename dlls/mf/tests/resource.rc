@@ -26,11 +26,20 @@ audiodata.bin RCDATA audiodata.bin
 /* @makedep: audioconvdata.bin */
 audioconvdata.bin RCDATA audioconvdata.bin
 
+/* @makedep: aacencdata.bin */
+aacencdata.bin RCDATA aacencdata.bin
+
+/* @makedep: aacdecdata.bin */
+aacdecdata.bin RCDATA aacdecdata.bin
+
 /* @makedep: wmaencdata.bin */
 wmaencdata.bin RCDATA wmaencdata.bin
 
 /* @makedep: wmadecdata.bin */
 wmadecdata.bin RCDATA wmadecdata.bin
+
+/* @makedep: wmvencdata.bin */
+wmvencdata.bin RCDATA wmvencdata.bin
 
 /* Generated with:
  *  gst-launch-1.0 filesrc location=dlls/mf/tests/audiodata.bin ! \
@@ -59,6 +68,10 @@ h264data.bin RCDATA h264data.bin
 nv12frame.bmp RCDATA nv12frame.bmp
 
 /* Generated from running the tests on Windows */
+/* @makedep: nv12frame-grabber.bmp */
+nv12frame-grabber.bmp RCDATA nv12frame-grabber.bmp
+
+/* Generated from running the tests on Windows */
 /* @makedep: i420frame.bmp */
 i420frame.bmp RCDATA i420frame.bmp
 
@@ -69,3 +82,16 @@ rgb32frame.bmp RCDATA rgb32frame.bmp
 /* Generated from running the tests on Windows */
 /* @makedep: rgb32frame-vp.bmp */
 rgb32frame-vp.bmp RCDATA rgb32frame-vp.bmp
+
+/* Generated from running the tests on Windows */
+/* @makedep: rgb32frame-grabber.bmp */
+rgb32frame-grabber.bmp RCDATA rgb32frame-grabber.bmp
+
+/* Generated with:
+ *  gst-launch-1.0 videotestsrc num-buffers=60 pattern=smpte100 ! \
+ *      video/x-raw,format=I420,width=64,height=64,framerate=30000/1001 ! \
+ *      videoflip method=clockwise ! videoconvert ! \
+ *      x264enc ! mp4mux ! filesink location=dlls/mf/tests/test.mp4
+ */
+/* @makedep: test.mp4 */
+test.mp4 RCDATA test.mp4

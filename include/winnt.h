@@ -2337,6 +2337,8 @@ extern struct _TEB * WINAPI NtCurrentTeb(void);
 #define IO_REPARSE_TAG_ONEDRIVE         __MSABI_LONG(0x80000021)
 #define IO_REPARSE_TAG_GVFS_TOMBSTONE   __MSABI_LONG(0xA0000022)
 
+#define IsReparseTagNameSurrogate(x)    (((x) & (1<<29)) == (1<<29))
+
 /*
  * File formats definitions
  */

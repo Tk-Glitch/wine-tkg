@@ -372,7 +372,7 @@ static BOOL match_token(const char *haystack, const char *needle)
 
         for (q = needle; *q && *p && tolower(*p) == tolower(*q); q++)
             p++;
-        if (! *q && (isspace(*p) || !*p))
+        if (! *q && (isspace(*p) || *p == ':' || !*p))
             return TRUE;
 
         while (*p && ! isspace(*p))

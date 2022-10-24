@@ -34,42 +34,18 @@ struct wg_format
 {
     enum wg_major_type
     {
-        WG_MAJOR_TYPE_UNKNOWN,
-        WG_MAJOR_TYPE_VIDEO,
+        WG_MAJOR_TYPE_UNKNOWN = 0,
         WG_MAJOR_TYPE_AUDIO,
-        WG_MAJOR_TYPE_MPEG1_AUDIO,
-        WG_MAJOR_TYPE_WMA,
-        WG_MAJOR_TYPE_H264,
+        WG_MAJOR_TYPE_AUDIO_MPEG1,
+        WG_MAJOR_TYPE_AUDIO_MPEG4,
+        WG_MAJOR_TYPE_AUDIO_WMA,
+        WG_MAJOR_TYPE_VIDEO,
+        WG_MAJOR_TYPE_VIDEO_CINEPAK,
+        WG_MAJOR_TYPE_VIDEO_H264,
     } major_type;
 
     union
     {
-        struct
-        {
-            enum wg_video_format
-            {
-                WG_VIDEO_FORMAT_UNKNOWN,
-
-                WG_VIDEO_FORMAT_BGRA,
-                WG_VIDEO_FORMAT_BGRx,
-                WG_VIDEO_FORMAT_BGR,
-                WG_VIDEO_FORMAT_RGB15,
-                WG_VIDEO_FORMAT_RGB16,
-
-                WG_VIDEO_FORMAT_AYUV,
-                WG_VIDEO_FORMAT_I420,
-                WG_VIDEO_FORMAT_NV12,
-                WG_VIDEO_FORMAT_UYVY,
-                WG_VIDEO_FORMAT_YUY2,
-                WG_VIDEO_FORMAT_YV12,
-                WG_VIDEO_FORMAT_YVYU,
-
-                WG_VIDEO_FORMAT_CINEPAK,
-            } format;
-            int32_t width, height;
-            uint32_t fps_n, fps_d;
-            RECT padding;
-        } video;
         struct
         {
             enum wg_audio_format
@@ -93,7 +69,13 @@ struct wg_format
             uint32_t layer;
             uint32_t rate;
             uint32_t channels;
-        } mpeg1_audio;
+        } audio_mpeg1;
+        struct
+        {
+            uint32_t payload_type;
+            uint32_t codec_data_len;
+            unsigned char codec_data[64];
+        } audio_mpeg4;
         struct
         {
             uint32_t version;
@@ -104,14 +86,46 @@ struct wg_format
             uint32_t block_align;
             uint32_t codec_data_len;
             unsigned char codec_data[64];
-        } wma;
+        } audio_wma;
+
+        struct
+        {
+            enum wg_video_format
+            {
+                WG_VIDEO_FORMAT_UNKNOWN,
+
+                WG_VIDEO_FORMAT_BGRA,
+                WG_VIDEO_FORMAT_BGRx,
+                WG_VIDEO_FORMAT_BGR,
+                WG_VIDEO_FORMAT_RGB15,
+                WG_VIDEO_FORMAT_RGB16,
+
+                WG_VIDEO_FORMAT_AYUV,
+                WG_VIDEO_FORMAT_I420,
+                WG_VIDEO_FORMAT_NV12,
+                WG_VIDEO_FORMAT_UYVY,
+                WG_VIDEO_FORMAT_YUY2,
+                WG_VIDEO_FORMAT_YV12,
+                WG_VIDEO_FORMAT_YVYU,
+            } format;
+            int32_t width, height;
+            uint32_t fps_n, fps_d;
+            RECT padding;
+        } video;
+        struct
+        {
+            uint32_t width;
+            uint32_t height;
+            uint32_t fps_n;
+            uint32_t fps_d;
+        } video_cinepak;
         struct
         {
             int32_t width, height;
             uint32_t fps_n, fps_d;
             uint32_t profile;
             uint32_t level;
-        } h264;
+        } video_h264;
     } u;
 };
 
@@ -157,6 +171,8 @@ struct wg_parser_create_params
     struct wg_parser *parser;
     enum wg_parser_type type;
     bool unlimited_buffering;
+    bool err_on;
+    bool warn_on;
 };
 
 struct wg_parser_connect_params

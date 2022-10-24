@@ -2423,7 +2423,7 @@ HRESULT exec_script(script_ctx_t *ctx, BOOL extern_caller, function_t *func, vbd
 
     heap_pool_init(&exec.heap);
 
-    TRACE("%s(", debugstr_w(func->name));
+    TRACE("%s args=%u\n", debugstr_w(func->name),func->arg_cnt);
     if(func->arg_cnt) {
         VARIANT *v;
         unsigned i;
@@ -2436,7 +2436,7 @@ HRESULT exec_script(script_ctx_t *ctx, BOOL extern_caller, function_t *func, vbd
 
         for(i=0; i < func->arg_cnt; i++) {
             v = get_arg(dp, i);
-            TRACE("%s%s", i ? ", " : "", debugstr_variant(v));
+            TRACE("  [%d] %s\n", i, debugstr_variant(v));
             if(V_VT(v) == (VT_VARIANT|VT_BYREF)) {
                 if(func->args[i].by_ref)
                     exec.args[i] = *v;
@@ -2453,7 +2453,6 @@ HRESULT exec_script(script_ctx_t *ctx, BOOL extern_caller, function_t *func, vbd
     }else {
         exec.args = NULL;
     }
-    TRACE(")\n");
 
     if(func->var_cnt) {
         exec.vars = heap_alloc_zero(func->var_cnt * sizeof(VARIANT));
@@ -2490,19 +2489,18 @@ HRESULT exec_script(script_ctx_t *ctx, BOOL extern_caller, function_t *func, vbd
         hres = op_funcs[op](&exec);
         if(FAILED(hres)) {
             if(hres != SCRIPT_E_RECORDED) {
+                /* SCRIPT_E_RECORDED means ctx->ei is already populated */
                 clear_ei(&ctx->ei);
-
-                ctx->ei.scode = hres = map_hres(hres);
-                ctx->ei.bstrSource = get_vbscript_string(VBS_RUNTIME_ERROR);
-                ctx->ei.bstrDescription = get_vbscript_error_string(hres);
-            }else {
-                hres = ctx->ei.scode;
+                ctx->ei.scode = hres;
             }
+
+            if(!ctx->ei.bstrDescription)
+                map_vbs_exception(&ctx->ei);
 
             if(exec.resume_next) {
                 unsigned stack_off;
 
-                WARN("Failed %08lx in resume next mode\n", hres);
+                WARN("Failed %08lx in resume next mode\n", ctx->ei.scode);
 
                 /*
                  * Unwinding here is simple. We need to find the next OP_catch, which contains

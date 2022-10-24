@@ -1381,8 +1381,10 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
             break;
         case N_RBRAC:
             if (curr_func)
-                block = symt_close_func_block(module, curr_func, block,
-                                              n_value);
+            {
+                block->size = curr_func->address + n_value - block->address;
+                block = symt_close_func_block(module, curr_func, block);
+            }
             break;
         case N_PSYM:
             /* These are function parameters. */
@@ -1570,7 +1572,7 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
                 {
                     stabs_reset_includes();
                     source_idx = source_new(module, srcpath, ptr);
-                    compiland = symt_new_compiland(module, 0 /* FIXME */, source_idx);
+                    compiland = symt_new_compiland(module, source_idx);
                 }
                 else
                 {

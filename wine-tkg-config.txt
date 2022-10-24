@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - mar. 04 oct. 2022 15:30:25 CEST :
+# Last wine-tkg-staging-fsync-git configuration - lun. 24 oct. 2022 17:32:35 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.18.r0.gad26f04f69a
-Using wine-staging patchset (version 7.18.r0.gfe476e72)
+Wine (plain) version: 7.19.r0.ge3f00bf7c94
+Using wine-staging patchset (version 7.19.r0.g41a3c56c)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -92,5 +92,6 @@ Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
+Applied your own patch testlmouse.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

@@ -36,6 +36,8 @@ DEFINE_GUID(DMOVideoFormat_RGB24,D3DFMT_R8G8B8,0x524f,0x11ce,0x9f,0x53,0x00,0x20
 DEFINE_GUID(DMOVideoFormat_RGB565,D3DFMT_R5G6B5,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
 DEFINE_GUID(DMOVideoFormat_RGB555,D3DFMT_X1R5G5B5,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
 DEFINE_GUID(DMOVideoFormat_RGB8,D3DFMT_P8,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
+DEFINE_MEDIATYPE_GUID(MFAudioFormat_RAW_AAC,WAVE_FORMAT_RAW_AAC1);
+DEFINE_MEDIATYPE_GUID(MFVideoFormat_VC1S,MAKEFOURCC('V','C','1','S'));
 
 struct class_factory
 {
@@ -124,6 +126,7 @@ class_objects[] =
 {
     { &CLSID_VideoProcessorMFT, &video_processor_create },
     { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
+    { &CLSID_MSAACDecMFT, &aac_decoder_create },
     { &CLSID_MSH264DecoderMFT, &h264_decoder_create },
 };
 
@@ -159,6 +162,18 @@ HRESULT mfplat_DllRegisterServer(void)
     {
         {MFMediaType_Audio, MFAudioFormat_PCM},
         {MFMediaType_Audio, MFAudioFormat_Float},
+    };
+
+    MFT_REGISTER_TYPE_INFO aac_decoder_input_types[] =
+    {
+        {MFMediaType_Audio, MFAudioFormat_AAC},
+        {MFMediaType_Audio, MFAudioFormat_RAW_AAC},
+        {MFMediaType_Audio, MFAudioFormat_ADTS},
+    };
+    MFT_REGISTER_TYPE_INFO aac_decoder_output_types[] =
+    {
+        {MFMediaType_Audio, MFAudioFormat_Float},
+        {MFMediaType_Audio, MFAudioFormat_PCM},
     };
 
     MFT_REGISTER_TYPE_INFO wma_decoder_input_types[] =
@@ -238,6 +253,33 @@ HRESULT mfplat_DllRegisterServer(void)
         {MFMediaType_Video, MFVideoFormat_YVYU},
     };
 
+    MFT_REGISTER_TYPE_INFO wmv_decoder_input_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_WMV1},
+        {MFMediaType_Video, MFVideoFormat_WMV2},
+        {MFMediaType_Video, MFVideoFormat_WMV3},
+        {MFMediaType_Video, MEDIASUBTYPE_WMVP},
+        {MFMediaType_Video, MEDIASUBTYPE_WVP2},
+        {MFMediaType_Video, MEDIASUBTYPE_WMVR},
+        {MFMediaType_Video, MEDIASUBTYPE_WMVA},
+        {MFMediaType_Video, MFVideoFormat_WVC1},
+        {MFMediaType_Video, MFVideoFormat_VC1S},
+    };
+    MFT_REGISTER_TYPE_INFO wmv_decoder_output_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+        {MFMediaType_Video, MFVideoFormat_UYVY},
+        {MFMediaType_Video, MFVideoFormat_YVYU},
+        {MFMediaType_Video, MFVideoFormat_NV11},
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, DMOVideoFormat_RGB32},
+        {MFMediaType_Video, DMOVideoFormat_RGB24},
+        {MFMediaType_Video, DMOVideoFormat_RGB565},
+        {MFMediaType_Video, DMOVideoFormat_RGB555},
+        {MFMediaType_Video, DMOVideoFormat_RGB8},
+    };
+
     MFT_REGISTER_TYPE_INFO color_convert_input_types[] =
     {
         {MFMediaType_Video, MFVideoFormat_YV12},
@@ -295,6 +337,16 @@ HRESULT mfplat_DllRegisterServer(void)
     mfts[] =
     {
         {
+            CLSID_MSAACDecMFT,
+            MFT_CATEGORY_AUDIO_DECODER,
+            L"Microsoft AAC Audio Decoder MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(aac_decoder_input_types),
+            aac_decoder_input_types,
+            ARRAY_SIZE(aac_decoder_output_types),
+            aac_decoder_output_types,
+        },
+        {
             CLSID_WMADecMediaObject,
             MFT_CATEGORY_AUDIO_DECODER,
             L"WMAudio Decoder MFT",
@@ -313,6 +365,16 @@ HRESULT mfplat_DllRegisterServer(void)
             h264_decoder_input_types,
             ARRAY_SIZE(h264_decoder_output_types),
             h264_decoder_output_types,
+        },
+        {
+            CLSID_WMVDecoderMFT,
+            MFT_CATEGORY_VIDEO_DECODER,
+            L"WMVideo Decoder MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(wmv_decoder_input_types),
+            wmv_decoder_input_types,
+            ARRAY_SIZE(wmv_decoder_output_types),
+            wmv_decoder_output_types,
         },
         {
             CLSID_VideoProcessorMFT,
@@ -487,9 +549,11 @@ IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format)
 {
     switch (format->major_type)
     {
-        case WG_MAJOR_TYPE_H264:
-        case WG_MAJOR_TYPE_WMA:
-        case WG_MAJOR_TYPE_MPEG1_AUDIO:
+        case WG_MAJOR_TYPE_AUDIO_MPEG1:
+        case WG_MAJOR_TYPE_AUDIO_MPEG4:
+        case WG_MAJOR_TYPE_AUDIO_WMA:
+        case WG_MAJOR_TYPE_VIDEO_CINEPAK:
+        case WG_MAJOR_TYPE_VIDEO_H264:
             FIXME("Format %u not implemented!\n", format->major_type);
             /* fallthrough */
         case WG_MAJOR_TYPE_UNKNOWN:
@@ -555,6 +619,51 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, const GUID *sub
     FIXME("Unrecognized audio subtype %s, depth %u.\n", debugstr_guid(subtype), depth);
 }
 
+static void mf_media_type_to_wg_format_audio_mpeg4(IMFMediaType *type, struct wg_format *format)
+{
+    /* Audio specific config is stored at after HEAACWAVEINFO in MF_MT_USER_DATA
+     * https://docs.microsoft.com/en-us/windows/win32/api/mmreg/ns-mmreg-heaacwaveformat
+     */
+    typedef struct
+    {
+        WORD wPayloadType;
+        WORD wAudioProfileLevelIndication;
+        WORD wStructType;
+        WORD wReserved1;
+        DWORD dwReserved2;
+    } HEAACWAVEINFO;
+    typedef struct
+    {
+        HEAACWAVEINFO wfInfo;
+        BYTE pbAudioSpecificConfig[1];
+    } HEAACWAVEFORMAT;
+
+    BYTE buffer[64];
+    HEAACWAVEFORMAT *user_data = (HEAACWAVEFORMAT *)buffer;
+    UINT32 codec_data_size;
+
+    if (FAILED(IMFMediaType_GetBlob(type, &MF_MT_USER_DATA, buffer, sizeof(buffer), &codec_data_size)))
+    {
+        FIXME("Codec data is not set.\n");
+        return;
+    }
+
+    codec_data_size -= min(codec_data_size, offsetof(HEAACWAVEFORMAT, pbAudioSpecificConfig));
+    if (codec_data_size > sizeof(format->u.audio_mpeg4.codec_data))
+    {
+        FIXME("Codec data needs %u bytes.\n", codec_data_size);
+        return;
+    }
+
+    format->major_type = WG_MAJOR_TYPE_AUDIO_MPEG4;
+
+    if (FAILED(IMFMediaType_GetUINT32(type, &MF_MT_AAC_PAYLOAD_TYPE, &format->u.audio_mpeg4.payload_type)))
+        format->u.audio_mpeg4.payload_type = -1;
+
+    format->u.audio_mpeg4.codec_data_len = codec_data_size;
+    memcpy(format->u.audio_mpeg4.codec_data, user_data->pbAudioSpecificConfig, codec_data_size);
+}
+
 static void mf_media_type_to_wg_format_video(IMFMediaType *type, const GUID *subtype, struct wg_format *format)
 {
     UINT64 frame_rate, frame_size;
@@ -600,7 +709,7 @@ static void mf_media_type_to_wg_format_video(IMFMediaType *type, const GUID *sub
     FIXME("Unrecognized video subtype %s.\n", debugstr_guid(subtype));
 }
 
-static void mf_media_type_to_wg_format_wma(IMFMediaType *type, const GUID *subtype, struct wg_format *format)
+static void mf_media_type_to_wg_format_audio_wma(IMFMediaType *type, const GUID *subtype, struct wg_format *format)
 {
     UINT32 rate, depth, channels, block_align, bytes_per_second, codec_data_len;
     BYTE codec_data[64];
@@ -651,47 +760,47 @@ static void mf_media_type_to_wg_format_wma(IMFMediaType *type, const GUID *subty
         return;
     }
 
-    format->major_type = WG_MAJOR_TYPE_WMA;
-    format->u.wma.version = version;
-    format->u.wma.bitrate = bytes_per_second * 8;
-    format->u.wma.rate = rate;
-    format->u.wma.depth = depth;
-    format->u.wma.channels = channels;
-    format->u.wma.block_align = block_align;
-    format->u.wma.codec_data_len = codec_data_len;
-    memcpy(format->u.wma.codec_data, codec_data, codec_data_len);
+    format->major_type = WG_MAJOR_TYPE_AUDIO_WMA;
+    format->u.audio_wma.version = version;
+    format->u.audio_wma.bitrate = bytes_per_second * 8;
+    format->u.audio_wma.rate = rate;
+    format->u.audio_wma.depth = depth;
+    format->u.audio_wma.channels = channels;
+    format->u.audio_wma.block_align = block_align;
+    format->u.audio_wma.codec_data_len = codec_data_len;
+    memcpy(format->u.audio_wma.codec_data, codec_data, codec_data_len);
 }
 
-static void mf_media_type_to_wg_format_h264(IMFMediaType *type, struct wg_format *format)
+static void mf_media_type_to_wg_format_video_h264(IMFMediaType *type, struct wg_format *format)
 {
     UINT64 frame_rate, frame_size;
     UINT32 profile, level;
 
     memset(format, 0, sizeof(*format));
-    format->major_type = WG_MAJOR_TYPE_H264;
+    format->major_type = WG_MAJOR_TYPE_VIDEO_H264;
 
     if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &frame_size)))
     {
-        format->u.h264.width = frame_size >> 32;
-        format->u.h264.height = (UINT32)frame_size;
+        format->u.video_h264.width = frame_size >> 32;
+        format->u.video_h264.height = (UINT32)frame_size;
     }
 
     if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_RATE, &frame_rate)) && (UINT32)frame_rate)
     {
-        format->u.h264.fps_n = frame_rate >> 32;
-        format->u.h264.fps_d = (UINT32)frame_rate;
+        format->u.video_h264.fps_n = frame_rate >> 32;
+        format->u.video_h264.fps_d = (UINT32)frame_rate;
     }
     else
     {
-        format->u.h264.fps_n = 1;
-        format->u.h264.fps_d = 1;
+        format->u.video_h264.fps_n = 1;
+        format->u.video_h264.fps_d = 1;
     }
 
     if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_MPEG2_PROFILE, &profile)))
-        format->u.h264.profile = profile;
+        format->u.video_h264.profile = profile;
 
     if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_MPEG2_LEVEL, &level)))
-        format->u.h264.level = level;
+        format->u.video_h264.level = level;
 }
 
 void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format)
@@ -717,14 +826,16 @@ void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format)
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8) ||
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ||
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudio_Lossless))
-            mf_media_type_to_wg_format_wma(type, &subtype, format);
+            mf_media_type_to_wg_format_audio_wma(type, &subtype, format);
+        else if (IsEqualGUID(&subtype, &MFAudioFormat_AAC))
+            mf_media_type_to_wg_format_audio_mpeg4(type, format);
         else
             mf_media_type_to_wg_format_audio(type, &subtype, format);
     }
     else if (IsEqualGUID(&major_type, &MFMediaType_Video))
     {
         if (IsEqualGUID(&subtype, &MFVideoFormat_H264))
-            mf_media_type_to_wg_format_h264(type, format);
+            mf_media_type_to_wg_format_video_h264(type, format);
         else
             mf_media_type_to_wg_format_video(type, &subtype, format);
     }

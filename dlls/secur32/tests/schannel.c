@@ -1464,7 +1464,7 @@ static void test_communication(void)
     status = InitializeSecurityContextA(&cred_handle, &context, (SEC_CHAR *)"localhost",
         ISC_REQ_CONFIDENTIALITY|ISC_REQ_STREAM,
         0, 0, NULL, 0, &context, &buffers[0], &attrs, NULL);
-    ok(status == SEC_I_CONTINUE_NEEDED, "Expected SEC_I_CONTINUE_NEEDED, got %08lx\n", status);
+    todo_wine ok(status == SEC_I_CONTINUE_NEEDED, "Expected SEC_I_CONTINUE_NEEDED, got %08lx\n", status);
     if (status != SEC_I_CONTINUE_NEEDED)
     {
         skip("skipping remaining renegotiate test\n");
@@ -1507,25 +1507,6 @@ static void test_communication(void)
         buffers[1].pBuffers[0].cbBuffer = buf_size;
     }
     ok (status == SEC_E_CERT_EXPIRED, "got %08lx\n", status);
-
-    buf = &buffers[0].pBuffers[0];
-    buf->cbBuffer = buf_size;
-    data_size = receive_data(sock, buf);
-
-    buffers[0].pBuffers[0].cbBuffer = data_size;
-    buffers[0].pBuffers[0].BufferType = SECBUFFER_DATA;
-    buffers[0].pBuffers[1].BufferType = SECBUFFER_EMPTY;
-    status = DecryptMessage(&context, &buffers[0], 0, NULL);
-    todo_wine ok(status == SEC_E_OK, "DecryptMessage failed: %08lx\n", status);
-    if (status == SEC_E_OK)
-    {
-        ok(buffers[0].pBuffers[0].BufferType == SECBUFFER_STREAM_HEADER, "Expected first buffer to be SECBUFFER_STREAM_HEADER\n");
-        ok(buffers[0].pBuffers[1].BufferType == SECBUFFER_DATA, "Expected second buffer to be SECBUFFER_DATA\n");
-        ok(buffers[0].pBuffers[2].BufferType == SECBUFFER_STREAM_TRAILER, "Expected third buffer to be SECBUFFER_STREAM_TRAILER\n");
-
-        data = buffers[0].pBuffers[1].pvBuffer;
-        data[buffers[0].pBuffers[1].cbBuffer] = 0;
-    }
 
 done:
     DeleteSecurityContext(&context);

@@ -2151,19 +2151,17 @@ static const char *get_crt_define( const struct makefile *make )
 
 
 /*******************************************************************
- *         add_default_imports
+ *         get_default_imports
  */
-static struct strarray add_default_imports( const struct makefile *make, struct strarray imports )
+static struct strarray get_default_imports( const struct makefile *make, struct strarray imports )
 {
     struct strarray ret = empty_strarray;
     const char *crt_dll = get_default_crt( make );
     unsigned int i;
 
     for (i = 0; i < imports.count; i++)
-    {
-        if (is_crt_module( imports.str[i] )) crt_dll = imports.str[i];
-        else strarray_add( &ret, imports.str[i] );
-    }
+        if (is_crt_module( imports.str[i] ))
+            crt_dll = imports.str[i];
 
     strarray_add( &ret, "winecrt0" );
     if (crt_dll) strarray_add( &ret, crt_dll );
@@ -2176,12 +2174,18 @@ static struct strarray add_default_imports( const struct makefile *make, struct 
     return ret;
 }
 
+enum import_type
+{
+    IMPORT_TYPE_DIRECT,
+    IMPORT_TYPE_DELAYED,
+    IMPORT_TYPE_DEFAULT,
+};
 
 /*******************************************************************
  *         add_import_libs
  */
 static struct strarray add_import_libs( const struct makefile *make, struct strarray *deps,
-                                        struct strarray imports, int delay, int is_cross )
+                                        struct strarray imports, enum import_type type, int is_cross )
 {
     struct strarray ret = empty_strarray;
     unsigned int i, j;
@@ -2190,6 +2194,9 @@ static struct strarray add_import_libs( const struct makefile *make, struct stra
     {
         const char *name = imports.str[i];
         const char *lib = NULL;
+
+        /* add crt import lib only when adding the default imports libs */
+        if (is_crt_module( imports.str[i] ) && type != IMPORT_TYPE_DEFAULT) continue;
 
         if (name[0] == '-')
         {
@@ -2215,7 +2222,7 @@ static struct strarray add_import_libs( const struct makefile *make, struct stra
         {
             const char *ext = NULL;
 
-            if (delay && !delay_load_flag && (is_cross || !*dll_ext)) ext = ".delay.a";
+            if (type == IMPORT_TYPE_DELAYED && !delay_load_flag && (is_cross || !*dll_ext)) ext = ".delay.a";
             else if (is_cross) ext = ".cross.a";
             if (ext) lib = replace_extension( lib, ".a", ext );
             strarray_add_uniq( deps, lib );
@@ -2959,15 +2966,18 @@ static void output_source_spec( struct makefile *make, struct incl_file *source,
 {
     struct strarray imports = get_expanded_file_local_var( make, obj, "IMPORTS" );
     struct strarray dll_flags = get_expanded_file_local_var( make, obj, "EXTRADLLFLAGS" );
-    struct strarray all_libs, dep_libs = empty_strarray;
+    struct strarray all_libs = empty_strarray, dep_libs = empty_strarray;
+    struct strarray default_imports = empty_strarray;
     char *dll_name, *obj_name, *output_file;
     const char *debug_file;
 
     if (!imports.count) imports = make->imports;
     if (!dll_flags.count) dll_flags = make->extradllflags;
-    if (!strarray_exists( &dll_flags, "-nodefaultlibs" )) imports = add_default_imports( make, imports );
+    if (!strarray_exists( &dll_flags, "-nodefaultlibs" )) default_imports = get_default_imports( make, imports );
 
-    all_libs = add_import_libs( make, &dep_libs, imports, 0, make->is_cross );
+    strarray_addall( &all_libs, add_import_libs( make, &dep_libs, imports, IMPORT_TYPE_DIRECT, make->is_cross ) );
+    strarray_addall( &all_libs, add_import_libs( make, &dep_libs, default_imports, IMPORT_TYPE_DEFAULT, make->is_cross ) );
+
     dll_name = strmake( "%s.dll%s", obj, make->is_cross ? "" : dll_ext );
     obj_name = strmake( "%s%s", obj_dir_path( make, obj ), make->is_cross ? ".cross.o" : ".o" );
     output_file = obj_dir_path( make, dll_name );
@@ -3147,6 +3157,7 @@ static char *get_unix_lib_name( struct makefile *make )
  */
 static void output_module( struct makefile *make )
 {
+    struct strarray default_imports = empty_strarray;
     struct strarray all_libs = empty_strarray;
     struct strarray dep_libs = empty_strarray;
     struct strarray imports = make->imports;
@@ -3163,11 +3174,11 @@ static void output_module( struct makefile *make )
         if (*dll_ext && !make->is_cross && !make->data_only)
             module_name = strmake( "%s%s", make->module, dll_ext );
 
-        if (!strarray_exists( &make->extradllflags, "-nodefaultlibs" ))
-            imports = add_default_imports( make, imports );
+        if (!strarray_exists( &make->extradllflags, "-nodefaultlibs" )) default_imports = get_default_imports( make, imports );
 
-        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->delayimports, 1, make->is_cross ));
-        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, imports, 0, make->is_cross ));
+        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, imports, IMPORT_TYPE_DIRECT, make->is_cross ));
+        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->delayimports, IMPORT_TYPE_DELAYED, make->is_cross ));
+        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, default_imports, IMPORT_TYPE_DEFAULT, make->is_cross ) );
 
         if (!make->use_msvcrt)
         {
@@ -3332,7 +3343,7 @@ static void output_unix_lib( struct makefile *make )
         strarray_add( &unix_imports, "winecrt0" );
         if (spec_file) strarray_add( &unix_deps, spec_file );
 
-        strarray_addall( &unix_libs, add_import_libs( make, &unix_deps, unix_imports, 0, 0 ));
+        strarray_addall( &unix_libs, add_import_libs( make, &unix_deps, unix_imports, IMPORT_TYPE_DIRECT, 0 ));
         strarray_addall( &unix_libs, get_expanded_make_var_array( make, "UNIX_LIBS" ));
         strarray_addall( &unix_libs, libs );
     }
@@ -3454,13 +3465,15 @@ static void output_test_module( struct makefile *make )
     char *testmodule = replace_extension( make->testdll, ".dll", "_test.exe" );
     char *stripped = replace_extension( make->testdll, ".dll", "_test-stripped.exe" );
     char *testres = replace_extension( make->testdll, ".dll", "_test.res" );
-    struct strarray dep_libs = empty_strarray;
-    struct strarray all_libs = add_import_libs( make, &dep_libs, add_default_imports( make, make->imports ),
-                                                0, make->is_cross );
+    struct strarray default_imports = get_default_imports( make, make->imports );
+    struct strarray dep_libs = empty_strarray, all_libs = empty_strarray;
     struct makefile *parent = get_parent_makefile( make );
     const char *ext = make->is_cross ? "" : dll_ext;
     const char *debug_file;
     char *output_file;
+
+    strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->imports, IMPORT_TYPE_DIRECT, make->is_cross ) );
+    strarray_addall( &all_libs, add_import_libs( make, &dep_libs, default_imports, IMPORT_TYPE_DEFAULT, make->is_cross ) );
 
     strarray_add( &make->all_targets, strmake( "%s%s", testmodule, ext ));
     strarray_add( &make->clean_files, strmake( "%s%s", stripped, ext ));

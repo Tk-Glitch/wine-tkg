@@ -699,8 +699,7 @@ static void elf_hash_symtab(struct module* module, struct pool* pool,
         {
         case ELF_STT_FILE:
             if (symname)
-                compiland = symt_new_compiland(module, sym.st_value,
-                                               source_new(module, NULL, symname));
+                compiland = symt_new_compiland(module, source_new(module, NULL, symname));
             else
                 compiland = NULL;
             continue;
@@ -861,10 +860,10 @@ static void elf_finish_stabs_info(struct module* module, const struct hash_table
             {
                 if (((struct symt_function*)sym)->address != elf_info->elf_addr &&
                     ((struct symt_function*)sym)->address != elf_info->elf_addr + symp->st_value)
-                    FIXME("Changing address for %p/%s!%s from %08Ix to %s\n",
+                    FIXME("Changing address for %p/%s!%s from %08Ix to %I64x\n",
                           sym, debugstr_w(module->modulename), sym->hash_elt.name,
                           ((struct symt_function*)sym)->address,
-                          wine_dbgstr_longlong(elf_info->elf_addr + symp->st_value));
+                          elf_info->elf_addr + symp->st_value);
                 if (((struct symt_function*)sym)->size && ((struct symt_function*)sym)->size != symp->st_size)
                     FIXME("Changing size for %p/%s!%s from %08Ix to %08x\n",
                           sym, debugstr_w(module->modulename), sym->hash_elt.name,
@@ -890,10 +889,10 @@ static void elf_finish_stabs_info(struct module* module, const struct hash_table
                 {
                     if (((struct symt_data*)sym)->u.var.offset != elf_info->elf_addr &&
                         ((struct symt_data*)sym)->u.var.offset != elf_info->elf_addr + symp->st_value)
-                        FIXME("Changing address for %p/%s!%s from %08Ix to %s\n",
+                        FIXME("Changing address for %p/%s!%s from %08Ix to %I64x\n",
                               sym, debugstr_w(module->modulename), sym->hash_elt.name,
                               ((struct symt_function*)sym)->address,
-                              wine_dbgstr_longlong(elf_info->elf_addr + symp->st_value));
+                              elf_info->elf_addr + symp->st_value);
                     ((struct symt_data*)sym)->u.var.offset = elf_info->elf_addr + symp->st_value;
                     ((struct symt_data*)sym)->kind = elf_is_local_symbol(symp->st_info) ?
                         DataIsFileStatic : DataIsGlobal;

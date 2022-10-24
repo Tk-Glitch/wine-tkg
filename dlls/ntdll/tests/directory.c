@@ -161,7 +161,8 @@ static void tally_test_file(FILE_BOTH_DIRECTORY_INFORMATION *dir_info)
         if (namelen != len || memcmp(nameW, testfiles[i].name, len*sizeof(WCHAR)))
             continue;
         if (!testfiles[i].attr_done) {
-            ok (attrib == (testfiles[i].attr & attribmask), "file %s: expected %s (%lx), got %lx (is your linux new enough?)\n", wine_dbgstr_w(testfiles[i].name), testfiles[i].description, testfiles[i].attr, attrib);
+            ok (attrib == (testfiles[i].attr & attribmask), "file %s: expected %s (%lx), got %lx\n",
+                wine_dbgstr_w(testfiles[i].name), testfiles[i].description, testfiles[i].attr, attrib);
             testfiles[i].attr_done = TRUE;
         }
         testfiles[i].nfound++;

@@ -634,17 +634,151 @@ sync_test("JS objs", function() {
     test_parses("if(false) { o.if; }", v >= 9);
 });
 
+sync_test("for..in", function() {
+    var v = document.documentMode, found = 0, r;
+
+    function ctor() {}
+    ctor.prototype.test2 = true;
+
+    var arr = new Array(), obj = new ctor(), i, r;
+    obj.test1 = true;
+
+    i = 0;
+    for(r in obj) {
+        ctor.prototype.test3 = true;
+        arr[r] = true;
+        i++;
+    }
+
+    ok(i === 3, "enum did " + i + " iterations");
+    ok(arr["test1"] === true, "arr[test1] !== true");
+    ok(arr["test2"] === true, "arr[test2] !== true");
+    ok(arr["test3"] === true, "arr[test3] !== true");
+
+    for(r in document)
+        if(r === "ondragstart")
+            found++;
+    ok(found === 1, "ondragstart enumerated " + found + " times in document");
+    document.ondragstart = "";
+    found = 0;
+    for(r in document)
+        if(r === "ondragstart")
+            found++;
+    ok(found === 1, "ondragstart enumerated " + found + " times in document after set to empty string");
+});
+
 sync_test("elem_by_id", function() {
     document.body.innerHTML = '<form id="testid" name="testname"></form>';
+    var v = document.documentMode, found, i;
 
     var id_elem = document.getElementById("testid");
     ok(id_elem.tagName === "FORM", "id_elem.tagName = " + id_elem.tagName);
 
     var name_elem = document.getElementById("testname");
-    if(document.documentMode < 8)
+    if(v < 8)
         ok(id_elem === name_elem, "id_elem != id_elem");
     else
         ok(name_elem === null, "name_elem != null");
+
+    id_elem = window.testid;
+    ok(id_elem.tagName === "FORM", "window.testid = " + id_elem);
+
+    name_elem = document.testname;
+    ok(name_elem.tagName === "FORM", "document.testname = " + name_elem);
+
+    for(id_elem in window)
+        ok(id_elem !== "testid" && id_elem != "testname", id_elem + " was enumerated in window");
+    window.testid = 137;
+    found = false;
+    for(id_elem in window) {
+        ok(id_elem != "testname", id_elem + " was enumerated in window after set to 137");
+        if(id_elem === "testid")
+            found = true;
+    }
+    ok(found, "testid was not enumerated in window after set to 137");
+
+    found = false;
+    for(id_elem in document) {
+        ok(id_elem !== "testid", "testid was enumerated in document");
+        if(id_elem === "testname")
+            found = true;
+    }
+    ok(found, "testname was not enumerated in document");
+
+    try {
+        document.testname();
+        ok(false, "document.testname() did not throw exception");
+    }catch(e) {
+        ok(e.number === 0xa01b6 - 0x80000000, "document.testname() threw = " + e.number);
+    }
+
+    try {
+        document.testname = "foo";
+        ok(v >= 9, "Setting document.testname did not throw exception");
+
+        id_elem = document.testid;
+        ok(id_elem.tagName === "FORM", "document.testid after set = " + id_elem);
+        name_elem = document.testname;
+        ok(name_elem === "foo", "document.testname after set = " + name_elem);
+    }catch(e) {
+        todo_wine_if(v >= 9).
+        ok(v < 9 && e.number === 0xa01b6 - 0x80000000, "Setting document.testname threw = " + e.number);
+    }
+
+    try {
+        document.testid = "bar";
+        ok(v >= 9, "Setting document.testid did not throw exception");
+
+        id_elem = document.testid;
+        ok(id_elem === "bar", "document.testid after both set = " + id_elem);
+        name_elem = document.testname;
+        ok(name_elem === "foo", "document.testname after both set = " + name_elem);
+
+        found = false, name_elem = false;
+        for(id_elem in document) {
+            if(id_elem === "testid")
+                found = true;
+            if(id_elem === "testname")
+                name_elem = true;
+        }
+        ok(found, "testid was not enumerated in document after both set");
+        ok(name_elem, "testname was not enumerated in document after both set");
+        delete document.testid;
+        delete document.testname;
+    }catch(e) {
+        todo_wine_if(v >= 9).
+        ok(v < 9 && e.number === 0xa01b6 - 0x80000000, "Setting document.testid threw = " + e.number);
+    }
+
+    // these tags expose name as props, and id only if they have a name
+    var tags = [ "embed", "form", "iframe", "img" ];
+    for(i in tags) {
+        var tag = tags[i];
+        document.body.innerHTML = '<' + tag + ' id="testid" name="testname"></' + tag + '><' + tag + ' id="foobar"></' + tag + '>';
+        ok("testname" in document, tag + " did not expose testname");
+        ok("testid" in document, tag + " did not expose testid");
+        ok(!("foobar" in document), tag + " exposed foobar");
+    }
+
+    // these tags always expose their id as well as name (we don't test applet because it makes Windows pop up a dialog box)
+    tags = [ "object" ];
+    for(i in tags) {
+        var tag = tags[i];
+        document.body.innerHTML = '<' + tag + ' id="testid" name="testname"></' + tag + '><' + tag + ' id="foobar"></' + tag + '>';
+        ok("testname" in document, tag + " did not expose testname");
+        ok("testid" in document, tag + " did not expose testid");
+        ok("foobar" in document, tag + " did not expose foobar");
+    }
+
+    // all other tags don't expose props for either id or name, test a few of them here
+    tags = [ "a", "b", "body", "center", "div", "frame", "h2", "head", "html", "input", "meta", "p", "span", "style", "table", "winetest" ];
+    for(i in tags) {
+        var tag = tags[i];
+        document.body.innerHTML = '<' + tag + ' id="testid" name="testname"></' + tag + '><' + tag + ' id="foobar"></' + tag + '>';
+        ok(!("testname" in document), tag + " exposed testname");
+        ok(!("testid" in document), tag + " exposed testid");
+        ok(!("foobar" in document), tag + " exposed foobar");
+    }
 });
 
 sync_test("doc_mode", function() {
@@ -1322,7 +1456,7 @@ async_test("storage events", function() {
         }
     }
 
-    function test_event(e, key, oldValue, newValue) {
+    function test_event(e, idx, key, oldValue, newValue) {
         if(v < 9) {
             ok(e === undefined, "event not undefined in legacy mode: " + e);
             return;
@@ -1333,6 +1467,8 @@ async_test("storage events", function() {
         ok(e.key === key, "key = " + e.key + ", expected " + key);
         ok(e.oldValue === oldValue, "oldValue = " + e.oldValue + ", expected " + oldValue);
         ok(e.newValue === newValue, "newValue = " + e.newValue + ", expected " + newValue);
+        s = (idx ? iframe.contentWindow : window)["location"]["href"];
+        ok(e.url === s, "url = " + e.url + ", expected " + s);
     }
 
     function expect(idx, key, oldValue, newValue, quirk) {
@@ -1352,10 +1488,10 @@ async_test("storage events", function() {
 
             (v < 9 ? document2 : window2)["onstorage"] = function(e) {
                 (local && idx ? document2 : (local || v < 9 ? document : window))[local ? "onstoragecommit" : "onstorage"] = function(e) {
-                    test_event(e, local ? "" : key, local ? "" : oldValue, local ? "" : newValue);
+                    test_event(e, idx, local ? "" : key, local ? "" : oldValue, local ? "" : newValue);
                     next();
                 }
-                test_event(e, key, oldValue, newValue);
+                test_event(e, idx, key, oldValue, newValue);
             }
         }
     }

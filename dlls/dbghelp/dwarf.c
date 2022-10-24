@@ -588,7 +588,7 @@ static BOOL dwarf2_fill_attr(const dwarf2_parse_context_t* ctx,
 
     case DW_FORM_data8:
         attr->u.lluvalue = dwarf2_get_u8(data);
-        TRACE("data8<%s>\n", wine_dbgstr_longlong(attr->u.uvalue));
+        TRACE("data8<%Ix>\n", attr->u.uvalue);
         break;
 
     case DW_FORM_ref1:
@@ -671,7 +671,7 @@ static BOOL dwarf2_fill_attr(const dwarf2_parse_context_t* ctx,
 
     case DW_FORM_sec_offset:
         attr->u.lluvalue = dwarf2_get_addr(data, ctx->head.offset_size);
-        TRACE("sec_offset<%s>\n", wine_dbgstr_longlong(attr->u.lluvalue));
+        TRACE("sec_offset<%I64x>\n", attr->u.lluvalue);
         break;
 
     case DW_FORM_GNU_ref_alt:
@@ -1993,13 +1993,23 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
             break;
         case loc_absolute:
             /* it's a global variable */
-            /* FIXME: we don't handle its scope yet */
             if (!dwarf2_find_attribute(di, DW_AT_external, &ext))
                 ext.u.uvalue = 0;
             loc.offset += subpgm->ctx->module_ctx->load_offset;
-            symt_new_global_variable(subpgm->ctx->module_ctx->module, subpgm->ctx->compiland,
-                                     dwarf2_get_cpp_name(di, name.u.string), !ext.u.uvalue,
-                                     loc, 0, param_type);
+            if (subpgm->top_func)
+            {
+                if (ext.u.uvalue) WARN("unexpected global inside a functionn");
+                symt_add_func_local(subpgm->ctx->module_ctx->module, subpgm->current_func,
+                                    DataIsStaticLocal, &loc, subpgm->current_block,
+                                    param_type, dwarf2_get_cpp_name(di, name.u.string));
+            }
+            else
+            {
+                symt_new_global_variable(subpgm->ctx->module_ctx->module,
+                                         ext.u.uvalue ? NULL : subpgm->ctx->compiland,
+                                         dwarf2_get_cpp_name(di, name.u.string), !ext.u.uvalue,
+                                         loc, 0, param_type);
+            }
             break;
         default:
             subpgm->non_computed_variable = TRUE;
@@ -2302,9 +2312,7 @@ static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
         }
     }
 
-    symt_close_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func, subpgm->current_block, 0);
-    subpgm->current_block = symt_check_tag(subpgm->current_block->container, SymTagBlock) ?
-        (struct symt_block*)subpgm->current_block->container : NULL;
+    subpgm->current_block = symt_close_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func, subpgm->current_block);
 }
 
 static struct symt* dwarf2_parse_subprogram(dwarf2_debug_info_t* di)
@@ -2979,8 +2987,9 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
 
             ctx->language = language.u.uvalue;
 
-            ctx->compiland = symt_new_compiland(ctx->module_ctx->module, ctx->module_ctx->load_offset + low_pc.u.uvalue,
+            ctx->compiland = symt_new_compiland(ctx->module_ctx->module,
                                                 source_new(ctx->module_ctx->module, comp_dir.u.string, name.u.string));
+            ctx->compiland->address = ctx->module_ctx->load_offset + low_pc.u.uvalue;
             dwarf2_cache_cuhead(ctx->module_ctx->module->format_info[DFI_DWARF]->u.dwarf2_info, ctx->compiland, &ctx->head);
             di->symt = &ctx->compiland->symt;
             children = dwarf2_get_di_children(di);
@@ -3678,7 +3687,7 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
             tmp = 0;
             if (!sw_read_mem(csw, stack[sp], &tmp, module->format_info[DFI_DWARF]->u.dwarf2_info->word_size))
             {
-                ERR("Couldn't read memory at %s\n", wine_dbgstr_longlong(stack[sp]));
+                ERR("Couldn't read memory at %I64x\n", stack[sp]);
                 tmp = 0;
             }
             stack[sp] = tmp;
@@ -3728,7 +3737,7 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
             sz = dwarf2_parse_byte(&ctx);
             if (!sw_read_mem(csw, stack[sp], &tmp, sz))
             {
-                ERR("Couldn't read memory at %s\n", wine_dbgstr_longlong(stack[sp]));
+                ERR("Couldn't read memory at %I64x\n", stack[sp]);
                 tmp = 0;
             }
             /* do integral promotion */
@@ -3762,7 +3771,7 @@ static void apply_frame_state(const struct module* module, struct cpu_stack_walk
         *cfa = eval_expression(module, csw, (const unsigned char*)state->cfa_offset, context);
         if (!sw_read_mem(csw, *cfa, cfa, csw->cpu->word_size))
         {
-            WARN("Couldn't read memory at %s\n", wine_dbgstr_longlong(*cfa));
+            WARN("Couldn't read memory at %I64x\n", *cfa);
             return;
         }
         break;

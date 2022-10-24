@@ -500,6 +500,10 @@ static BOOL grab_clipping_window( const RECT *clip )
         return TRUE;  /* don't clip in the desktop process */
 
     if (!data) return FALSE;
+
+    if (data->clip_hwnd && EqualRect( clip, &clip_rect ))
+        return TRUE;
+
     if (!(clip_window = init_clip_window())) return TRUE;
 
     if (!(msg_hwnd = CreateWindowW( messageW, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,

@@ -143,6 +143,7 @@ BOOL symt_get_address(const struct symt* type, ULONG64* addr)
         {
         case DataIsGlobal:
         case DataIsFileStatic:
+        case DataIsStaticLocal:
             *addr = ((const struct symt_data*)type)->u.var.offset;
             break;
         default: return FALSE;
@@ -478,9 +479,7 @@ BOOL WINAPI SymEnumTypes(HANDLE hProcess, ULONG64 BaseOfDll,
     DWORD64             size;
     unsigned int        i;
 
-    TRACE("(%p %s %p %p)\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), EnumSymbolsCallback,
-          UserContext);
+    TRACE("(%p %I64x %p %p)\n", hProcess, BaseOfDll, EnumSymbolsCallback, UserContext);
 
     if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
 
@@ -984,6 +983,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagLabel:
         case SymTagInlineSite:
         case SymTagCustom:
+        case SymTagPublicSymbol:
+        case SymTagThunk:
             return FALSE;
         }
         break;

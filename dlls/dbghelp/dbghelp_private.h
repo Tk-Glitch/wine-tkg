@@ -192,7 +192,7 @@ struct symt_data
     struct symt*                type;
     union                                       /* depends on kind */
     {
-        /* DataIs{Global, FileStatic}:
+        /* DataIs{Global, FileStatic, StaticLocal}:
          *      with loc.kind
          *              loc_absolute    loc.offset is address
          *              loc_tlsrel      loc.offset is TLS index address
@@ -815,8 +815,7 @@ extern struct symt_ht*
 extern struct symt_module*
                     symt_new_module(struct module* module) DECLSPEC_HIDDEN;
 extern struct symt_compiland*
-                    symt_new_compiland(struct module* module, ULONG_PTR address,
-                                       unsigned src_idx) DECLSPEC_HIDDEN;
+                    symt_new_compiland(struct module* module, unsigned src_idx) DECLSPEC_HIDDEN;
 extern struct symt_public*
                     symt_new_public(struct module* module, 
                                     struct symt_compiland* parent, 
@@ -863,9 +862,9 @@ extern struct symt_block*
                                          struct symt_block* block, 
                                          unsigned pc, unsigned len) DECLSPEC_HIDDEN;
 extern struct symt_block*
-                    symt_close_func_block(struct module* module, 
+                    symt_close_func_block(struct module* module,
                                           const struct symt_function* func,
-                                          struct symt_block* block, unsigned pc) DECLSPEC_HIDDEN;
+                                          struct symt_block* block) DECLSPEC_HIDDEN;
 extern struct symt_hierarchy_point*
                     symt_add_function_point(struct module* module, 
                                             struct symt_function* func,

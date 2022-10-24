@@ -845,7 +845,7 @@ static void shader_glsl_load_sampler_handles(void *shader_priv, struct wined3d_c
         }
         else if (view)
         {
-            wined3d_shader_resource_view_gl_bind(wined3d_shader_resource_view_gl(view), bind_idx, sampler, context_gl);
+            wined3d_shader_resource_view_gl_bind(wined3d_shader_resource_view_gl(view), bind_idx, wined3d_sampler_gl(sampler), context_gl);
         }
     }
     string_buffer_release(&priv->string_buffers, sampler_name);
