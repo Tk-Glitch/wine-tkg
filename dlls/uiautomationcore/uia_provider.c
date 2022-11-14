@@ -1159,7 +1159,7 @@ struct uia_provider_thread_map_entry
 static int uia_runtime_id_compare(const void *key, const struct rb_entry *entry)
 {
     struct uia_provider_thread_map_entry *prov_entry = RB_ENTRY_VALUE(entry, struct uia_provider_thread_map_entry, entry);
-    return uia_compare_runtime_ids(prov_entry->runtime_id, (SAFEARRAY *)key);
+    return uia_compare_safearrays(prov_entry->runtime_id, (SAFEARRAY *)key, UIAutomationType_IntArray);
 }
 
 void uia_provider_thread_remove_node(HUIANODE node)
@@ -1231,10 +1231,12 @@ exit:
 static HRESULT uia_provider_thread_add_node(HUIANODE node)
 {
     struct uia_node *node_data = impl_from_IWineUiaNode((IWineUiaNode *)node);
-    struct uia_provider *prov_data = impl_from_IWineUiaProvider(node_data->prov);
+    int prov_type = get_node_provider_type_at_idx(node_data, 0);
+    struct uia_provider *prov_data;
     SAFEARRAY *sa;
     HRESULT hr;
 
+    prov_data = impl_from_IWineUiaProvider(node_data->prov[prov_type]);
     node_data->nested_node = prov_data->return_nested_node = TRUE;
     hr = UiaGetRuntimeId(node, &sa);
     if (FAILED(hr))
@@ -1462,7 +1464,7 @@ LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wparam,
         return 0;
     }
 
-    hr = UiaNodeFromProvider(elprov, &node);
+    hr = create_uia_node_from_elprov(elprov, &node, FALSE);
     if (FAILED(hr))
     {
         WARN("Failed to create HUIANODE with hr %#lx\n", hr);
@@ -1483,7 +1485,7 @@ HRESULT WINAPI UiaDisconnectProvider(IRawElementProviderSimple *elprov)
 
     TRACE("(%p)\n", elprov);
 
-    hr = UiaNodeFromProvider(elprov, &node);
+    hr = create_uia_node_from_elprov(elprov, &node, FALSE);
     if (FAILED(hr))
         return hr;
 

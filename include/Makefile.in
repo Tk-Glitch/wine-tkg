@@ -418,6 +418,7 @@ SOURCES = \
 	mediaerr.h \
 	mediaobj.idl \
 	medparam.idl \
+	memoryapi.h \
 	metahost.idl \
 	mfapi.h \
 	mfd3d12.idl \
@@ -858,7 +859,6 @@ SOURCES = \
 	wine/strmbase.h \
 	wine/svcctl.idl \
 	wine/test.h \
-	wine/unicode.h \
 	wine/unixlib.h \
 	wine/vulkan.h \
 	wine/vulkan_driver.h \

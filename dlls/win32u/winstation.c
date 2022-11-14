@@ -50,7 +50,7 @@ HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK a
 
     if (attr->ObjectName->Length >= MAX_PATH * sizeof(WCHAR))
     {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        RtlSetLastWin32Error( ERROR_FILENAME_EXCED_RANGE );
         return 0;
     }
 
@@ -145,12 +145,12 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
 
     if ((device && device->Length) || devmode)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
     if (attr->ObjectName->Length >= MAX_PATH * sizeof(WCHAR))
     {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        RtlSetLastWin32Error( ERROR_FILENAME_EXCED_RANGE );
         return 0;
     }
     SERVER_START_REQ( create_desktop )
@@ -174,7 +174,7 @@ HDESK WINAPI NtUserOpenDesktop( OBJECT_ATTRIBUTES *attr, DWORD flags, ACCESS_MAS
     HANDLE ret = 0;
     if (attr->ObjectName->Length >= MAX_PATH * sizeof(WCHAR))
     {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        RtlSetLastWin32Error( ERROR_FILENAME_EXCED_RANGE );
         return 0;
     }
     SERVER_START_REQ( open_desktop )
@@ -239,8 +239,8 @@ BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
     {
         struct user_thread_info *thread_info = get_user_thread_info();
         struct user_key_state_info *key_state_info = thread_info->key_state;
-        thread_info->top_window = 0;
-        thread_info->msg_window = 0;
+        thread_info->client_info.top_window = 0;
+        thread_info->client_info.msg_window = 0;
         if (key_state_info) key_state_info->time = 0;
     }
     return ret;
@@ -289,7 +289,7 @@ BOOL WINAPI NtUserGetObjectInformation( HANDLE handle, INT index, void *info,
             if (needed) *needed = sizeof(*obj_flags);
             if (len < sizeof(*obj_flags))
             {
-                SetLastError( ERROR_BUFFER_OVERFLOW );
+                RtlSetLastWin32Error( ERROR_BUFFER_OVERFLOW );
                 return FALSE;
             }
             SERVER_START_REQ( set_user_object_info )
@@ -319,7 +319,7 @@ BOOL WINAPI NtUserGetObjectInformation( HANDLE handle, INT index, void *info,
                 if (needed) *needed = size;
                 if (len < size)
                 {
-                    SetLastError( ERROR_INSUFFICIENT_BUFFER );
+                    RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
                     ret = FALSE;
                 }
                 else memcpy( info, reply->is_desktop ? desktopW : window_stationW, size );
@@ -345,7 +345,7 @@ BOOL WINAPI NtUserGetObjectInformation( HANDLE handle, INT index, void *info,
                     if (needed) *needed = size;
                     if (len < size)
                     {
-                        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+                        RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
                         ret = FALSE;
                     }
                     else memcpy( info, buffer, size );
@@ -359,7 +359,7 @@ BOOL WINAPI NtUserGetObjectInformation( HANDLE handle, INT index, void *info,
         FIXME( "not supported index %d\n", index );
         /* fall through */
     default:
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
 }
@@ -374,7 +374,7 @@ BOOL WINAPI NtUserSetObjectInformation( HANDLE handle, INT index, void *info, DW
 
     if (index != UOI_FLAGS || !info || len < sizeof(*obj_flags))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
     /* FIXME: inherit flag */
@@ -397,9 +397,9 @@ static inline TEB64 *NtCurrentTeb64(void) { return (TEB64 *)NtCurrentTeb()->GdiB
 
 HWND get_desktop_window(void)
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
-    if (thread_info->top_window) return thread_info->top_window;
+    if (thread_info->top_window) return UlongToHandle( thread_info->top_window );
 
 
     SERVER_START_REQ( get_desktop_window )
@@ -407,8 +407,8 @@ HWND get_desktop_window(void)
         req->force = 0;
         if (!wine_server_call( req ))
         {
-            thread_info->top_window = wine_server_ptr_handle( reply->top_window );
-            thread_info->msg_window = wine_server_ptr_handle( reply->msg_window );
+            thread_info->top_window = reply->top_window;
+            thread_info->msg_window = reply->msg_window;
         }
     }
     SERVER_END_REQ;
@@ -450,11 +450,11 @@ HWND get_desktop_window(void)
         params.Environment     = peb->ProcessParameters->Environment;
         params.EnvironmentSize = peb->ProcessParameters->EnvironmentSize;
         params.hStdError       = peb->ProcessParameters->hStdError;
-        init_unicode_string( &params.CurrentDirectory.DosPath, system_dir );
-        init_unicode_string( &params.ImagePathName, appnameW + 4 );
-        init_unicode_string( &params.CommandLine, cmdlineW );
-        init_unicode_string( &params.WindowTitle, appnameW + 4 );
-        init_unicode_string( &params.Desktop, desktop );
+        RtlInitUnicodeString( &params.CurrentDirectory.DosPath, system_dir );
+        RtlInitUnicodeString( &params.ImagePathName, appnameW + 4 );
+        RtlInitUnicodeString( &params.CommandLine, cmdlineW );
+        RtlInitUnicodeString( &params.WindowTitle, appnameW + 4 );
+        RtlInitUnicodeString( &params.Desktop, desktop );
 
         ps_attr.TotalLength = sizeof(ps_attr);
         ps_attr.Attributes[0].Attribute    = PS_ATTRIBUTE_IMAGE_NAME;
@@ -489,18 +489,19 @@ HWND get_desktop_window(void)
             req->force = 1;
             if (!wine_server_call( req ))
             {
-                thread_info->top_window = wine_server_ptr_handle( reply->top_window );
-                thread_info->msg_window = wine_server_ptr_handle( reply->msg_window );
+                thread_info->top_window = reply->top_window;
+                thread_info->msg_window = reply->msg_window;
             }
         }
         SERVER_END_REQ;
     }
 
-    if (!thread_info->top_window || !user_driver->pCreateDesktopWindow( thread_info->top_window ))
+    if (!thread_info->top_window ||
+        !user_driver->pCreateDesktopWindow( UlongToHandle( thread_info->top_window )))
         ERR_(win)( "failed to create desktop window\n" );
 
-    if (user_callbacks) user_callbacks->register_builtin_classes();
-    return thread_info->top_window;
+    register_builtin_classes();
+    return UlongToHandle( thread_info->top_window );
 }
 
 static HANDLE get_winstations_dir_handle(void)

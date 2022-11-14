@@ -275,16 +275,16 @@ static void parse_complete(HTMLDocumentObj *doc)
     TRACE("(%p)\n", doc);
 
     if(doc->nscontainer->usermode == EDITMODE)
-        init_editor(doc->basedoc.doc_node);
+        init_editor(doc->doc_node);
 
     call_explorer_69(doc);
     if(doc->view_sink)
         IAdviseSink_OnViewChange(doc->view_sink, DVASPECT_CONTENT, -1);
-    call_property_onchanged(&doc->basedoc.cp_container, 1005);
+    call_property_onchanged(&doc->cp_container, 1005);
     call_explorer_69(doc);
 
-    if(doc->webbrowser && doc->nscontainer->usermode != EDITMODE && !(doc->basedoc.window->load_flags & BINDING_REFRESH))
-        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->basedoc.window->base.IHTMLWindow2_iface, 0);
+    if(doc->webbrowser && doc->nscontainer->usermode != EDITMODE && !(doc->window->load_flags & BINDING_REFRESH))
+        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->window->base.IHTMLWindow2_iface, 0);
 
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
 }
@@ -293,19 +293,19 @@ static nsresult run_end_load(HTMLDocumentNode *This, nsISupports *arg1, nsISuppo
 {
     TRACE("(%p)\n", This);
 
-    if(!This->basedoc.doc_obj)
+    if(!This->doc_obj)
         return NS_OK;
 
-    if(This == This->basedoc.doc_obj->basedoc.doc_node) {
+    if(This == This->doc_obj->doc_node) {
         /*
          * This should be done in the worker thread that parses HTML,
          * but we don't have such thread (Gecko parses HTML for us).
          */
-        parse_complete(This->basedoc.doc_obj);
+        parse_complete(This->doc_obj);
     }
 
     bind_event_scripts(This);
-    set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
+    set_ready_state(This->outer_window, READYSTATE_INTERACTIVE);
     return NS_OK;
 }
 
@@ -605,7 +605,7 @@ static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
-        htmldoc_release(&This->doc->basedoc);
+        IHTMLDOMNode_Release(&This->doc->node.IHTMLDOMNode_iface);
         if(This->arg1)
             nsISupports_Release(This->arg1);
         if(This->arg2)
@@ -641,7 +641,7 @@ static void add_script_runner(HTMLDocumentNode *This, runnable_proc_t proc, nsIS
     runnable->nsIRunnable_iface.lpVtbl = &nsRunnableVtbl;
     runnable->ref = 1;
 
-    htmldoc_addref(&This->basedoc);
+    IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
     runnable->doc = This;
     runnable->proc = proc;
 
@@ -683,20 +683,20 @@ static nsresult NSAPI nsDocumentObserver_QueryInterface(nsIDocumentObserver *ifa
         return NS_NOINTERFACE;
     }
 
-    htmldoc_addref(&This->basedoc);
+    IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
     return NS_OK;
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_AddRef(nsIDocumentObserver *iface)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
-    return htmldoc_addref(&This->basedoc);
+    return IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_Release(nsIDocumentObserver *iface)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
-    return htmldoc_release(&This->basedoc);
+    return IHTMLDOMNode_Release(&This->node.IHTMLDOMNode_iface);
 }
 
 static void NSAPI nsDocumentObserver_CharacterDataWillChange(nsIDocumentObserver *iface,

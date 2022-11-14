@@ -20,6 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -86,7 +90,7 @@ static void update_blit_data(struct macdrv_window_surface *surface)
 
         if (NtGdiCombineRgn(blit, surface->drawn, 0, RGN_COPY) > NULLREGION &&
             (!surface->region || NtGdiCombineRgn(blit, blit, surface->region, RGN_AND) > NULLREGION) &&
-            OffsetRgn(blit, surface->header.rect.left, surface->header.rect.top) > NULLREGION)
+            NtGdiOffsetRgn(blit, surface->header.rect.left, surface->header.rect.top) > NULLREGION)
             surface->blit_data = get_region_data(blit, 0);
 
         NtGdiDeleteObjectApp(blit);
@@ -96,7 +100,7 @@ static void update_blit_data(struct macdrv_window_surface *surface)
 /***********************************************************************
  *              macdrv_surface_lock
  */
-static void CDECL macdrv_surface_lock(struct window_surface *window_surface)
+static void macdrv_surface_lock(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -106,7 +110,7 @@ static void CDECL macdrv_surface_lock(struct window_surface *window_surface)
 /***********************************************************************
  *              macdrv_surface_unlock
  */
-static void CDECL macdrv_surface_unlock(struct window_surface *window_surface)
+static void macdrv_surface_unlock(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -116,7 +120,7 @@ static void CDECL macdrv_surface_unlock(struct window_surface *window_surface)
 /***********************************************************************
  *              macdrv_surface_get_bitmap_info
  */
-static void *CDECL macdrv_surface_get_bitmap_info(struct window_surface *window_surface,
+static void *macdrv_surface_get_bitmap_info(struct window_surface *window_surface,
                                                   BITMAPINFO *info)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
@@ -128,7 +132,7 @@ static void *CDECL macdrv_surface_get_bitmap_info(struct window_surface *window_
 /***********************************************************************
  *              macdrv_surface_get_bounds
  */
-static RECT *CDECL macdrv_surface_get_bounds(struct window_surface *window_surface)
+static RECT *macdrv_surface_get_bounds(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -138,7 +142,7 @@ static RECT *CDECL macdrv_surface_get_bounds(struct window_surface *window_surfa
 /***********************************************************************
  *              macdrv_surface_set_region
  */
-static void CDECL macdrv_surface_set_region(struct window_surface *window_surface, HRGN region)
+static void macdrv_surface_set_region(struct window_surface *window_surface, HRGN region)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -164,7 +168,7 @@ static void CDECL macdrv_surface_set_region(struct window_surface *window_surfac
 /***********************************************************************
  *              macdrv_surface_flush
  */
-static void CDECL macdrv_surface_flush(struct window_surface *window_surface)
+static void macdrv_surface_flush(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
     CGRect rect;
@@ -202,7 +206,7 @@ static void CDECL macdrv_surface_flush(struct window_surface *window_surface)
 /***********************************************************************
  *              macdrv_surface_destroy
  */
-static void CDECL macdrv_surface_destroy(struct window_surface *window_surface)
+static void macdrv_surface_destroy(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -285,7 +289,7 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     if (old_mac_surface && old_mac_surface->drawn)
     {
         surface->drawn = NtGdiCreateRectRgn(rect->left, rect->top, rect->right, rect->bottom);
-        OffsetRgn(surface->drawn, -rect->left, -rect->top);
+        NtGdiOffsetRgn(surface->drawn, -rect->left, -rect->top);
         if (NtGdiCombineRgn(surface->drawn, surface->drawn, old_mac_surface->drawn, RGN_AND) <= NULLREGION)
         {
             NtGdiDeleteObjectApp(surface->drawn);

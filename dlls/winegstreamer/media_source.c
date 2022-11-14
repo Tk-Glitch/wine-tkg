@@ -855,7 +855,7 @@ static HRESULT new_media_stream(struct media_source *source,
 static HRESULT media_stream_init_desc(struct media_stream *stream)
 {
     IMFMediaTypeHandler *type_handler = NULL;
-    IMFMediaType *stream_types[6];
+    IMFMediaType *stream_types[7];
     struct wg_format format;
     DWORD type_count = 0;
     unsigned int i;
@@ -874,6 +874,7 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
             &MFVideoFormat_YUY2,
             &MFVideoFormat_IYUV,
             &MFVideoFormat_I420,
+            &MFVideoFormat_ARGB32,
         };
 
         IMFMediaType *base_type = mf_media_type_from_wg_format(&format);
@@ -1386,6 +1387,7 @@ static const IMFMediaSourceVtbl IMFMediaSource_vtbl =
 
 static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_source **out_media_source)
 {
+    BOOL video_selected = FALSE, audio_selected = FALSE;
     IMFStreamDescriptor **descriptors = NULL;
     unsigned int stream_count = UINT_MAX;
     struct media_source *object;
@@ -1480,15 +1482,52 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = malloc(object->stream_count * sizeof(IMFStreamDescriptor *));
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
+        IMFStreamDescriptor **descriptor = &descriptors[object->stream_count - 1 - i];
+        char language[128];
+        DWORD language_len;
+        WCHAR *languageW;
+
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, descriptor);
+
+        if (wg_parser_stream_get_language(object->streams[i]->wg_stream, language, sizeof(language)))
+        {
+            if ((language_len = MultiByteToWideChar(CP_UTF8, 0, language, -1, NULL, 0)))
+            {
+                languageW = malloc(language_len * sizeof(WCHAR));
+                if (MultiByteToWideChar(CP_UTF8, 0, language, -1, languageW, language_len))
+                {
+                    IMFStreamDescriptor_SetString(*descriptor, &MF_SD_LANGUAGE, languageW);
+                }
+                free(languageW);
+            }
+        }
     }
 
     if (FAILED(hr = MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))
         goto fail;
 
+    /* Select one of each major type. */
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler *handler;
+        GUID major_type;
+        BOOL select_stream = FALSE;
+
+        IMFStreamDescriptor_GetMediaTypeHandler(descriptors[i], &handler);
+        IMFMediaTypeHandler_GetMajorType(handler, &major_type);
+        if (IsEqualGUID(&major_type, &MFMediaType_Video) && !video_selected)
+        {
+            select_stream = TRUE;
+            video_selected = TRUE;
+        }
+        if (IsEqualGUID(&major_type, &MFMediaType_Audio) && !audio_selected)
+        {
+            select_stream = TRUE;
+            audio_selected = TRUE;
+        }
+        if (select_stream)
+            IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler_Release(handler);
         IMFStreamDescriptor_Release(descriptors[i]);
     }
     free(descriptors);

@@ -18,191 +18,432 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
-
-#include <stdarg.h>
-#include <stdlib.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "rpc.h"
-#include "winreg.h"
-#include "cfgmgr32.h"
-#include "initguid.h"
-#include "devguid.h"
-#include "devpkey.h"
-#include "ntddvdeo.h"
-#include "setupapi.h"
-#define WIN32_NO_STATUS
-#include "winternl.h"
-#include "wine/debug.h"
-#include "wine/unicode.h"
 #include "x11drv.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
-/* Wine specific properties */
-DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_RCMONITOR, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 3);
-
-static const WCHAR displayW[] = {'D','I','S','P','L','A','Y',0};
-static const WCHAR video_keyW[] = {
-    'H','A','R','D','W','A','R','E','\\',
-    'D','E','V','I','C','E','M','A','P','\\',
-    'V','I','D','E','O',0};
-
 static struct x11drv_display_device_handler host_handler;
 struct x11drv_display_device_handler desktop_handler;
+static struct x11drv_settings_handler settings_handler;
 
-/* Cached screen information, protected by screen_section */
-static HKEY video_key;
-static RECT native_screen_rect;
-static RECT virtual_screen_rect;
-static RECT primary_monitor_rect;
-static FILETIME last_query_screen_time;
-static CRITICAL_SECTION screen_section;
-static CRITICAL_SECTION_DEBUG screen_critsect_debug =
+#define NEXT_DEVMODEW(mode) ((DEVMODEW *)((char *)((mode) + 1) + (mode)->dmDriverExtra))
+
+struct x11drv_display_depth
 {
-    0, 0, &screen_section,
-    {&screen_critsect_debug.ProcessLocksList, &screen_critsect_debug.ProcessLocksList},
-     0, 0, {(DWORD_PTR)(__FILE__ ": screen_section")}
+    struct list entry;
+    ULONG_PTR display_id;
+    DWORD depth;
 };
-static CRITICAL_SECTION screen_section = {&screen_critsect_debug, -1, 0, 0, 0, 0};
 
-HANDLE get_display_device_init_mutex(void)
+/* Display device emulated depth list, protected by modes_section */
+static struct list x11drv_display_depth_list = LIST_INIT(x11drv_display_depth_list);
+
+/* All Windows drivers seen so far either support 32 bit depths, or 24 bit depths, but never both. So if we have
+ * a 32 bit framebuffer, report 32 bit bpps, otherwise 24 bit ones.
+ */
+static const unsigned int depths_24[]  = {8, 16, 24};
+static const unsigned int depths_32[]  = {8, 16, 32};
+const unsigned int *depths;
+
+static pthread_mutex_t settings_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *new_handler)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
-    HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
-
-    WaitForSingleObject(mutex, INFINITE);
-    return mutex;
-}
-
-void release_display_device_init_mutex(HANDLE mutex)
-{
-    ReleaseMutex(mutex);
-    CloseHandle(mutex);
-}
-
-/* Update screen rectangle cache from SetupAPI if it's outdated, return FALSE on failure and TRUE on success */
-static BOOL update_screen_cache(void)
-{
-    RECT virtual_rect = {0}, primary_rect = {0}, monitor_rect;
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
-    HDEVINFO devinfo = INVALID_HANDLE_VALUE;
-    FILETIME filetime = {0};
-    HANDLE mutex = NULL;
-    DWORD i = 0;
-    INT result;
-    DWORD type;
-    BOOL ret = FALSE;
-
-    EnterCriticalSection(&screen_section);
-    if ((!video_key && RegOpenKeyW(HKEY_LOCAL_MACHINE, video_keyW, &video_key))
-        || RegQueryInfoKeyW(video_key, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &filetime))
+    if (new_handler->priority > settings_handler.priority)
     {
-        LeaveCriticalSection(&screen_section);
+        settings_handler = *new_handler;
+        TRACE("Display settings are now handled by: %s.\n", settings_handler.name);
+    }
+}
+
+/***********************************************************************
+ * Default handlers if resolution switching is not enabled
+ *
+ */
+static BOOL nores_get_id(const WCHAR *device_name, ULONG_PTR *id)
+{
+    WCHAR primary_adapter[CCHDEVICENAME];
+
+    if (!get_primary_adapter( primary_adapter ))
+        return FALSE;
+
+    *id = !wcsicmp( device_name, primary_adapter ) ? 1 : 0;
+    return TRUE;
+}
+
+static BOOL nores_get_modes(ULONG_PTR id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count)
+{
+    RECT primary = get_host_primary_monitor_rect();
+    DEVMODEW *modes;
+
+    modes = calloc(1, sizeof(*modes));
+    if (!modes)
+    {
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
     }
-    result = CompareFileTime(&filetime, &last_query_screen_time);
-    LeaveCriticalSection(&screen_section);
-    if (result < 1)
-        return TRUE;
 
-    mutex = get_display_device_init_mutex();
+    modes[0].dmSize = sizeof(*modes);
+    modes[0].dmDriverExtra = 0;
+    modes[0].dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
+                        DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
+    modes[0].dmDisplayOrientation = DMDO_DEFAULT;
+    modes[0].dmBitsPerPel = screen_bpp;
+    modes[0].dmPelsWidth = primary.right;
+    modes[0].dmPelsHeight = primary.bottom;
+    modes[0].dmDisplayFlags = 0;
+    modes[0].dmDisplayFrequency = 60;
 
-    devinfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_MONITOR, displayW, NULL, DIGCF_PRESENT);
-    if (devinfo == INVALID_HANDLE_VALUE)
-        goto fail;
+    *new_modes = modes;
+    *mode_count = 1;
+    return TRUE;
+}
 
-    while (SetupDiEnumDeviceInfo(devinfo, i++, &device_data))
+static void nores_free_modes(DEVMODEW *modes)
+{
+    free(modes);
+}
+
+static BOOL nores_get_current_mode(ULONG_PTR id, DEVMODEW *mode)
+{
+    RECT primary = get_host_primary_monitor_rect();
+
+    mode->dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
+                     DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION;
+    mode->dmDisplayOrientation = DMDO_DEFAULT;
+    mode->dmDisplayFlags = 0;
+    mode->dmPosition.x = 0;
+    mode->dmPosition.y = 0;
+
+    if (id != 1)
     {
-        if (!SetupDiGetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_RCMONITOR, &type,
-                                       (BYTE *)&monitor_rect, sizeof(monitor_rect), NULL, 0))
-            goto fail;
-
-        UnionRect(&virtual_rect, &virtual_rect, &monitor_rect);
-        if (i == 1)
-            primary_rect = monitor_rect;
+        FIXME("Non-primary adapters are unsupported.\n");
+        mode->dmBitsPerPel = 0;
+        mode->dmPelsWidth = 0;
+        mode->dmPelsHeight = 0;
+        mode->dmDisplayFrequency = 0;
+        return TRUE;
     }
 
-    EnterCriticalSection(&screen_section);
-    if (!native_screen_rect.bottom) native_screen_rect = virtual_rect;
-    virtual_screen_rect = virtual_rect;
-    primary_monitor_rect = primary_rect;
-    last_query_screen_time = filetime;
-    LeaveCriticalSection(&screen_section);
-    ret = TRUE;
-fail:
-    SetupDiDestroyDeviceInfoList(devinfo);
-    release_display_device_init_mutex(mutex);
-    if (!ret)
-        WARN("Update screen cache failed!\n");
+    mode->dmBitsPerPel = screen_bpp;
+    mode->dmPelsWidth = primary.right;
+    mode->dmPelsHeight = primary.bottom;
+    mode->dmDisplayFrequency = 60;
+    return TRUE;
+}
+
+static LONG nores_set_current_mode(ULONG_PTR id, const DEVMODEW *mode)
+{
+    WARN("NoRes settings handler, ignoring mode change request.\n");
+    return DISP_CHANGE_SUCCESSFUL;
+}
+
+/* default handler only gets the current X desktop resolution */
+void X11DRV_Settings_Init(void)
+{
+    struct x11drv_settings_handler nores_handler;
+
+    depths = screen_bpp == 32 ? depths_32 : depths_24;
+
+    nores_handler.name = "NoRes";
+    nores_handler.priority = 1;
+    nores_handler.get_id = nores_get_id;
+    nores_handler.get_modes = nores_get_modes;
+    nores_handler.free_modes = nores_free_modes;
+    nores_handler.get_current_mode = nores_get_current_mode;
+    nores_handler.set_current_mode = nores_set_current_mode;
+    X11DRV_Settings_SetHandler(&nores_handler);
+}
+
+/* Initialize registry display settings when new display devices are added */
+void init_registry_display_settings(void)
+{
+    DEVMODEW dm = {.dmSize = sizeof(dm)};
+    DISPLAY_DEVICEW dd = {sizeof(dd)};
+    UNICODE_STRING device_name;
+    DWORD i = 0;
+    LONG ret;
+
+    while (!NtUserEnumDisplayDevices( NULL, i++, &dd, 0 ))
+    {
+        RtlInitUnicodeString( &device_name, dd.DeviceName );
+
+        /* Skip if the device already has registry display settings */
+        if (NtUserEnumDisplaySettings( &device_name, ENUM_REGISTRY_SETTINGS, &dm, 0 ))
+            continue;
+
+        if (!NtUserEnumDisplaySettings( &device_name, ENUM_CURRENT_SETTINGS, &dm, 0 ))
+        {
+            ERR("Failed to query current display settings for %s.\n", wine_dbgstr_w(dd.DeviceName));
+            continue;
+        }
+
+        TRACE("Device %s current display mode %ux%u %ubits %uHz at %d,%d.\n",
+              wine_dbgstr_w(dd.DeviceName), dm.dmPelsWidth, dm.dmPelsHeight, dm.dmBitsPerPel,
+              dm.dmDisplayFrequency, dm.dmPosition.x, dm.dmPosition.y);
+
+        ret = NtUserChangeDisplaySettings( &device_name, &dm, NULL,
+                                           CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL );
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            ERR("Failed to save registry display settings for %s, returned %d.\n",
+                wine_dbgstr_w(dd.DeviceName), ret);
+    }
+}
+
+BOOL get_primary_adapter(WCHAR *name)
+{
+    DISPLAY_DEVICEW dd;
+    DWORD i;
+
+    dd.cb = sizeof(dd);
+    for (i = 0; !NtUserEnumDisplayDevices( NULL, i, &dd, 0 ); ++i)
+    {
+        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+        {
+            lstrcpyW(name, dd.DeviceName);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static void set_display_depth(ULONG_PTR display_id, DWORD depth)
+{
+    struct x11drv_display_depth *display_depth;
+
+    pthread_mutex_lock( &settings_mutex );
+    LIST_FOR_EACH_ENTRY(display_depth, &x11drv_display_depth_list, struct x11drv_display_depth, entry)
+    {
+        if (display_depth->display_id == display_id)
+        {
+            display_depth->depth = depth;
+            pthread_mutex_unlock( &settings_mutex );
+            return;
+        }
+    }
+
+    display_depth = malloc(sizeof(*display_depth));
+    if (!display_depth)
+    {
+        ERR("Failed to allocate memory.\n");
+        pthread_mutex_unlock( &settings_mutex );
+        return;
+    }
+
+    display_depth->display_id = display_id;
+    display_depth->depth = depth;
+    list_add_head(&x11drv_display_depth_list, &display_depth->entry);
+    pthread_mutex_unlock( &settings_mutex );
+}
+
+static DWORD get_display_depth(ULONG_PTR display_id)
+{
+    struct x11drv_display_depth *display_depth;
+    DWORD depth;
+
+    pthread_mutex_lock( &settings_mutex );
+    LIST_FOR_EACH_ENTRY(display_depth, &x11drv_display_depth_list, struct x11drv_display_depth, entry)
+    {
+        if (display_depth->display_id == display_id)
+        {
+            depth = display_depth->depth;
+            pthread_mutex_unlock( &settings_mutex );
+            return depth;
+        }
+    }
+    pthread_mutex_unlock( &settings_mutex );
+    return screen_bpp;
+}
+
+/***********************************************************************
+ *      GetCurrentDisplaySettings  (X11DRV.@)
+ *
+ */
+BOOL X11DRV_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode )
+{
+    DEVMODEW mode;
+    ULONG_PTR id;
+
+    if (!settings_handler.get_id( name, &id ) || !settings_handler.get_current_mode( id, &mode ))
+    {
+        ERR("Failed to get %s current display settings.\n", wine_dbgstr_w(name));
+        return FALSE;
+    }
+
+    memcpy( &devmode->dmFields, &mode.dmFields, devmode->dmSize - offsetof(DEVMODEW, dmFields) );
+    if (!is_detached_mode( devmode )) devmode->dmBitsPerPel = get_display_depth( id );
+    return TRUE;
+}
+
+BOOL is_detached_mode(const DEVMODEW *mode)
+{
+    return mode->dmFields & DM_POSITION &&
+           mode->dmFields & DM_PELSWIDTH &&
+           mode->dmFields & DM_PELSHEIGHT &&
+           mode->dmPelsWidth == 0 &&
+           mode->dmPelsHeight == 0;
+}
+
+/* Get the full display mode with all the necessary fields set.
+ * Return NULL on failure. Caller should call free_full_mode() to free the returned mode. */
+static DEVMODEW *get_full_mode(ULONG_PTR id, DEVMODEW *dev_mode)
+{
+    DEVMODEW *modes, *full_mode, *found_mode = NULL;
+    UINT mode_count, mode_idx;
+
+    if (is_detached_mode(dev_mode))
+        return dev_mode;
+
+    if (!settings_handler.get_modes(id, EDS_ROTATEDMODE, &modes, &mode_count))
+        return NULL;
+
+    for (mode_idx = 0; mode_idx < mode_count; ++mode_idx)
+    {
+        found_mode = (DEVMODEW *)((BYTE *)modes + (sizeof(*modes) + modes[0].dmDriverExtra) * mode_idx);
+
+        if (found_mode->dmBitsPerPel != dev_mode->dmBitsPerPel)
+            continue;
+        if (found_mode->dmPelsWidth != dev_mode->dmPelsWidth)
+            continue;
+        if (found_mode->dmPelsHeight != dev_mode->dmPelsHeight)
+            continue;
+        if (found_mode->dmDisplayFrequency != dev_mode->dmDisplayFrequency)
+            continue;
+        if (found_mode->dmDisplayOrientation != dev_mode->dmDisplayOrientation)
+            continue;
+
+        break;
+    }
+
+    if (!found_mode || mode_idx == mode_count)
+    {
+        settings_handler.free_modes(modes);
+        return NULL;
+    }
+
+    if (!(full_mode = malloc(sizeof(*found_mode) + found_mode->dmDriverExtra)))
+    {
+        settings_handler.free_modes(modes);
+        return NULL;
+    }
+
+    memcpy(full_mode, found_mode, sizeof(*found_mode) + found_mode->dmDriverExtra);
+    settings_handler.free_modes(modes);
+
+    full_mode->dmFields |= DM_POSITION;
+    full_mode->dmPosition = dev_mode->dmPosition;
+    return full_mode;
+}
+
+static void free_full_mode(DEVMODEW *mode)
+{
+    if (!is_detached_mode(mode))
+        free(mode);
+}
+
+static LONG apply_display_settings( DEVMODEW *displays, ULONG_PTR *ids, BOOL do_attach )
+{
+    DEVMODEW *full_mode;
+    BOOL attached_mode;
+    LONG count, ret;
+    DEVMODEW *mode;
+
+    for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
+    {
+        ULONG_PTR *id = ids + count;
+
+        attached_mode = !is_detached_mode(mode);
+        if ((attached_mode && !do_attach) || (!attached_mode && do_attach))
+            continue;
+
+        /* FIXME: get a full mode again because X11 driver extra data isn't portable */
+        full_mode = get_full_mode(*id, mode);
+        if (!full_mode)
+            return DISP_CHANGE_BADMODE;
+
+        TRACE("handler:%s changing %s to position:(%d,%d) resolution:%ux%u frequency:%uHz "
+              "depth:%ubits orientation:%#x.\n", settings_handler.name,
+              wine_dbgstr_w(mode->dmDeviceName),
+              full_mode->dmPosition.x, full_mode->dmPosition.y, full_mode->dmPelsWidth,
+              full_mode->dmPelsHeight, full_mode->dmDisplayFrequency, full_mode->dmBitsPerPel,
+              full_mode->dmDisplayOrientation);
+
+        ret = settings_handler.set_current_mode(*id, full_mode);
+        if (attached_mode && ret == DISP_CHANGE_SUCCESSFUL)
+            set_display_depth(*id, full_mode->dmBitsPerPel);
+        free_full_mode(full_mode);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            return ret;
+    }
+
+    return DISP_CHANGE_SUCCESSFUL;
+}
+
+/***********************************************************************
+ *      ChangeDisplaySettings  (X11DRV.@)
+ *
+ */
+LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid )
+{
+    INT left_most = INT_MAX, top_most = INT_MAX;
+    LONG count, ret = DISP_CHANGE_BADPARAM;
+    ULONG_PTR *ids;
+    DEVMODEW *mode;
+
+    /* Convert virtual screen coordinates to root coordinates, and find display ids.
+     * We cannot safely get the ids while changing modes, as the backend state may be invalidated.
+     */
+    for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
+    {
+        left_most = min( left_most, mode->dmPosition.x );
+        top_most = min( top_most, mode->dmPosition.y );
+    }
+
+    if (!(ids = calloc( count, sizeof(*ids) ))) return DISP_CHANGE_FAILED;
+    for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
+    {
+        if (!settings_handler.get_id( mode->dmDeviceName, ids + count )) goto done;
+        mode->dmPosition.x -= left_most;
+        mode->dmPosition.y -= top_most;
+    }
+
+    /* Detach displays first to free up CRTCs */
+    ret = apply_display_settings( displays, ids, FALSE );
+    if (ret == DISP_CHANGE_SUCCESSFUL)
+        ret = apply_display_settings( displays, ids, TRUE );
+    if (ret == DISP_CHANGE_SUCCESSFUL)
+        X11DRV_DisplayDevices_Init(TRUE);
+
+done:
+    free( ids );
     return ret;
 }
 
 POINT virtual_screen_to_root(INT x, INT y)
 {
-    RECT virtual = fs_hack_get_real_virtual_screen();
+    RECT virtual = NtUserGetVirtualScreenRect();
     POINT pt;
 
-    TRACE("from %d,%d\n", x, y);
-
-    pt.x = x;
-    pt.y = y;
-    fs_hack_point_user_to_real(&pt);
-    TRACE("to real %d,%d\n", pt.x, pt.y);
-
-    pt.x -= virtual.left;
-    pt.y -= virtual.top;
-    TRACE("to root %d,%d\n", pt.x, pt.y);
+    pt.x = x - virtual.left;
+    pt.y = y - virtual.top;
     return pt;
 }
 
 POINT root_to_virtual_screen(INT x, INT y)
 {
-    RECT virtual = fs_hack_get_real_virtual_screen();
+    RECT virtual = NtUserGetVirtualScreenRect();
     POINT pt;
 
-    TRACE("from root %d,%d\n", x, y);
     pt.x = x + virtual.left;
     pt.y = y + virtual.top;
-    TRACE("to real %d,%d\n", pt.x, pt.y);
-    fs_hack_point_real_to_user(&pt);
-    TRACE("to user %d,%d\n", pt.x, pt.y);
     return pt;
-}
-
-RECT get_native_screen_rect(void)
-{
-    RECT rect;
-
-    update_screen_cache();
-    EnterCriticalSection(&screen_section);
-    rect = native_screen_rect;
-    LeaveCriticalSection(&screen_section);
-    return rect;
-}
-
-RECT get_virtual_screen_rect(void)
-{
-    RECT virtual;
-
-    update_screen_cache();
-    EnterCriticalSection(&screen_section);
-    virtual = virtual_screen_rect;
-    LeaveCriticalSection(&screen_section);
-    return virtual;
-}
-
-RECT get_primary_monitor_rect(void)
-{
-    RECT primary;
-
-    update_screen_cache();
-    EnterCriticalSection(&screen_section);
-    primary = primary_monitor_rect;
-    LeaveCriticalSection(&screen_section);
-    return primary;
 }
 
 /* Get the primary monitor rect from the host system */
@@ -263,7 +504,7 @@ RECT get_work_area(const RECT *monitor_rect)
                 work_rect.right = work_rect.left + work_area[i * 4 + 2];
                 work_rect.bottom = work_rect.top + work_area[i * 4 + 3];
 
-                if (IntersectRect(&work_rect, &work_rect, monitor_rect))
+                if (intersect_rect( &work_rect, &work_rect, monitor_rect ))
                 {
                     TRACE("work_rect:%s.\n", wine_dbgstr_rect(&work_rect));
                     XFree(work_area);
@@ -285,7 +526,7 @@ RECT get_work_area(const RECT *monitor_rect)
             SetRect(&work_rect, work_area[0], work_area[1], work_area[0] + work_area[2],
                     work_area[1] + work_area[3]);
 
-            if (IntersectRect(&work_rect, &work_rect, monitor_rect))
+            if (intersect_rect( &work_rect, &work_rect, monitor_rect ))
             {
                 TRACE("work_rect:%s.\n", wine_dbgstr_rect(&work_rect));
                 XFree(work_area);
@@ -309,11 +550,6 @@ void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler
     }
 }
 
-struct x11drv_display_device_handler X11DRV_DisplayDevices_GetHandler(void)
-{
-    return host_handler;
-}
-
 void X11DRV_DisplayDevices_RegisterEventHandlers(void)
 {
     struct x11drv_display_device_handler *handler = is_virtual_desktop() ? &desktop_handler : &host_handler;
@@ -322,151 +558,9 @@ void X11DRV_DisplayDevices_RegisterEventHandlers(void)
         handler->register_event_handlers();
 }
 
-BOOL CALLBACK fs_hack_update_child_window_client_surface(HWND hwnd, LPARAM enable_fs_hack)
-{
-    struct x11drv_win_data *data;
-    RECT client_rect;
-
-    if (!(data = get_win_data( hwnd )))
-        return TRUE;
-
-    if (enable_fs_hack && data->client_window)
-    {
-        client_rect = data->client_rect;
-        ClientToScreen( hwnd, (POINT *)&client_rect.left );
-        ClientToScreen( hwnd, (POINT *)&client_rect.right );
-        fs_hack_rect_user_to_real( &client_rect );
-
-        FIXME( "Enabling child fshack, resizing window %p to %s.\n", hwnd, wine_dbgstr_rect( &client_rect ) );
-        XMoveResizeWindow( gdi_display, data->client_window,
-                           client_rect.left, client_rect.top,
-                           client_rect.right - client_rect.left,
-                           client_rect.bottom - client_rect.top );
-        data->fs_hack = TRUE;
-    }
-    else if (!enable_fs_hack && data->client_window)
-    {
-        FIXME( "Disabling child fshack, restoring window %p.\n", hwnd );
-        XMoveResizeWindow( gdi_display, data->client_window,
-                           data->client_rect.left - data->whole_rect.left,
-                           data->client_rect.top - data->whole_rect.top,
-                           data->client_rect.right - data->client_rect.left,
-                           data->client_rect.bottom - data->client_rect.top );
-        data->fs_hack = FALSE;
-    }
-
-    if (data->client_window) sync_gl_drawable( hwnd, TRUE );
-    release_win_data( data );
-    return TRUE;
-}
-
-static BOOL CALLBACK update_windows_on_display_change(HWND hwnd, LPARAM lparam)
-{
-    struct x11drv_win_data *data;
-    UINT mask = (UINT)lparam;
-    HMONITOR monitor;
-
-    if (!(data = get_win_data(hwnd)))
-        return TRUE;
-
-    monitor = fs_hack_monitor_from_hwnd( hwnd );
-    if (fs_hack_mapping_required( monitor ) &&
-            fs_hack_matches_current_mode( monitor,
-                data->whole_rect.right - data->whole_rect.left,
-                data->whole_rect.bottom - data->whole_rect.top)){
-        if(!data->fs_hack){
-            RECT real_rect = fs_hack_real_mode( monitor );
-            MONITORINFO monitor_info;
-            UINT width, height;
-            POINT tl;
-
-            monitor_info.cbSize = sizeof(monitor_info);
-            GetMonitorInfoW( monitor, &monitor_info );
-            tl = virtual_screen_to_root( monitor_info.rcMonitor.left, monitor_info.rcMonitor.top );
-            width = real_rect.right - real_rect.left;
-            height = real_rect.bottom - real_rect.top;
-
-            TRACE("Enabling fs hack, resizing window %p to (%u,%u)-(%u,%u)\n", hwnd, tl.x, tl.y, width, height);
-            data->fs_hack = TRUE;
-            set_wm_hints( data );
-            XMoveResizeWindow(data->display, data->whole_window, tl.x, tl.y, width, height);
-            if(data->client_window)
-                XMoveResizeWindow(gdi_display, data->client_window, 0, 0, width, height);
-            sync_gl_drawable(hwnd, FALSE);
-            update_net_wm_states( data );
-            EnumChildWindows( hwnd, fs_hack_update_child_window_client_surface, TRUE );
-        }
-    } else {
-        /* update the full screen state */
-        update_net_wm_states(data);
-
-        if (data->fs_hack)
-            mask |= CWX | CWY;
-
-        if (mask && data->whole_window)
-        {
-            POINT pos = virtual_screen_to_root(data->whole_rect.left, data->whole_rect.top);
-            XWindowChanges changes;
-            changes.x = pos.x;
-            changes.y = pos.y;
-            XReconfigureWMWindow(data->display, data->whole_window, data->vis.screen, mask, &changes);
-        }
-
-        if(data->fs_hack && (!fs_hack_mapping_required(monitor) ||
-            !fs_hack_matches_current_mode(monitor,
-                data->whole_rect.right - data->whole_rect.left,
-                data->whole_rect.bottom - data->whole_rect.top))){
-            TRACE("Disabling fs hack\n");
-            data->fs_hack = FALSE;
-            if(data->client_window){
-                XMoveResizeWindow(gdi_display, data->client_window,
-                        data->client_rect.left - data->whole_rect.left,
-                        data->client_rect.top - data->whole_rect.top,
-                        data->client_rect.right - data->client_rect.left,
-                        data->client_rect.bottom - data->client_rect.top);
-            }
-            sync_gl_drawable(hwnd, FALSE);
-            EnumChildWindows( hwnd, fs_hack_update_child_window_client_surface, FALSE );
-        }
-    }
-    release_win_data(data);
-    if (hwnd == GetForegroundWindow())
-        clip_fullscreen_window(hwnd, TRUE);
-    return TRUE;
-}
-
-void X11DRV_DisplayDevices_Update(BOOL send_display_change)
-{
-    RECT old_virtual_rect, new_virtual_rect;
-    DWORD tid, pid;
-    HWND foreground;
-    UINT mask = 0;
-
-    old_virtual_rect = get_virtual_screen_rect();
-    X11DRV_DisplayDevices_Init(TRUE);
-    new_virtual_rect = get_virtual_screen_rect();
-
-    /* Calculate XReconfigureWMWindow() mask */
-    if (old_virtual_rect.left != new_virtual_rect.left)
-        mask |= CWX;
-    if (old_virtual_rect.top != new_virtual_rect.top)
-        mask |= CWY;
-
-    X11DRV_resize_desktop(send_display_change);
-    EnumWindows(update_windows_on_display_change, (LPARAM)mask);
-
-    /* forward clip_fullscreen_window request to the foreground window */
-    if ((foreground = GetForegroundWindow()) && (tid = GetWindowThreadProcessId( foreground, &pid )) && pid == GetCurrentProcessId())
-    {
-        if (tid == GetCurrentThreadId()) clip_fullscreen_window( foreground, TRUE );
-        else SendNotifyMessageW( foreground, WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );
-    }
-}
-
 static BOOL force_display_devices_refresh;
 
-void CDECL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
-                                        BOOL force, void *param )
+BOOL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager, BOOL force, void *param )
 {
     struct x11drv_display_device_handler *handler;
     struct gdi_adapter *adapters;
@@ -474,32 +568,21 @@ void CDECL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_
     struct gdi_gpu *gpus;
     INT gpu_count, adapter_count, monitor_count;
     INT gpu, adapter, monitor;
+    DEVMODEW *modes, *mode;
+    DWORD mode_count;
 
-    if (!force && !force_display_devices_refresh) return;
+    if (!force && !force_display_devices_refresh) return TRUE;
     force_display_devices_refresh = FALSE;
     handler = is_virtual_desktop() ? &desktop_handler : &host_handler;
 
     TRACE("via %s\n", wine_dbgstr_a(handler->name));
 
     /* Initialize GPUs */
-    if (!handler->get_gpus(&gpus, &gpu_count))
-        return;
+    if (!handler->get_gpus( &gpus, &gpu_count )) return FALSE;
     TRACE("GPU count: %d\n", gpu_count);
 
     for (gpu = 0; gpu < gpu_count; gpu++)
     {
-        {
-            const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-            if (sgi && *sgi != '0')
-            {
-                if (gpus[gpu].vendor_id == 0x10de /* NVIDIA */)
-                {
-                    gpus[gpu].vendor_id = 0x1002; /* AMD */
-                    gpus[gpu].device_id = 0x67df; /* RX 480 */
-                }
-            }
-        }
-
         device_manager->add_gpu( &gpus[gpu], param );
 
         /* Initialize adapters */
@@ -521,12 +604,25 @@ void CDECL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_
             }
 
             handler->free_monitors(monitors, monitor_count);
+
+            if (!settings_handler.get_modes( adapters[adapter].id, EDS_ROTATEDMODE, &modes, &mode_count ))
+                continue;
+
+            for (mode = modes; mode_count; mode_count--)
+            {
+                TRACE( "mode: %p\n", mode );
+                device_manager->add_mode( mode, param );
+                mode = (DEVMODEW *)((char *)mode + sizeof(*modes) + modes[0].dmDriverExtra);
+            }
+
+            settings_handler.free_modes( modes );
         }
 
         handler->free_adapters(adapters);
     }
 
     handler->free_gpus(gpus);
+    return TRUE;
 }
 
 void X11DRV_DisplayDevices_Init(BOOL force)

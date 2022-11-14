@@ -153,6 +153,7 @@
 # @ stub NtCancelDeviceWakeupRequest
 @ stdcall -syscall NtCancelIoFile(long ptr)
 @ stdcall -syscall NtCancelIoFileEx(long ptr ptr)
+@ stdcall -syscall NtCancelSynchronousIoFile(long ptr ptr)
 @ stdcall -syscall NtCancelTimer(long ptr)
 @ stdcall -syscall NtClearEvent(long)
 @ stdcall -syscall NtClose(long)
@@ -877,8 +878,8 @@
 @ stub RtlNewInstanceSecurityObject
 @ stub RtlNewSecurityGrantedAccess
 @ stdcall RtlNewSecurityObject(ptr ptr ptr long ptr ptr)
-# @ stub RtlNewSecurityObjectEx
-# @ stub RtlNewSecurityObjectWithMultipleInheritance
+@ stdcall RtlNewSecurityObjectEx(ptr ptr ptr ptr long long long ptr)
+@ stdcall RtlNewSecurityObjectWithMultipleInheritance(ptr ptr ptr ptr long long long long ptr)
 @ stdcall RtlNormalizeProcessParams(ptr)
 @ stdcall RtlNormalizeString(long wstr long ptr ptr)
 # @ stub RtlNtPathNameToDosPathName
@@ -1186,6 +1187,7 @@
 # @ stub ZwCancelDeviceWakeupRequest
 @ stdcall -private -syscall ZwCancelIoFile(long ptr) NtCancelIoFile
 @ stdcall -private -syscall ZwCancelIoFileEx(long ptr ptr) NtCancelIoFileEx
+@ stdcall -private -syscall ZwCancelSynchronousIoFile(long ptr ptr) NtCancelSynchronousIoFile
 @ stdcall -private -syscall ZwCancelTimer(long ptr) NtCancelTimer
 @ stdcall -private -syscall ZwClearEvent(long) NtClearEvent
 @ stdcall -private -syscall ZwClose(long) NtClose

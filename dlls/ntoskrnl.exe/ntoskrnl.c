@@ -3319,8 +3319,7 @@ PVOID WINAPI MmGetSystemRoutineAddress(PUNICODE_STRING SystemRoutineName)
         pFunc = GetProcAddress( hMod, routineNameA.Buffer );
         if (!pFunc)
         {
-           hMod = GetModuleHandleW( halW );
-
+           hMod = LoadLibraryW( halW );
            if (hMod) pFunc = GetProcAddress( hMod, routineNameA.Buffer );
         }
         RtlFreeAnsiString( &routineNameA );
@@ -4074,16 +4073,6 @@ NTSTATUS WINAPI IoCreateFile(HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUT
     return IoCreateFileEx(handle, access, attr, io, alloc_size, attributes, sharing, disposition,
                           create_options, ea_buffer, ea_length, file_type, parameters, options, NULL);
 }
-
-/***********************************************************************
- *           IoCreateNotificationEvent (NTOSKRNL.EXE.@)
- */
-PKEVENT WINAPI IoCreateNotificationEvent(UNICODE_STRING *name, HANDLE *handle)
-{
-    FIXME( "stub: %s %p\n", debugstr_us(name), handle );
-    return NULL;
-}
-
 
 /**************************************************************************
  *		__chkstk (NTOSKRNL.@)

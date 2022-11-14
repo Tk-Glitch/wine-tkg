@@ -709,7 +709,7 @@ HRESULT dispex_get_dprop_ref(DispatchEx *This, const WCHAR *name, BOOL alloc, VA
     return S_OK;
 }
 
-HRESULT dispex_get_dynid(DispatchEx *This, const WCHAR *name, DISPID *id)
+HRESULT dispex_get_dynid(DispatchEx *This, const WCHAR *name, BOOL hidden, DISPID *id)
 {
     dynamic_prop_t *prop;
     HRESULT hres;
@@ -718,7 +718,8 @@ HRESULT dispex_get_dynid(DispatchEx *This, const WCHAR *name, DISPID *id)
     if(FAILED(hres))
         return hres;
 
-    prop->flags |= DYNPROP_HIDDEN;
+    if(hidden)
+        prop->flags |= DYNPROP_HIDDEN;
     *id = DISPID_DYNPROP_0 + (prop - This->dynamic_data->props);
     return S_OK;
 }
@@ -1071,7 +1072,8 @@ HRESULT change_type(VARIANT *dst, VARIANT *src, VARTYPE vt, IServiceProvider *ca
         if(SUCCEEDED(hres)) {
             hres = IVariantChangeType_ChangeType(change_type, dst, src, LOCALE_NEUTRAL, vt);
             IVariantChangeType_Release(change_type);
-            return hres;
+            if(SUCCEEDED(hres))
+                return S_OK;
         }
     }
 
@@ -1080,6 +1082,14 @@ HRESULT change_type(VARIANT *dst, VARIANT *src, VARTYPE vt, IServiceProvider *ca
         if(V_VT(src) == VT_BSTR) {
             V_VT(dst) = VT_BOOL;
             V_BOOL(dst) = variant_bool(V_BSTR(src) && *V_BSTR(src));
+            return S_OK;
+        }
+        break;
+    case VT_UNKNOWN:
+    case VT_DISPATCH:
+        if(V_VT(src) == VT_EMPTY || V_VT(src) == VT_NULL) {
+            V_VT(dst) = vt;
+            V_DISPATCH(dst) = NULL;
             return S_OK;
         }
         break;

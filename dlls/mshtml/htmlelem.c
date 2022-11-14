@@ -1811,7 +1811,7 @@ static HRESULT WINAPI HTMLElement_get_document(IHTMLElement *iface, IDispatch **
     if(This->node.vtbl->get_document)
         return This->node.vtbl->get_document(&This->node, p);
 
-    *p = (IDispatch*)&This->node.doc->basedoc.IHTMLDocument2_iface;
+    *p = (IDispatch*)&This->node.doc->IHTMLDocument2_iface;
     IDispatch_AddRef(*p);
     return S_OK;
 }
@@ -2939,8 +2939,7 @@ static HRESULT WINAPI HTMLElement2_doScroll(IHTMLElement2 *iface, VARIANT compon
 
     TRACE("(%p)->(%s)\n", This, debugstr_variant(&component));
 
-    if(!This->node.doc->content_ready
-       || !This->node.doc->basedoc.doc_obj->in_place_active)
+    if(!This->node.doc->content_ready || !This->node.doc->doc_obj->in_place_active)
         return E_PENDING;
 
     WARN("stub\n");

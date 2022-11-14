@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -264,13 +268,14 @@ static const struct user_driver_funcs macdrv_funcs =
 
     .pActivateKeyboardLayout = macdrv_ActivateKeyboardLayout,
     .pBeep = macdrv_Beep,
-    .pChangeDisplaySettingsEx = macdrv_ChangeDisplaySettingsEx,
+    .pChangeDisplaySettings = macdrv_ChangeDisplaySettings,
     .pClipCursor = macdrv_ClipCursor,
+    .pClipboardWindowProc = macdrv_ClipboardWindowProc,
     .pCreateDesktopWindow = macdrv_CreateDesktopWindow,
-    .pCreateWindow = macdrv_CreateWindow,
+    .pDesktopWindowProc = macdrv_DesktopWindowProc,
     .pDestroyCursorIcon = macdrv_DestroyCursorIcon,
     .pDestroyWindow = macdrv_DestroyWindow,
-    .pEnumDisplaySettingsEx = macdrv_EnumDisplaySettingsEx,
+    .pGetCurrentDisplaySettings = macdrv_GetCurrentDisplaySettings,
     .pUpdateDisplayDevices = macdrv_UpdateDisplayDevices,
     .pGetCursorPos = macdrv_GetCursorPos,
     .pGetKeyboardLayoutList = macdrv_GetKeyboardLayoutList,

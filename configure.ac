@@ -77,6 +77,8 @@ AC_ARG_WITH(xinput,    AS_HELP_STRING([--without-xinput],[do not use the Xinput 
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_XInput_h=no; fi])
 AC_ARG_WITH(xinput2,   AS_HELP_STRING([--without-xinput2],[do not use the Xinput 2 extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_XInput2_h=no; fi])
+AC_ARG_WITH(xpresent,  AS_HELP_STRING([--without-xpresent],[do not use the Xpresent extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xpresent_h=no; fi])
 AC_ARG_WITH(xrandr,    AS_HELP_STRING([--without-xrandr],[do not use Xrandr (multi-monitor support)]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xrandr_h=no; fi])
 AC_ARG_WITH(xrender,   AS_HELP_STRING([--without-xrender],[do not use the Xrender extension]),
@@ -677,7 +679,6 @@ libwine_soversion=`expr $libwine_version : '\([[0-9]]*\)\..*'`
 
 case $host_os in
   cygwin*|mingw32*)
-    AC_CHECK_TOOL(DLLTOOL,dlltool,false)
     LIBEXT="dll"
     EXTRACFLAGS="-D__WINE_PE_BUILD"
     dnl Disable stdcall fixups to catch prototype mismatches
@@ -1199,6 +1200,7 @@ then
                       X11/extensions/Xcomposite.h \
                       X11/extensions/Xfixes.h \
                       X11/extensions/Xinerama.h \
+                      X11/extensions/Xpresent.h \
                       X11/extensions/Xrandr.h \
                       X11/extensions/Xrender.h \
                       X11/extensions/xf86vmode.h \
@@ -1315,6 +1317,16 @@ then
         fi
         WINE_NOTICE_WITH(xinerama,[test "x$ac_cv_lib_soname_Xinerama" = "x"],
                          [libxinerama ${notice_platform}development files not found, multi-monitor setups won't be supported.])
+
+        dnl *** Check for Xpresent extension
+        if test "$ac_cv_header_X11_extensions_Xpresent_h" = "yes"
+        then
+                AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
+#include <X11/extensions/Xpresent.h>]], [[static typeof(XPresentQueryVersion) * func; if (func) return 0;]])],
+                  [WINE_CHECK_SONAME(Xpresent,XPresentQueryVersion,,,[$X_LIBS $X_EXTRA_LIBS])])
+        fi
+        WINE_NOTICE_WITH(Xpresent,[test "x$ac_cv_lib_soname_Xpresent" = "x"],
+                         [libXpresent ${notice_platform}development files not found, Xpresent won't be supported.])
 
         dnl *** Check for X Composite extension
         if test "$ac_cv_header_X11_extensions_Xcomposite_h" = "yes"
@@ -2447,6 +2459,7 @@ WINE_CONFIG_MAKEFILE(dlls/atl90)
 WINE_CONFIG_MAKEFILE(dlls/atlthunk)
 WINE_CONFIG_MAKEFILE(dlls/atlthunk/tests)
 WINE_CONFIG_MAKEFILE(dlls/atmlib)
+WINE_CONFIG_MAKEFILE(dlls/audioses)
 WINE_CONFIG_MAKEFILE(dlls/authz)
 WINE_CONFIG_MAKEFILE(dlls/avicap32)
 WINE_CONFIG_MAKEFILE(dlls/avifil32)
@@ -3656,7 +3669,7 @@ dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.19.r0.g41a3c56c\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.20.r0.gacb05462\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:

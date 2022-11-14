@@ -28,10 +28,11 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "prsht.h"
+#include "commctrl.h"
 #include "ddk/compstui.h"
 
 #include "wine/debug.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(compstui);
 
@@ -59,11 +60,24 @@ struct propsheet
 {
     int pages_cnt;
     HANDLE pages[100];
+    struct list funcs;
 };
 
 struct propsheetpage
 {
     HPROPSHEETPAGE hpsp;
+    DLGPROC dlg_proc;
+};
+
+struct propsheetfunc
+{
+    struct list entry;
+    HANDLE handle;
+    PFNPROPSHEETUI func;
+    LPARAM lparam;
+    BOOL unicode;
+    ULONG_PTR user_data;
+    ULONG_PTR result;
 };
 
 #define HANDLE_FIRST 0x43440001
@@ -73,7 +87,8 @@ static struct cps_data
     {
         HANDLE_FREE = 0,
         HANDLE_PROPSHEET,
-        HANDLE_PROPSHEETPAGE
+        HANDLE_PROPSHEETPAGE,
+        HANDLE_PROPSHEETFUNC,
     } type;
     union
     {
@@ -81,6 +96,7 @@ static struct cps_data
         struct cps_data *next_free;
         struct propsheet *ps;
         struct propsheetpage *psp;
+        struct propsheetfunc *psf;
     };
 } handles[0x1000];
 static struct cps_data *first_free_handle = handles;
@@ -93,6 +109,8 @@ static CRITICAL_SECTION_DEBUG handles_cs_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": handles_cs") }
 };
 static CRITICAL_SECTION handles_cs = { &handles_cs_debug, -1, 0, 0, 0, 0 };
+
+static LONG_PTR WINAPI cps_callback(HANDLE hcps, UINT func, LPARAM lparam1, LPARAM lparam2);
 
 static struct cps_data* get_handle_data(HANDLE handle)
 {
@@ -116,6 +134,9 @@ static HANDLE alloc_handle(struct cps_data **cps_data, int type)
         break;
     case HANDLE_PROPSHEETPAGE:
         data = calloc(1, sizeof(struct propsheetpage));
+        break;
+    case HANDLE_PROPSHEETFUNC:
+        data = calloc(1, sizeof(struct propsheetfunc));
         break;
     }
 
@@ -187,6 +208,183 @@ static HANDLE add_hpropsheetpage(HANDLE hcps, HPROPSHEETPAGE hpsp)
     return ret;
 }
 
+static HANDLE add_propsheetfunc(HANDLE hcps, PFNPROPSHEETUI func, LPARAM lparam, BOOL unicode)
+{
+    struct cps_data *cps_data = get_handle_data(hcps);
+    struct cps_data *cpsf_data;
+    PROPSHEETUI_INFO info, callback_info;
+    HANDLE ret;
+    LONG lret;
+
+    if (!cps_data || !func)
+        return 0;
+
+    if (cps_data->type != HANDLE_PROPSHEET)
+    {
+        FIXME("unsupported handle type %d\n", cps_data->type);
+        return 0;
+    }
+
+    ret = alloc_handle(&cpsf_data, HANDLE_PROPSHEETFUNC);
+    if (!ret)
+        return 0;
+    cpsf_data->psf->handle = ret;
+    cpsf_data->psf->func = func;
+    cpsf_data->psf->unicode = unicode;
+    cpsf_data->psf->lparam = lparam;
+
+    memset(&info, 0, sizeof(info));
+    info.cbSize = sizeof(info);
+    info.Version = PROPSHEETUI_INFO_VERSION;
+    info.Flags = unicode ? PSUIINFO_UNICODE : 0;
+    info.Reason = PROPSHEETUI_REASON_INIT;
+    info.hComPropSheet = hcps;
+    info.pfnComPropSheet = cps_callback;
+    info.lParamInit = lparam;
+
+    callback_info = info;
+    lret = func(&callback_info, lparam);
+    cpsf_data->psf->user_data = callback_info.UserData;
+    cpsf_data->psf->result = callback_info.Result;
+    if (lret <= 0)
+    {
+        callback_info = info;
+        callback_info.Reason = PROPSHEETUI_REASON_DESTROY;
+        callback_info.UserData = cpsf_data->psf->user_data;
+        callback_info.Result = cpsf_data->psf->result;
+        free_handle(ret);
+        func(&callback_info, 0);
+        return 0;
+    }
+
+    list_add_tail(&cps_data->ps->funcs, &cpsf_data->psf->entry);
+    return ret;
+}
+
+static HANDLE add_propsheetpage(HANDLE hcps, void *psp, PSPINFO *info,
+        DLGPROC dlg_proc, BOOL unicode)
+{
+    struct cps_data *cps_data = get_handle_data(hcps);
+    struct cps_data *cpsp_data;
+    HPROPSHEETPAGE hpsp;
+    HANDLE ret;
+
+    if (!cps_data)
+        return 0;
+
+    if (cps_data->type != HANDLE_PROPSHEET)
+    {
+        FIXME("unsupported handle type %d\n", cps_data->type);
+        return 0;
+    }
+
+    if (cps_data->ps->pages_cnt == ARRAY_SIZE(cps_data->ps->pages))
+        return 0;
+
+    ret = alloc_handle(&cpsp_data, HANDLE_PROPSHEETPAGE);
+    if (!ret)
+        return 0;
+
+    info->cbSize = sizeof(*info);
+    info->wReserved = 0;
+    info->hComPropSheet = hcps;
+    info->hCPSUIPage = ret;
+    info->pfnComPropSheet = cps_callback;
+
+    if (unicode)
+        hpsp = CreatePropertySheetPageW((PROPSHEETPAGEW*)psp);
+    else
+        hpsp = CreatePropertySheetPageA((PROPSHEETPAGEA*)psp);
+    if (!hpsp)
+    {
+        free_handle(ret);
+        return 0;
+    }
+
+    cpsp_data->psp->hpsp = hpsp;
+    cpsp_data->psp->dlg_proc = dlg_proc;
+    cps_data->ps->pages[cps_data->ps->pages_cnt++] = ret;
+    return ret;
+}
+
+static INT_PTR CALLBACK propsheetpage_dlg_procW(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg == WM_INITDIALOG)
+    {
+        PROPSHEETPAGEW *psp = (PROPSHEETPAGEW*)lparam;
+        PSPINFO *info = (PSPINFO*)((BYTE*)lparam + psp->dwSize - sizeof(*info));
+        struct cps_data *cpsp_data = get_handle_data(info->hCPSUIPage);
+
+        psp->dwSize -= sizeof(*info);
+        psp->pfnDlgProc = cpsp_data->psp->dlg_proc;
+        SetWindowLongPtrW(hwnd, DWLP_DLGPROC, (LONG_PTR)psp->pfnDlgProc);
+        return psp->pfnDlgProc(hwnd, msg, wparam, lparam);
+    }
+
+    return FALSE;
+}
+
+static HANDLE add_propsheetpageW(HANDLE hcps, PROPSHEETPAGEW *psp)
+{
+    PROPSHEETPAGEW *psp_copy;
+    PSPINFO *info;
+    HANDLE ret;
+
+    if (!psp || psp->dwSize < PROPSHEETPAGEW_V1_SIZE)
+        return 0;
+
+    psp_copy = (PROPSHEETPAGEW*)malloc(psp->dwSize + sizeof(*info));
+    if (!psp_copy)
+        return 0;
+    memcpy(psp_copy, psp, psp->dwSize);
+    psp_copy->dwSize += sizeof(*info);
+    psp_copy->pfnDlgProc = propsheetpage_dlg_procW;
+
+    info = (PSPINFO*)((BYTE*)psp_copy + psp->dwSize);
+    ret = add_propsheetpage(hcps, psp_copy, info, psp->pfnDlgProc, TRUE);
+    free(psp_copy);
+    return ret;
+}
+
+static INT_PTR CALLBACK propsheetpage_dlg_procA(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg == WM_INITDIALOG)
+    {
+        PROPSHEETPAGEA *psp = (PROPSHEETPAGEA*)lparam;
+        PSPINFO *info = (PSPINFO*)((BYTE*)lparam + psp->dwSize - sizeof(*info));
+        struct cps_data *cpsp_data = get_handle_data(info->hCPSUIPage);
+
+        psp->dwSize -= sizeof(*info);
+        psp->pfnDlgProc = cpsp_data->psp->dlg_proc;
+        SetWindowLongPtrA(hwnd, DWLP_DLGPROC, (LONG_PTR)psp->pfnDlgProc);
+        return psp->pfnDlgProc(hwnd, msg, wparam, lparam);
+    }
+
+    return FALSE;
+}
+
+static HANDLE add_propsheetpageA(HANDLE hcps, PROPSHEETPAGEA *psp)
+{
+    PROPSHEETPAGEA *psp_copy;
+    PSPINFO *info;
+    HANDLE ret;
+
+    if (!psp || psp->dwSize < PROPSHEETPAGEW_V1_SIZE)
+        return 0;
+
+    psp_copy = (PROPSHEETPAGEA*)malloc(psp->dwSize + sizeof(*info));
+    if (!psp_copy)
+        return 0;
+    memcpy(psp_copy, psp, psp->dwSize);
+    psp_copy->dwSize += sizeof(*info);
+    psp_copy->pfnDlgProc = propsheetpage_dlg_procA;
+
+    info = (PSPINFO*)((BYTE*)psp_copy + psp->dwSize);
+    ret = add_propsheetpage(hcps, psp_copy, info, psp->pfnDlgProc, FALSE);
+    free(psp_copy);
+    return ret;
+}
+
 static LONG_PTR WINAPI cps_callback(HANDLE hcps, UINT func, LPARAM lparam1, LPARAM lparam2)
 {
     TRACE("(%p, %u, %Ix, %Ix\n", hcps, func, lparam1, lparam2);
@@ -195,11 +393,16 @@ static LONG_PTR WINAPI cps_callback(HANDLE hcps, UINT func, LPARAM lparam1, LPAR
     {
     case CPSFUNC_ADD_HPROPSHEETPAGE:
         return (LONG_PTR)add_hpropsheetpage(hcps, (HPROPSHEETPAGE)lparam1);
-    case CPSFUNC_ADD_PROPSHEETPAGEW:
-    case CPSFUNC_ADD_PCOMPROPSHEETUIA:
-    case CPSFUNC_ADD_PCOMPROPSHEETUIW:
     case CPSFUNC_ADD_PFNPROPSHEETUIA:
     case CPSFUNC_ADD_PFNPROPSHEETUIW:
+        return (LONG_PTR)add_propsheetfunc(hcps, (PFNPROPSHEETUI)lparam1,
+                lparam2, func == CPSFUNC_ADD_PFNPROPSHEETUIW);
+    case CPSFUNC_ADD_PROPSHEETPAGEA:
+        return (LONG_PTR)add_propsheetpageA(hcps, (PROPSHEETPAGEA*)lparam1);
+    case CPSFUNC_ADD_PROPSHEETPAGEW:
+        return (LONG_PTR)add_propsheetpageW(hcps, (PROPSHEETPAGEW*)lparam1);
+    case CPSFUNC_ADD_PCOMPROPSHEETUIA:
+    case CPSFUNC_ADD_PCOMPROPSHEETUIW:
     case CPSFUNC_DELETE_HCOMPROPSHEET:
     case CPSFUNC_SET_HSTARTPAGE:
     case CPSFUNC_GET_PAGECOUNT:
@@ -209,7 +412,6 @@ static LONG_PTR WINAPI cps_callback(HANDLE hcps, UINT func, LPARAM lparam1, LPAR
     case CPSFUNC_LOAD_CPSUI_STRINGW:
     case CPSFUNC_LOAD_CPSUI_ICON:
     case CPSFUNC_GET_PFNPROPSHEETUI_ICON:
-    case CPSFUNC_ADD_PROPSHEETPAGEA:
     case CPSFUNC_INSERT_PSUIPAGEA:
     case CPSFUNC_INSERT_PSUIPAGEW:
     case CPSFUNC_SET_PSUIPAGE_TITLEA:
@@ -324,6 +526,7 @@ static LONG create_prop_dlg(HWND hwnd, PFNPROPSHEETUI callback, LPARAM lparam, D
         SetLastError(0);
         return ERR_CPSUI_GETLASTERROR;
     }
+    list_init(&cps_data->ps->funcs);
 
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
@@ -364,9 +567,25 @@ static LONG create_prop_dlg(HWND hwnd, PFNPROPSHEETUI callback, LPARAM lparam, D
     ret = create_property_sheetW(cps_data->ps, &header);
 
 destroy:
+    info.Reason = PROPSHEETUI_REASON_DESTROY;
+    while (!list_empty(&cps_data->ps->funcs))
+    {
+        struct propsheetfunc *func = LIST_ENTRY(list_head(&cps_data->ps->funcs),
+                struct propsheetfunc, entry);
+
+        list_remove(&func->entry);
+
+        callback_info = info;
+        callback_info.Flags = func->unicode ? PSUIINFO_UNICODE : 0;
+        callback_info.lParamInit = func->lparam;
+        callback_info.UserData = func->user_data;
+        callback_info.Result = func->result;
+        func->func(&callback_info, ret <= 0 ? 0 : 0x100);
+        free_handle(func->handle);
+    }
+
     callback_info = info;
-    callback_info.Reason = PROPSHEETUI_REASON_DESTROY;
-    callback(&callback_info, ret < 0 ? 0 : 0x100);
+    callback(&callback_info, ret <= 0 ? 0 : 0x100);
 
     for (i = 0; i < cps_data->ps->pages_cnt; i++)
         free_handle(cps_data->ps->pages[i]);

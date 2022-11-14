@@ -7,7 +7,6 @@ DELAYIMPORTS = setupapi imm32
 
 C_SRCS = \
 	button.c \
-	caret.c \
 	class.c \
 	clipboard.c \
 	combo.c \
@@ -19,7 +18,6 @@ C_SRCS = \
 	defwnd.c \
 	desktop.c \
 	dialog.c \
-	driver.c \
 	edit.c \
 	exticon.c \
 	focus.c \
@@ -36,10 +34,8 @@ C_SRCS = \
 	nonclient.c \
 	painting.c \
 	property.c \
-	rawinput.c \
 	resource.c \
 	scroll.c \
-	spy.c \
 	static.c \
 	sysparams.c \
 	text.c \

@@ -20,16 +20,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #define NONAMELESSUNION
 
-#include "macdrv.h"
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "macdrv_dll.h"
 
 #define COBJMACROS
 #include "objidl.h"
 #include "shellapi.h"
 #include "shlobj.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dragdrop);
 
@@ -42,15 +43,73 @@ typedef struct
 {
     IDataObject IDataObject_iface;
     LONG        ref;
-    CFTypeRef   pasteboard;
+    UINT64      pasteboard;
 } DragDropDataObject;
 
+
+/**************************************************************************
+ *              debugstr_format
+ */
+static const char *debugstr_format(UINT id)
+{
+    WCHAR buffer[256];
+
+    if (GetClipboardFormatNameW(id, buffer, 256))
+        return wine_dbg_sprintf("0x%04x %s", id, debugstr_w(buffer));
+
+    switch (id)
+    {
+#define BUILTIN(id) case id: return #id;
+    BUILTIN(CF_TEXT)
+    BUILTIN(CF_BITMAP)
+    BUILTIN(CF_METAFILEPICT)
+    BUILTIN(CF_SYLK)
+    BUILTIN(CF_DIF)
+    BUILTIN(CF_TIFF)
+    BUILTIN(CF_OEMTEXT)
+    BUILTIN(CF_DIB)
+    BUILTIN(CF_PALETTE)
+    BUILTIN(CF_PENDATA)
+    BUILTIN(CF_RIFF)
+    BUILTIN(CF_WAVE)
+    BUILTIN(CF_UNICODETEXT)
+    BUILTIN(CF_ENHMETAFILE)
+    BUILTIN(CF_HDROP)
+    BUILTIN(CF_LOCALE)
+    BUILTIN(CF_DIBV5)
+    BUILTIN(CF_OWNERDISPLAY)
+    BUILTIN(CF_DSPTEXT)
+    BUILTIN(CF_DSPBITMAP)
+    BUILTIN(CF_DSPMETAFILEPICT)
+    BUILTIN(CF_DSPENHMETAFILE)
+#undef BUILTIN
+    default: return wine_dbg_sprintf("0x%04x", id);
+    }
+}
 
 static inline DragDropDataObject *impl_from_IDataObject(IDataObject *iface)
 {
     return CONTAINING_RECORD(iface, DragDropDataObject, IDataObject_iface);
 }
 
+
+static HANDLE get_pasteboard_data(UINT64 pasteboard, UINT desired_format)
+{
+    struct dnd_get_data_params params = { .handle = pasteboard, .format = desired_format, .size = 2048 };
+    HANDLE handle;
+    NTSTATUS status;
+
+    for (;;)
+    {
+        if (!(handle = GlobalAlloc(GMEM_FIXED, params.size))) return 0;
+        params.data = GlobalLock(handle);
+        status = MACDRV_CALL(dnd_get_data, &params);
+        GlobalUnlock(handle);
+        if (!status) return GlobalReAlloc(handle, params.size, 0);
+        GlobalFree(handle);
+        if (status != STATUS_BUFFER_OVERFLOW) return 0;
+    }
+}
 
 static HRESULT WINAPI dddo_QueryInterface(IDataObject* iface, REFIID riid, LPVOID *ppvObj)
 {
@@ -91,7 +150,7 @@ static ULONG WINAPI dddo_Release(IDataObject* iface)
         return refCount;
 
     TRACE("-- destroying DragDropDataObject (%p)\n", This);
-    CFRelease(This->pasteboard);
+    MACDRV_CALL(dnd_release, &This->pasteboard);
     HeapFree(GetProcessHeap(), 0, This);
     return 0;
 }
@@ -108,7 +167,7 @@ static HRESULT WINAPI dddo_GetData(IDataObject* iface, FORMATETC* formatEtc, STG
     if (SUCCEEDED(hr))
     {
         medium->tymed = TYMED_HGLOBAL;
-        medium->u.hGlobal = macdrv_get_pasteboard_data(This->pasteboard, formatEtc->cfFormat);
+        medium->u.hGlobal = get_pasteboard_data(This->pasteboard, formatEtc->cfFormat);
         medium->pUnkForRelease = NULL;
         hr = medium->u.hGlobal ? S_OK : E_OUTOFMEMORY;
     }
@@ -128,6 +187,7 @@ static HRESULT WINAPI dddo_GetDataHere(IDataObject* iface, FORMATETC* formatEtc,
 static HRESULT WINAPI dddo_QueryGetData(IDataObject* iface, FORMATETC* formatEtc)
 {
     DragDropDataObject *This = impl_from_IDataObject(iface);
+    struct dnd_have_format_params params;
     HRESULT hr = DV_E_FORMATETC;
 
     TRACE("This %p formatEtc %p={.tymed=0x%x, .dwAspect=%d, .cfFormat=%s}\n",
@@ -145,7 +205,9 @@ static HRESULT WINAPI dddo_QueryGetData(IDataObject* iface, FORMATETC* formatEtc
         return E_NOTIMPL;
     }
 
-    if (macdrv_pasteboard_has_format(This->pasteboard, formatEtc->cfFormat))
+    params.handle = This->pasteboard;
+    params.format = formatEtc->cfFormat;
+    if (MACDRV_CALL(dnd_have_format, &params))
         hr = S_OK;
 
     TRACE(" -> 0x%x\n", hr);
@@ -185,7 +247,8 @@ static HRESULT WINAPI dddo_EnumFormatEtc(IDataObject* iface, DWORD direction,
                                          IEnumFORMATETC** enumFormatEtc)
 {
     DragDropDataObject *This = impl_from_IDataObject(iface);
-    UINT *formats, count;
+    struct dnd_get_formats_params params;
+    UINT count;
     HRESULT hr;
 
     TRACE("This %p direction %u enumFormatEtc %p\n", This, direction, enumFormatEtc);
@@ -196,8 +259,9 @@ static HRESULT WINAPI dddo_EnumFormatEtc(IDataObject* iface, DWORD direction,
         return E_NOTIMPL;
     }
 
-    formats = macdrv_get_pasteboard_formats(This->pasteboard, &count);
-    if (formats)
+    params.handle = This->pasteboard;
+    count = MACDRV_CALL(dnd_get_formats, &params);
+    if (count)
     {
         FORMATETC *formatEtcs = HeapAlloc(GetProcessHeap(), 0, count * sizeof(FORMATETC));
         if (formatEtcs)
@@ -206,7 +270,7 @@ static HRESULT WINAPI dddo_EnumFormatEtc(IDataObject* iface, DWORD direction,
 
             for (i = 0; i < count; i++)
             {
-                formatEtcs[i].cfFormat = formats[i];
+                formatEtcs[i].cfFormat = params.formats[i];
                 formatEtcs[i].ptd = NULL;
                 formatEtcs[i].dwAspect = DVASPECT_CONTENT;
                 formatEtcs[i].lindex = -1;
@@ -218,8 +282,6 @@ static HRESULT WINAPI dddo_EnumFormatEtc(IDataObject* iface, DWORD direction,
         }
         else
             hr = E_OUTOFMEMORY;
-
-        HeapFree(GetProcessHeap(), 0, formats);
     }
     else
         hr = SHCreateStdEnumFmtEtc(0, NULL, enumFormatEtc);
@@ -269,7 +331,7 @@ static const IDataObjectVtbl dovt =
 };
 
 
-static IDataObject *create_data_object_for_pasteboard(CFTypeRef pasteboard)
+static IDataObject *create_data_object_for_pasteboard(UINT64 pasteboard)
 {
     DragDropDataObject *dddo;
 
@@ -279,40 +341,10 @@ static IDataObject *create_data_object_for_pasteboard(CFTypeRef pasteboard)
 
     dddo->ref = 1;
     dddo->IDataObject_iface.lpVtbl = &dovt;
-    dddo->pasteboard = CFRetain(pasteboard);
+    dddo->pasteboard = pasteboard;
+    MACDRV_CALL(dnd_retain, &dddo->pasteboard);
 
     return &dddo->IDataObject_iface;
-}
-
-
-/**************************************************************************
- *              drag_operations_to_dropeffects
- */
-static DWORD drag_operations_to_dropeffects(uint32_t ops)
-{
-    DWORD effects = DROPEFFECT_NONE;
-    if (ops & (DRAG_OP_COPY | DRAG_OP_GENERIC))
-        effects |= DROPEFFECT_COPY;
-    if (ops & DRAG_OP_MOVE)
-        effects |= DROPEFFECT_MOVE;
-    if (ops & (DRAG_OP_LINK | DRAG_OP_GENERIC))
-        effects |= DROPEFFECT_LINK;
-    return effects;
-}
-
-
-/**************************************************************************
- *              dropeffect_to_drag_operation
- */
-static uint32_t dropeffect_to_drag_operation(DWORD effect, uint32_t ops)
-{
-    if (effect & DROPEFFECT_LINK && ops & DRAG_OP_LINK) return DRAG_OP_LINK;
-    if (effect & DROPEFFECT_COPY && ops & DRAG_OP_COPY) return DRAG_OP_COPY;
-    if (effect & DROPEFFECT_MOVE && ops & DRAG_OP_MOVE) return DRAG_OP_MOVE;
-    if (effect & DROPEFFECT_LINK && ops & DRAG_OP_GENERIC) return DRAG_OP_GENERIC;
-    if (effect & DROPEFFECT_COPY && ops & DRAG_OP_GENERIC) return DRAG_OP_GENERIC;
-
-    return DRAG_OP_NONE;
 }
 
 
@@ -387,40 +419,32 @@ static IDropTarget* get_droptarget_pointer(HWND hwnd)
 
 
 /**************************************************************************
- *              query_drag_drop
+ *              macdrv_dnd_query_drop
  */
-BOOL query_drag_drop(macdrv_query* query)
+NTSTATUS WINAPI macdrv_dnd_query_drop(void *arg, ULONG size)
 {
-    BOOL ret = FALSE;
-    HWND hwnd = macdrv_get_window_hwnd(query->window);
-    struct macdrv_win_data *data = get_win_data(hwnd);
-    POINT pt;
+    struct dnd_query_drop_params *params = arg;
     IDropTarget *droptarget;
+    BOOL ret = FALSE;
+    POINT pt;
 
-    TRACE("win %p/%p x,y %d,%d op 0x%08x pasteboard %p\n", hwnd, query->window,
-          query->drag_drop.x, query->drag_drop.y, query->drag_drop.op, query->drag_drop.pasteboard);
+    TRACE("win %x x,y %d,%d effect %x pasteboard %s\n", params->hwnd, params->x, params->y,
+          params->effect, wine_dbgstr_longlong(params->handle));
 
-    if (!data)
-    {
-        WARN("no win_data for win %p/%p\n", hwnd, query->window);
-        return FALSE;
-    }
-
-    pt.x = query->drag_drop.x + data->whole_rect.left;
-    pt.y = query->drag_drop.y + data->whole_rect.top;
-    release_win_data(data);
+    pt.x = params->x;
+    pt.y = params->y;
 
     droptarget = get_droptarget_pointer(last_droptarget_hwnd);
     if (droptarget)
     {
         HRESULT hr;
         POINTL pointl;
-        DWORD effect = drag_operations_to_dropeffects(query->drag_drop.op);
+        DWORD effect = params->effect;
 
         if (!active_data_object)
         {
             WARN("shouldn't happen: no active IDataObject\n");
-            active_data_object = create_data_object_for_pasteboard(query->drag_drop.pasteboard);
+            active_data_object = create_data_object_for_pasteboard(params->handle);
         }
 
         pointl.x = pt.x;
@@ -444,12 +468,12 @@ BOOL query_drag_drop(macdrv_query* query)
     }
     else
     {
-        hwnd = WindowFromPoint(pt);
+        HWND hwnd = WindowFromPoint(pt);
         while (hwnd && !(GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_ACCEPTFILES))
             hwnd = GetParent(hwnd);
         if (hwnd)
         {
-            HDROP hdrop = macdrv_get_pasteboard_data(query->drag_drop.pasteboard, CF_HDROP);
+            HDROP hdrop = get_pasteboard_data(params->handle, CF_HDROP);
             DROPFILES *dropfiles = GlobalLock(hdrop);
             if (dropfiles)
             {
@@ -482,14 +506,15 @@ BOOL query_drag_drop(macdrv_query* query)
 
 
 /**************************************************************************
- *              query_drag_exited
+ *              macdrv_dnd_query_exited
  */
-BOOL query_drag_exited(macdrv_query* query)
+NTSTATUS WINAPI macdrv_dnd_query_exited(void *arg, ULONG size)
 {
-    HWND hwnd = macdrv_get_window_hwnd(query->window);
+    struct dnd_query_exited_params *params = arg;
+    HWND hwnd = UlongToHandle(params->hwnd);
     IDropTarget *droptarget;
 
-    TRACE("win %p/%p\n", hwnd, query->window);
+    TRACE("win %p\n", hwnd);
 
     droptarget = get_droptarget_pointer(last_droptarget_hwnd);
     if (droptarget)
@@ -514,31 +539,22 @@ BOOL query_drag_exited(macdrv_query* query)
 /**************************************************************************
  *              query_drag_operation
  */
-BOOL query_drag_operation(macdrv_query* query)
+NTSTATUS WINAPI macdrv_dnd_query_drag(void *arg, ULONG size)
 {
+    struct dnd_query_drag_params *params = arg;
+    HWND hwnd = UlongToHandle(params->hwnd);
     BOOL ret = FALSE;
-    HWND hwnd = macdrv_get_window_hwnd(query->window);
-    struct macdrv_win_data *data = get_win_data(hwnd);
     POINT pt;
     DWORD effect;
     IDropTarget *droptarget;
     HRESULT hr;
 
-    TRACE("win %p/%p x,y %d,%d offered_ops 0x%x pasteboard %p\n", hwnd, query->window,
-          query->drag_operation.x, query->drag_operation.y, query->drag_operation.offered_ops,
-          query->drag_operation.pasteboard);
+    TRACE("win %p x,y %d,%d effect %x pasteboard %s\n", hwnd, params->x, params->y,
+          params->effect, wine_dbgstr_longlong(params->handle));
 
-    if (!data)
-    {
-        WARN("no win_data for win %p/%p\n", hwnd, query->window);
-        return FALSE;
-    }
-
-    pt.x = query->drag_operation.x + data->whole_rect.left;
-    pt.y = query->drag_operation.y + data->whole_rect.top;
-    release_win_data(data);
-
-    effect = drag_operations_to_dropeffects(query->drag_operation.offered_ops);
+    pt.x = params->x;
+    pt.y = params->y;
+    effect = params->effect;
 
     /* Instead of the top-level window we got in the query, start with the deepest
        child under the cursor.  Travel up the hierarchy looking for a window that
@@ -571,16 +587,14 @@ BOOL query_drag_operation(macdrv_query* query)
             POINTL pointl = { pt.x, pt.y };
 
             if (!active_data_object)
-                active_data_object = create_data_object_for_pasteboard(query->drag_operation.pasteboard);
+                active_data_object = create_data_object_for_pasteboard(params->handle);
 
             TRACE("DragEnter hwnd %p droptarget %p\n", hwnd, droptarget);
             hr = IDropTarget_DragEnter(droptarget, active_data_object, MK_LBUTTON,
                                        pointl, &effect);
             if (SUCCEEDED(hr))
             {
-                query->drag_operation.accepted_op = dropeffect_to_drag_operation(effect,
-                                                        query->drag_operation.offered_ops);
-                TRACE("    effect %d accepted op %d\n", effect, query->drag_operation.accepted_op);
+                TRACE("    effect %d\n", effect);
                 ret = TRUE;
             }
             else
@@ -596,9 +610,7 @@ BOOL query_drag_operation(macdrv_query* query)
         hr = IDropTarget_DragOver(droptarget, MK_LBUTTON, pointl, &effect);
         if (SUCCEEDED(hr))
         {
-            query->drag_operation.accepted_op = dropeffect_to_drag_operation(effect,
-                                                    query->drag_operation.offered_ops);
-            TRACE("    effect %d accepted op %d\n", effect, query->drag_operation.accepted_op);
+            TRACE("    effect %d\n", effect);
             ret = TRUE;
         }
         else
@@ -616,7 +628,7 @@ BOOL query_drag_operation(macdrv_query* query)
             FORMATETC formatEtc;
 
             if (!active_data_object)
-                active_data_object = create_data_object_for_pasteboard(query->drag_operation.pasteboard);
+                active_data_object = create_data_object_for_pasteboard(params->handle);
 
             formatEtc.cfFormat = CF_HDROP;
             formatEtc.ptd = NULL;
@@ -626,12 +638,12 @@ BOOL query_drag_operation(macdrv_query* query)
             if (SUCCEEDED(IDataObject_QueryGetData(active_data_object, &formatEtc)))
             {
                 TRACE("WS_EX_ACCEPTFILES hwnd %p\n", hwnd);
-                query->drag_operation.accepted_op = DRAG_OP_GENERIC;
+                effect = DROPEFFECT_COPY | DROPEFFECT_LINK;
                 ret = TRUE;
             }
         }
     }
 
     TRACE(" -> %s\n", ret ? "TRUE" : "FALSE");
-    return ret;
+    return ret ? effect : 0;
 }

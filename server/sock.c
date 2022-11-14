@@ -91,6 +91,7 @@
 #include "wsipx.h"
 #include "af_irda.h"
 #include "wine/afd.h"
+#include "wine/rbtree.h"
 
 #include "process.h"
 #include "file.h"
@@ -112,6 +113,19 @@ union win_sockaddr
     struct WS_sockaddr_in6 in6;
     struct WS_sockaddr_ipx ipx;
     SOCKADDR_IRDA irda;
+};
+
+union unix_sockaddr
+{
+    struct sockaddr addr;
+    struct sockaddr_in in;
+    struct sockaddr_in6 in6;
+#ifdef HAS_IPX
+    struct sockaddr_ipx ipx;
+#endif
+#ifdef HAS_IRDA
+    struct sockaddr_irda irda;
+#endif
 };
 
 static struct list poll_list = LIST_INIT( poll_list );
@@ -169,6 +183,13 @@ enum connection_state
     SOCK_CONNECTIONLESS,
 };
 
+struct bound_addr
+{
+    struct rb_entry entry;
+    union unix_sockaddr addr;
+    int reuse_count;
+};
+
 #define MAX_ICMP_HISTORY_LENGTH 8
 
 struct sock
@@ -224,6 +245,7 @@ struct sock
         unsigned short icmp_seq;
     }
     icmp_fixup_data[MAX_ICMP_HISTORY_LENGTH]; /* Sent ICMP packets history used to fixup reply id. */
+    struct bound_addr  *bound_addr[2]; /* Links to the entries in bound addresses tree. */
     unsigned int        icmp_fixup_data_len;  /* Sent ICMP packets history length. */
     unsigned int        rd_shutdown : 1; /* is the read end shut down? */
     unsigned int        wr_shutdown : 1; /* is the write end shut down? */
@@ -233,7 +255,139 @@ struct sock
     unsigned int        nonblocking : 1; /* is the socket nonblocking? */
     unsigned int        bound : 1;   /* is the socket bound? */
     unsigned int        reset : 1;   /* did we get a TCP reset? */
+    unsigned int        reuseaddr : 1; /* winsock SO_REUSEADDR option value */
 };
+
+static int is_tcp_socket( struct sock *sock )
+{
+    return sock->type == WS_SOCK_STREAM && (sock->family == WS_AF_INET || sock->family == WS_AF_INET6);
+}
+
+static int addr_compare( const void *key, const struct wine_rb_entry *entry )
+{
+    const struct bound_addr *bound_addr = RB_ENTRY_VALUE(entry, struct bound_addr, entry);
+    const union unix_sockaddr *addr = key;
+
+    if (addr->addr.sa_family != bound_addr->addr.addr.sa_family)
+        return addr->addr.sa_family < bound_addr->addr.addr.sa_family ? -1 : 1;
+
+    if (addr->addr.sa_family == AF_INET)
+    {
+        if (addr->in.sin_port != bound_addr->addr.in.sin_port)
+            return addr->in.sin_port < bound_addr->addr.in.sin_port ? -1 : 1;
+        if (addr->in.sin_addr.s_addr == bound_addr->addr.in.sin_addr.s_addr)
+            return 0;
+        return addr->in.sin_addr.s_addr < bound_addr->addr.in.sin_addr.s_addr ? -1 : 1;
+    }
+
+    assert( addr->addr.sa_family == AF_INET6 );
+    if (addr->in6.sin6_port != bound_addr->addr.in6.sin6_port)
+        return addr->in6.sin6_port < bound_addr->addr.in6.sin6_port ? -1 : 1;
+    return memcmp( &addr->in6.sin6_addr, &bound_addr->addr.in6.sin6_addr, sizeof(addr->in6.sin6_addr) );
+}
+
+static int ipv4addr_from_v6( union unix_sockaddr *v4addr, const struct sockaddr_in6 *in6 )
+{
+    v4addr->in.sin_family = AF_INET;
+    v4addr->in.sin_port = in6->sin6_port;
+    if (IN6_IS_ADDR_UNSPECIFIED(&in6->sin6_addr))
+    {
+        v4addr->in.sin_addr.s_addr = INADDR_ANY;
+        return 1;
+    }
+    if (IN6_IS_ADDR_LOOPBACK(&in6->sin6_addr))
+    {
+        v4addr->in.sin_addr.s_addr = INADDR_LOOPBACK;
+        return 1;
+    }
+    if (IN6_IS_ADDR_V4COMPAT(&in6->sin6_addr) || IN6_IS_ADDR_V4MAPPED(&in6->sin6_addr))
+    {
+        memcpy( &v4addr->in.sin_addr.s_addr, &in6->sin6_addr.s6_addr[12], sizeof(v4addr->in.sin_addr.s_addr) );
+        return 1;
+    }
+    return 0;
+}
+
+static struct rb_tree bound_addresses_tree = { addr_compare };
+
+static int should_track_conflicts_for_addr( struct sock *sock, const union unix_sockaddr *addr )
+{
+    if (!is_tcp_socket( sock )) return 0;
+
+    if (sock->family == WS_AF_INET && addr->addr.sa_family == AF_INET && addr->in.sin_port)
+        return 1;
+    else if (sock->family == WS_AF_INET6 && addr->addr.sa_family == AF_INET6 && addr->in6.sin6_port)
+        return 1;
+
+    return 0;
+}
+
+static int check_addr_usage( struct sock *sock, const union unix_sockaddr *addr, int v6only )
+{
+    struct bound_addr *bound_addr;
+    union unix_sockaddr v4addr;
+    struct rb_entry *entry;
+
+    if (!should_track_conflicts_for_addr( sock, addr )) return 0;
+
+    if ((entry = rb_get( &bound_addresses_tree, addr )))
+    {
+        bound_addr = WINE_RB_ENTRY_VALUE(entry, struct bound_addr, entry);
+        if (bound_addr->reuse_count == -1 || !sock->reuseaddr) return 1;
+    }
+
+    if (sock->family != WS_AF_INET6 || v6only) return 0;
+    if (!ipv4addr_from_v6( &v4addr, &addr->in6 )) return 0;
+    if ((entry = rb_get( &bound_addresses_tree, &v4addr )))
+    {
+        bound_addr = WINE_RB_ENTRY_VALUE(entry, struct bound_addr, entry);
+        if (bound_addr->reuse_count == -1 || !sock->reuseaddr) return 1;
+    }
+    return 0;
+}
+
+static struct bound_addr *register_bound_address( struct sock *sock, const union unix_sockaddr *addr )
+{
+    struct bound_addr *bound_addr;
+
+    if (!(bound_addr = mem_alloc( sizeof(*bound_addr) )))
+        return NULL;
+
+    if (rb_put( &bound_addresses_tree, addr, &bound_addr->entry ))
+    {
+        free( bound_addr );
+        bound_addr = WINE_RB_ENTRY_VALUE(rb_get( &bound_addresses_tree, addr ), struct bound_addr, entry);
+        if (bound_addr->reuse_count == -1)
+        {
+            if (debug_level)
+                fprintf( stderr, "register_bound_address: address being updated is already exclusively bound\n" );
+            return NULL;
+        }
+        ++bound_addr->reuse_count;
+    }
+    else
+    {
+        bound_addr->addr = *addr;
+        bound_addr->reuse_count = sock->reuseaddr ? 1 : -1;
+    }
+    return bound_addr;
+}
+
+static void update_addr_usage( struct sock *sock, const union unix_sockaddr *addr, int v6only )
+{
+    union unix_sockaddr v4addr;
+
+    assert( !sock->bound_addr[0] && !sock->bound_addr[1] );
+
+    if (!should_track_conflicts_for_addr( sock, addr )) return;
+
+    sock->bound_addr[0] = register_bound_address( sock, addr );
+
+    if (sock->family != WS_AF_INET6 || v6only) return;
+    if (!ipv4addr_from_v6( &v4addr, &addr->in6 )) return;
+
+    sock->bound_addr[1] = register_bound_address( sock, &v4addr );
+}
 
 static void sock_dump( struct object *obj, int verbose );
 static struct fd *sock_get_fd( struct object *obj );
@@ -296,19 +450,6 @@ static const struct fd_ops sock_fd_ops =
     sock_cancel_async,            /* cancel_async */
     no_fd_queue_async,            /* queue_async */
     sock_reselect_async           /* reselect_async */
-};
-
-union unix_sockaddr
-{
-    struct sockaddr addr;
-    struct sockaddr_in in;
-    struct sockaddr_in6 in6;
-#ifdef HAS_IPX
-    struct sockaddr_ipx ipx;
-#endif
-#ifdef HAS_IRDA
-    struct sockaddr_irda irda;
-#endif
 };
 
 static int sockaddr_from_unix( const union unix_sockaddr *uaddr, struct WS_sockaddr *wsaddr, socklen_t wsaddrlen )
@@ -1494,10 +1635,20 @@ static int sock_close_handle( struct object *obj, struct process *process, obj_h
 static void sock_destroy( struct object *obj )
 {
     struct sock *sock = (struct sock *)obj;
+    unsigned int i;
 
     assert( obj->ops == &sock_ops );
 
     /* FIXME: special socket shutdown stuff? */
+
+    for (i = 0; i < 2; ++i)
+    {
+        if (sock->bound_addr[i] && --sock->bound_addr[i]->reuse_count <= 0)
+        {
+            rb_remove( &bound_addresses_tree, &sock->bound_addr[i]->entry );
+            free( sock->bound_addr[i] );
+        }
+    }
 
     if ( sock->deferred )
         release_object( sock->deferred );
@@ -1547,11 +1698,13 @@ static struct sock *create_socket(void)
     sock->nonblocking = 0;
     sock->bound = 0;
     sock->reset = 0;
+    sock->reuseaddr = 0;
     sock->rcvbuf = 0;
     sock->sndbuf = 0;
     sock->rcvtimeo = 0;
     sock->sndtimeo = 0;
     sock->icmp_fixup_data_len = 0;
+    sock->bound_addr[0] = sock->bound_addr[1] = NULL;
     init_async_queue( &sock->read_q );
     init_async_queue( &sock->write_q );
     init_async_queue( &sock->ifchange_q );
@@ -1739,6 +1892,13 @@ static int init_socket( struct sock *sock, int family, int type, int protocol )
     sock->proto  = protocol;
     sock->type   = type;
     sock->family = family;
+
+    if (is_tcp_socket( sock ))
+    {
+        int reuse = 1;
+
+        setsockopt( sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse) );
+    }
 
     if (sock->fd)
     {
@@ -2671,6 +2831,7 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         union unix_sockaddr unix_addr, bind_addr;
         data_size_t in_size;
         socklen_t unix_len;
+        int v6only = 1;
 
         /* the ioctl is METHOD_NEITHER, so ntdll gives us the output buffer as
          * input */
@@ -2720,16 +2881,25 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 
         set_async_pending( async );
 
+#ifdef IPV6_V6ONLY
+    if (sock->family == WS_AF_INET6)
+    {
+        socklen_t len = sizeof(v6only);
+
+        getsockopt( get_unix_fd(sock->fd), IPPROTO_IPV6, IPV6_V6ONLY, &v6only, &len );
+    }
+#endif
+
+        if (check_addr_usage( sock, &bind_addr, v6only ))
+        {
+            set_error( sock->reuseaddr ? STATUS_ACCESS_DENIED : STATUS_SHARING_VIOLATION );
+            return;
+        }
+
         if (bind( unix_fd, &bind_addr.addr, unix_len ) < 0)
         {
-            if (errno == EADDRINUSE)
-            {
-                int reuse;
-                socklen_t len = sizeof(reuse);
-
-                if (!getsockopt( unix_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, &len ) && reuse)
-                    errno = EACCES;
-            }
+            if (errno == EADDRINUSE && sock->reuseaddr)
+                errno = EACCES;
 
             set_error( sock_get_ntstatus( errno ) );
             return;
@@ -2746,6 +2916,8 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
                 bind_addr.in.sin_addr = unix_addr.in.sin_addr;
             sock->addr_len = sockaddr_from_unix( &bind_addr, &sock->addr.addr, sizeof(sock->addr) );
         }
+
+        update_addr_usage( sock, &bind_addr, v6only );
 
         if (get_reply_max_size() >= sock->addr_len)
             set_reply_data( &sock->addr, sock->addr_len );
@@ -2907,6 +3079,32 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         return;
     }
 
+    /* BSD socket SO_REUSEADDR is not compatible with winsock semantics. */
+    case IOCTL_AFD_WINE_SET_SO_REUSEADDR:
+    {
+        int reuse, ret;
+
+        if (get_req_data_size() < sizeof(reuse))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return;
+        }
+
+        reuse = *(int *)get_req_data();
+        if (is_tcp_socket( sock ))
+            ret = 0;
+        else
+            ret = setsockopt( unix_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse) );
+#ifdef __APPLE__
+        if (!ret) ret = setsockopt( unix_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse) );
+#endif
+        if (ret)
+            set_error( sock_get_ntstatus( errno ) );
+        else
+            sock->reuseaddr = !!reuse;
+        return;
+    }
+
     case IOCTL_AFD_WINE_GET_SO_SNDBUF:
     {
         int sndbuf = sock->sndbuf;
@@ -2991,6 +3189,21 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
             time = (current_time - sock->connect_time) / 10000000;
 
         set_reply_data( &time, sizeof(time) );
+        return;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_REUSEADDR:
+    {
+        int reuse;
+
+        if (!get_reply_max_size())
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return;
+        }
+
+        reuse = sock->reuseaddr;
+        set_reply_data( &reuse, min( sizeof(reuse), get_reply_max_size() ));
         return;
     }
 

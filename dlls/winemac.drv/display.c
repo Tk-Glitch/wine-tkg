@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -27,10 +31,10 @@
 #include "ddrawi.h"
 #define WIN32_NO_STATUS
 #include "winternl.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(display);
 
+#define NEXT_DEVMODEW(mode) ((DEVMODEW *)((char *)((mode) + 1) + (mode)->dmDriverExtra))
 
 struct display_mode_descriptor
 {
@@ -43,139 +47,91 @@ struct display_mode_descriptor
     CFStringRef pixel_encoding;
 };
 
-
-BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, LPDEVMODEW devmode, DWORD flags);
-
 static const WCHAR initial_mode_keyW[] = {'I','n','i','t','i','a','l',' ','D','i','s','p','l','a','y',
     ' ','M','o','d','e'};
 static const WCHAR pixelencodingW[] = {'P','i','x','e','l','E','n','c','o','d','i','n','g',0};
 
-static CFArrayRef modes;
-static BOOL modes_has_8bpp, modes_has_16bpp;
-static int default_mode_bpp;
-static pthread_mutex_t modes_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static BOOL inited_original_display_mode;
 
-static HANDLE get_display_device_init_mutex(void)
+
+static int display_mode_bits_per_pixel(CGDisplayModeRef display_mode)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
-    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
-    OBJECT_ATTRIBUTES attr;
-    HANDLE mutex = 0;
+    CFStringRef pixel_encoding;
+    int bits_per_pixel = 0;
 
-    InitializeObjectAttributes(&attr, &name, OBJ_OPENIF, NULL, NULL);
-    NtCreateMutant(&mutex, MUTEX_ALL_ACCESS, &attr, FALSE);
-    if (mutex) NtWaitForSingleObject(mutex, FALSE, NULL);
-    return mutex;
-}
-
-static void release_display_device_init_mutex(HANDLE mutex)
-{
-    NtReleaseMutant(mutex, NULL);
-    NtClose(mutex);
-}
-
-static HKEY get_display_device_reg_key(const WCHAR *device_name)
-{
-    static const WCHAR display[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-    static const WCHAR video_key[] = {
-        '\\','R','e','g','i','s','t','r','y',
-        '\\','M','a','c','h','i','n','e',
-        '\\','H','A','R','D','W','A','R','E',
-        '\\','D','E','V','I','C','E','M','A','P',
-        '\\','V','I','D','E','O'};
-    static const WCHAR current_config_key[] = {
-        '\\','R','e','g','i','s','t','r','y',
-        '\\','M','a','c','h','i','n','e',
-        '\\','S','y','s','t','e','m',
-        '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
-        '\\','H','a','r','d','w','a','r','e',' ','P','r','o','f','i','l','e','s',
-        '\\','C','u','r','r','e','n','t'};
-    WCHAR value_name[MAX_PATH], buffer[4096], *end_ptr;
-    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
-    DWORD adapter_index, size;
-    char adapter_name[100];
-    HKEY hkey;
-
-    /* Device name has to be \\.\DISPLAY%d */
-    if (wcsnicmp(device_name, display, ARRAY_SIZE(display)))
-        return FALSE;
-
-    /* Parse \\.\DISPLAY* */
-    adapter_index = wcstol(device_name + ARRAY_SIZE(display), &end_ptr, 10) - 1;
-    if (*end_ptr)
-        return FALSE;
-
-    /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
-    if (!(hkey = reg_open_key(NULL, video_key, sizeof(video_key)))) return FALSE;
-    sprintf(adapter_name, "\\Device\\Video%d", adapter_index);
-    asciiz_to_unicode(value_name, adapter_name);
-    size = query_reg_value(hkey, value_name, value, sizeof(buffer));
-    NtClose(hkey);
-    if (!size || value->Type != REG_SZ) return FALSE;
-
-    /* Replace \Registry\Machine\ prefix with HKEY_CURRENT_CONFIG */
-    memmove(buffer + ARRAYSIZE(current_config_key), (const WCHAR *)value->Data + 17,
-             size - 17 * sizeof(WCHAR));
-    memcpy(buffer, current_config_key, sizeof(current_config_key));
-    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name),
-           wine_dbgstr_w(buffer));
-    return reg_open_key(NULL, buffer, lstrlenW(buffer) * sizeof(WCHAR));
-}
-
-
-static BOOL query_display_setting(HKEY hkey, const char *name, DWORD *ret)
-{
-    char buffer[1024];
-    WCHAR nameW[128];
-    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
-
-    asciiz_to_unicode(nameW, name);
-    if (query_reg_value(hkey, nameW, value, sizeof(buffer)) != sizeof(DWORD) ||
-        value->Type != REG_DWORD)
-        return FALSE;
-
-    *ret = *(DWORD *)value->Data;
-    return TRUE;
-}
-
-
-static BOOL read_registry_settings(const WCHAR *device_name, DEVMODEW *dm)
-{
-    HANDLE mutex;
-    HKEY hkey;
-    BOOL ret = TRUE;
-
-    dm->dmFields = 0;
-
-    mutex = get_display_device_init_mutex();
-    if (!(hkey = get_display_device_reg_key(device_name)))
+    pixel_encoding = CGDisplayModeCopyPixelEncoding(display_mode);
+    if (pixel_encoding)
     {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
+        if (CFEqual(pixel_encoding, CFSTR(kIO32BitFloatPixels)))
+            bits_per_pixel = 128;
+        else if (CFEqual(pixel_encoding, CFSTR(kIO16BitFloatPixels)))
+            bits_per_pixel = 64;
+        else if (CFEqual(pixel_encoding, CFSTR(kIO64BitDirectPixels)))
+            bits_per_pixel = 64;
+        else if (CFEqual(pixel_encoding, CFSTR(kIO30BitDirectPixels)))
+            bits_per_pixel = 30;
+        else if (CFEqual(pixel_encoding, CFSTR(IO32BitDirectPixels)))
+            bits_per_pixel = 32;
+        else if (CFEqual(pixel_encoding, CFSTR(IO16BitDirectPixels)))
+            bits_per_pixel = 16;
+        else if (CFEqual(pixel_encoding, CFSTR(IO8BitIndexedPixels)))
+            bits_per_pixel = 8;
+        else if (CFEqual(pixel_encoding, CFSTR(IO4BitIndexedPixels)))
+            bits_per_pixel = 4;
+        else if (CFEqual(pixel_encoding, CFSTR(IO2BitIndexedPixels)))
+            bits_per_pixel = 2;
+        else if (CFEqual(pixel_encoding, CFSTR(IO1BitIndexedPixels)))
+            bits_per_pixel = 1;
+
+        CFRelease(pixel_encoding);
     }
 
-    ret &= query_display_setting(hkey, "DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
-    dm->dmFields |= DM_BITSPERPEL;
-    ret &= query_display_setting(hkey, "DefaultSettings.XResolution", &dm->dmPelsWidth);
-    dm->dmFields |= DM_PELSWIDTH;
-    ret &= query_display_setting(hkey, "DefaultSettings.YResolution", &dm->dmPelsHeight);
-    dm->dmFields |= DM_PELSHEIGHT;
-    ret &= query_display_setting(hkey, "DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
-    dm->dmFields |= DM_DISPLAYFREQUENCY;
-    ret &= query_display_setting(hkey, "DefaultSettings.Flags", &dm->dmDisplayFlags);
-    dm->dmFields |= DM_DISPLAYFLAGS;
-    ret &= query_display_setting(hkey, "DefaultSettings.XPanning", (DWORD *)&dm->dmPosition.x);
-    ret &= query_display_setting(hkey, "DefaultSettings.YPanning", (DWORD *)&dm->dmPosition.y);
-    dm->dmFields |= DM_POSITION;
-    ret &= query_display_setting(hkey, "DefaultSettings.Orientation", &dm->dmDisplayOrientation);
-    dm->dmFields |= DM_DISPLAYORIENTATION;
-    ret &= query_display_setting(hkey, "DefaultSettings.FixedOutput", &dm->dmDisplayFixedOutput);
+    return bits_per_pixel;
+}
 
-    NtClose(hkey);
-    release_display_device_init_mutex(mutex);
-    return ret;
+
+static BOOL display_mode_is_supported(CGDisplayModeRef display_mode)
+{
+    uint32_t io_flags = CGDisplayModeGetIOFlags(display_mode);
+    return (io_flags & kDisplayModeValidFlag) && (io_flags & kDisplayModeSafeFlag);
+}
+
+
+static void display_mode_to_devmode(CGDirectDisplayID display_id, CGDisplayModeRef display_mode, DEVMODEW *devmode)
+{
+    uint32_t io_flags;
+    double rotation;
+
+    rotation = CGDisplayRotation(display_id);
+    devmode->dmDisplayOrientation = ((int)((rotation / 90) + 0.5)) % 4;
+    devmode->dmFields |= DM_DISPLAYORIENTATION;
+
+    io_flags = CGDisplayModeGetIOFlags(display_mode);
+    if (io_flags & kDisplayModeStretchedFlag)
+        devmode->dmDisplayFixedOutput = DMDFO_STRETCH;
+    else
+        devmode->dmDisplayFixedOutput = DMDFO_CENTER;
+    devmode->dmFields |= DM_DISPLAYFIXEDOUTPUT;
+
+    devmode->dmBitsPerPel = display_mode_bits_per_pixel(display_mode);
+    if (devmode->dmBitsPerPel)
+        devmode->dmFields |= DM_BITSPERPEL;
+
+    devmode->dmPelsWidth = CGDisplayModeGetWidth(display_mode);
+    devmode->dmPelsHeight = CGDisplayModeGetHeight(display_mode);
+    devmode->dmFields |= DM_PELSWIDTH | DM_PELSHEIGHT;
+
+    devmode->dmDisplayFlags = 0;
+    if (io_flags & kDisplayModeInterlacedFlag)
+        devmode->dmDisplayFlags |= DM_INTERLACED;
+    if (!display_mode_is_supported(display_mode))
+        devmode->dmDisplayFlags |= WINE_DM_UNSUPPORTED;
+    devmode->dmFields |= DM_DISPLAYFLAGS;
+
+    devmode->dmDisplayFrequency = CGDisplayModeGetRefreshRate(display_mode);
+    if (!devmode->dmDisplayFrequency)
+        devmode->dmDisplayFrequency = 60;
+    devmode->dmFields |= DM_DISPLAYFREQUENCY;
 }
 
 
@@ -184,35 +140,6 @@ static BOOL set_setting_value(HKEY hkey, const char *name, DWORD val)
     WCHAR nameW[128];
     UNICODE_STRING str = { asciiz_to_unicode(nameW, name) - sizeof(WCHAR), sizeof(nameW), nameW };
     return !NtSetValueKey(hkey, &str, 0, REG_DWORD, &val, sizeof(val));
-}
-
-
-static BOOL write_registry_settings(const WCHAR *device_name, const DEVMODEW *dm)
-{
-    HANDLE mutex;
-    HKEY hkey;
-    BOOL ret = TRUE;
-
-    mutex = get_display_device_init_mutex();
-    if (!(hkey = get_display_device_reg_key(device_name)))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
-
-    ret &= set_setting_value(hkey, "DefaultSettings.BitsPerPel", dm->dmBitsPerPel);
-    ret &= set_setting_value(hkey, "DefaultSettings.XResolution", dm->dmPelsWidth);
-    ret &= set_setting_value(hkey, "DefaultSettings.YResolution", dm->dmPelsHeight);
-    ret &= set_setting_value(hkey, "DefaultSettings.VRefresh", dm->dmDisplayFrequency);
-    ret &= set_setting_value(hkey, "DefaultSettings.Flags", dm->dmDisplayFlags);
-    ret &= set_setting_value(hkey, "DefaultSettings.XPanning", dm->dmPosition.x);
-    ret &= set_setting_value(hkey, "DefaultSettings.YPanning", dm->dmPosition.y);
-    ret &= set_setting_value(hkey, "DefaultSettings.Orientation", dm->dmDisplayOrientation);
-    ret &= set_setting_value(hkey, "DefaultSettings.FixedOutput", dm->dmDisplayFixedOutput);
-
-    NtClose(hkey);
-    release_display_device_init_mutex(mutex);
-    return ret;
 }
 
 
@@ -381,7 +308,7 @@ static struct display_mode_descriptor* create_original_display_mode_descriptor(C
 
     snprintf(display_key, sizeof(display_key), display_key_format, CGDisplayUnitNumber(displayID));
     /* @@ Wine registry key: HKLM\Software\Wine\Mac Driver\Initial Display Mode\Display 0xnnnnnnnn */
-    if (!(hkey = reg_open_key(NULL, nameW, asciiz_to_unicode(nameW, display_key))))
+    if (!(hkey = reg_open_key(NULL, nameW, asciiz_to_unicode(nameW, display_key) - sizeof(WCHAR))))
         return NULL;
 
     desc = malloc(sizeof(*desc));
@@ -468,70 +395,28 @@ static BOOL display_mode_matches_descriptor(CGDisplayModeRef mode, const struct 
 }
 
 
-static int display_mode_bits_per_pixel(CGDisplayModeRef display_mode)
-{
-    CFStringRef pixel_encoding;
-    int bits_per_pixel = 0;
-
-    pixel_encoding = CGDisplayModeCopyPixelEncoding(display_mode);
-    if (pixel_encoding)
-    {
-        if (CFEqual(pixel_encoding, CFSTR(kIO32BitFloatPixels)))
-            bits_per_pixel = 128;
-        else if (CFEqual(pixel_encoding, CFSTR(kIO16BitFloatPixels)))
-            bits_per_pixel = 64;
-        else if (CFEqual(pixel_encoding, CFSTR(kIO64BitDirectPixels)))
-            bits_per_pixel = 64;
-        else if (CFEqual(pixel_encoding, CFSTR(kIO30BitDirectPixels)))
-            bits_per_pixel = 30;
-        else if (CFEqual(pixel_encoding, CFSTR(IO32BitDirectPixels)))
-            bits_per_pixel = 32;
-        else if (CFEqual(pixel_encoding, CFSTR(IO16BitDirectPixels)))
-            bits_per_pixel = 16;
-        else if (CFEqual(pixel_encoding, CFSTR(IO8BitIndexedPixels)))
-            bits_per_pixel = 8;
-        else if (CFEqual(pixel_encoding, CFSTR(IO4BitIndexedPixels)))
-            bits_per_pixel = 4;
-        else if (CFEqual(pixel_encoding, CFSTR(IO2BitIndexedPixels)))
-            bits_per_pixel = 2;
-        else if (CFEqual(pixel_encoding, CFSTR(IO1BitIndexedPixels)))
-            bits_per_pixel = 1;
-
-        CFRelease(pixel_encoding);
-    }
-
-    return bits_per_pixel;
-}
-
-
 static int get_default_bpp(void)
 {
+    static int cached;
     int ret;
 
-    if (!default_mode_bpp)
+    if (!cached)
     {
         CGDisplayModeRef mode = CGDisplayCopyDisplayMode(kCGDirectMainDisplay);
         if (mode)
         {
-            default_mode_bpp = display_mode_bits_per_pixel(mode);
+            cached = display_mode_bits_per_pixel(mode);
             CFRelease(mode);
         }
 
-        if (!default_mode_bpp)
-            default_mode_bpp = 32;
+        if (!cached)
+            cached = 32;
     }
 
-    ret = default_mode_bpp;
+    ret = cached;
 
     TRACE(" -> %d\n", ret);
     return ret;
-}
-
-
-static BOOL display_mode_is_supported(CGDisplayModeRef display_mode)
-{
-    uint32_t io_flags = CGDisplayModeGetIOFlags(display_mode);
-    return (io_flags & kDisplayModeValidFlag) && (io_flags & kDisplayModeSafeFlag);
 }
 
 
@@ -806,7 +691,7 @@ static BOOL get_primary_adapter(WCHAR *name)
     DWORD i;
 
     dd.cb = sizeof(dd);
-    for (i = 0; EnumDisplayDevicesW(NULL, i, &dd, 0); ++i)
+    for (i = 0; !NtUserEnumDisplayDevices(NULL, i, &dd, 0); ++i)
     {
         if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
         {
@@ -827,83 +712,13 @@ static BOOL is_detached_mode(const DEVMODEW *mode)
            mode->dmPelsHeight == 0;
 }
 
-/***********************************************************************
- *              ChangeDisplaySettingsEx  (MACDRV.@)
- *
- */
-LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
-                                          HWND hwnd, DWORD flags, LPVOID lpvoid)
+static CGDisplayModeRef find_best_display_mode(DEVMODEW *devmode, CFArrayRef display_modes, int bpp, struct display_mode_descriptor *desc)
 {
-    WCHAR primary_adapter[CCHDEVICENAME];
-    LONG ret = DISP_CHANGE_BADMODE;
-    DEVMODEW default_mode;
-    int bpp;
-    struct macdrv_display *displays;
-    int num_displays;
-    CFArrayRef display_modes;
-    struct display_mode_descriptor* desc;
     CFIndex count, i, best;
     CGDisplayModeRef best_display_mode;
-    uint32_t best_io_flags;
-    BOOL best_is_original;
-
-    TRACE("%s %p %p 0x%08x %p\n", debugstr_w(devname), devmode, hwnd, flags, lpvoid);
-
-    init_original_display_mode();
-
-    if (!get_primary_adapter(primary_adapter))
-        return DISP_CHANGE_FAILED;
-
-    if (!devname && !devmode)
-    {
-        memset(&default_mode, 0, sizeof(default_mode));
-        default_mode.dmSize = sizeof(default_mode);
-        if (!EnumDisplaySettingsExW(primary_adapter, ENUM_REGISTRY_SETTINGS, &default_mode, 0))
-        {
-            ERR("Default mode not found for %s!\n", wine_dbgstr_w(primary_adapter));
-            return DISP_CHANGE_BADMODE;
-        }
-
-        devname = primary_adapter;
-        devmode = &default_mode;
-    }
-
-    if (is_detached_mode(devmode))
-    {
-        FIXME("Detaching adapters is currently unsupported.\n");
-        return DISP_CHANGE_SUCCESSFUL;
-    }
-
-    if (macdrv_get_displays(&displays, &num_displays))
-        return DISP_CHANGE_FAILED;
-
-    display_modes = copy_display_modes(displays[0].displayID, FALSE);
-    if (!display_modes)
-    {
-        macdrv_free_displays(displays);
-        return DISP_CHANGE_FAILED;
-    }
-
-    pthread_mutex_lock(&modes_mutex);
-    bpp = get_default_bpp();
-    pthread_mutex_unlock(&modes_mutex);
-    if ((devmode->dmFields & DM_BITSPERPEL) && devmode->dmBitsPerPel != bpp)
-        TRACE("using default %d bpp instead of caller's request %d bpp\n", bpp, devmode->dmBitsPerPel);
-
-    TRACE("looking for %dx%dx%dbpp @%d Hz",
-          (devmode->dmFields & DM_PELSWIDTH ? devmode->dmPelsWidth : 0),
-          (devmode->dmFields & DM_PELSHEIGHT ? devmode->dmPelsHeight : 0),
-          bpp,
-          (devmode->dmFields & DM_DISPLAYFREQUENCY ? devmode->dmDisplayFrequency : 0));
-    if (devmode->dmFields & DM_DISPLAYFIXEDOUTPUT)
-        TRACE(" %sstretched", devmode->dmDisplayFixedOutput == DMDFO_STRETCH ? "" : "un");
-    if (devmode->dmFields & DM_DISPLAYFLAGS)
-        TRACE(" %sinterlaced", devmode->dmDisplayFlags & DM_INTERLACED ? "" : "non-");
-    TRACE("\n");
-
-    desc = create_original_display_mode_descriptor(displays[0].displayID);
 
     best_display_mode = NULL;
+
     count = CFArrayGetCount(display_modes);
     for (i = 0; i < count; i++)
     {
@@ -913,6 +728,9 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
         int mode_bpp = display_mode_bits_per_pixel(display_mode);
         size_t width = CGDisplayModeGetWidth(display_mode);
         size_t height = CGDisplayModeGetHeight(display_mode);
+        double refresh_rate = CGDisplayModeGetRefreshRate(display_mode);
+        if (!refresh_rate)
+            refresh_rate = 60;
 
         if (is_original && retina_enabled)
         {
@@ -923,274 +741,215 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
         if (bpp != mode_bpp)
             continue;
 
-        if (devmode->dmFields & DM_PELSWIDTH)
-        {
-            if (devmode->dmPelsWidth != width)
-                continue;
-        }
-        if (devmode->dmFields & DM_PELSHEIGHT)
-        {
-            if (devmode->dmPelsHeight != height)
-                continue;
-        }
-        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) &&
-            devmode->dmDisplayFrequency != 0 &&
-            devmode->dmDisplayFrequency != 1)
-        {
-            double refresh_rate = CGDisplayModeGetRefreshRate(display_mode);
-            if (!refresh_rate)
-                refresh_rate = 60;
-            if (devmode->dmDisplayFrequency != (DWORD)refresh_rate)
-                continue;
-        }
-        if (devmode->dmFields & DM_DISPLAYFLAGS)
-        {
-            if (!(devmode->dmDisplayFlags & DM_INTERLACED) != !(io_flags & kDisplayModeInterlacedFlag))
-                continue;
-        }
-        else if (best_display_mode)
-        {
-            if (io_flags & kDisplayModeInterlacedFlag && !(best_io_flags & kDisplayModeInterlacedFlag))
-                continue;
-            else if (!(io_flags & kDisplayModeInterlacedFlag) && best_io_flags & kDisplayModeInterlacedFlag)
-                goto better;
-        }
-        if (devmode->dmFields & DM_DISPLAYFIXEDOUTPUT)
-        {
-            if (!(devmode->dmDisplayFixedOutput == DMDFO_STRETCH) != !(io_flags & kDisplayModeStretchedFlag))
-                continue;
-        }
-        else if (best_display_mode)
-        {
-            if (io_flags & kDisplayModeStretchedFlag && !(best_io_flags & kDisplayModeStretchedFlag))
-                continue;
-            else if (!(io_flags & kDisplayModeStretchedFlag) && best_io_flags & kDisplayModeStretchedFlag)
-                goto better;
-        }
+        if (devmode->dmPelsWidth != width)
+            continue;
+        if (devmode->dmPelsHeight != height)
+            continue;
+        if (devmode->dmDisplayFrequency != (DWORD)refresh_rate)
+            continue;
+        if (!(devmode->dmDisplayFlags & DM_INTERLACED) != !(io_flags & kDisplayModeInterlacedFlag))
+            continue;
+        if (!(devmode->dmDisplayFixedOutput == DMDFO_STRETCH) != !(io_flags & kDisplayModeStretchedFlag))
+            continue;
 
         if (best_display_mode)
             continue;
 
-better:
         best_display_mode = display_mode;
         best = i;
-        best_io_flags = io_flags;
-        best_is_original = is_original;
     }
 
     if (best_display_mode)
-    {
-        /* we have a valid mode */
         TRACE("Requested display settings match mode %ld\n", best);
 
-        if ((flags & CDS_UPDATEREGISTRY) && !write_registry_settings(devname, devmode))
-        {
-            WARN("Failed to update registry\n");
-            ret = DISP_CHANGE_NOTUPDATED;
-        }
-        else if (flags & (CDS_TEST | CDS_NORESET))
-            ret = DISP_CHANGE_SUCCESSFUL;
-        else if (lstrcmpiW(primary_adapter, devname))
+    return best_display_mode;
+}
+
+/***********************************************************************
+ *              ChangeDisplaySettings  (MACDRV.@)
+ *
+ */
+LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid)
+{
+    WCHAR primary_adapter[CCHDEVICENAME];
+    LONG ret = DISP_CHANGE_SUCCESSFUL;
+    DEVMODEW *mode;
+    int bpp;
+    struct macdrv_display *macdrv_displays;
+    int num_displays;
+    CFArrayRef display_modes;
+    struct display_mode_descriptor *desc;
+    CGDisplayModeRef best_display_mode;
+
+    TRACE("%p %p 0x%08x %p\n", displays, hwnd, flags, lpvoid);
+
+    init_original_display_mode();
+
+    if (!get_primary_adapter(primary_adapter))
+        return DISP_CHANGE_FAILED;
+
+    if (macdrv_get_displays(&macdrv_displays, &num_displays))
+        return DISP_CHANGE_FAILED;
+
+    display_modes = copy_display_modes(macdrv_displays[0].displayID, FALSE);
+    if (!display_modes)
+    {
+        macdrv_free_displays(macdrv_displays);
+        return DISP_CHANGE_FAILED;
+    }
+
+    bpp = get_default_bpp();
+
+    desc = create_original_display_mode_descriptor(macdrv_displays[0].displayID);
+
+    for (mode = displays; mode->dmSize && !ret; mode = NEXT_DEVMODEW(mode))
+    {
+        if (wcsicmp(primary_adapter, mode->dmDeviceName))
         {
             FIXME("Changing non-primary adapter settings is currently unsupported.\n");
-            ret = DISP_CHANGE_SUCCESSFUL;
+            continue;
         }
-        else if (macdrv_set_display_mode(&displays[0], best_display_mode))
+        if (is_detached_mode(mode))
         {
-            int mode_bpp = display_mode_bits_per_pixel(best_display_mode);
-            size_t width = CGDisplayModeGetWidth(best_display_mode);
-            size_t height = CGDisplayModeGetHeight(best_display_mode);
-
-            macdrv_init_display_devices(TRUE);
-
-            if (best_is_original && retina_enabled)
-            {
-                width *= 2;
-                height *= 2;
-            }
-
-            SendMessageW(GetDesktopWindow(), WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
-                         MAKELPARAM(width, height));
-            ret = DISP_CHANGE_SUCCESSFUL;
+            FIXME("Detaching adapters is currently unsupported.\n");
+            continue;
         }
+
+        if (mode->dmBitsPerPel != bpp)
+            TRACE("using default %d bpp instead of caller's request %d bpp\n", bpp, mode->dmBitsPerPel);
+
+        TRACE("looking for %dx%dx%dbpp @%d Hz", mode->dmPelsWidth, mode->dmPelsHeight,
+              bpp, mode->dmDisplayFrequency);
+        TRACE(" %sstretched", mode->dmDisplayFixedOutput == DMDFO_STRETCH ? "" : "un");
+        TRACE(" %sinterlaced", mode->dmDisplayFlags & DM_INTERLACED ? "" : "non-");
+        TRACE("\n");
+
+        if (!(best_display_mode = find_best_display_mode(mode, display_modes, bpp, desc)))
+        {
+            ERR("No matching mode found %ux%ux%d @%u!\n", mode->dmPelsWidth, mode->dmPelsHeight,
+                bpp, mode->dmDisplayFrequency);
+            ret = DISP_CHANGE_BADMODE;
+        }
+        else if (macdrv_set_display_mode(&macdrv_displays[0], best_display_mode))
+            macdrv_init_display_devices(TRUE);
         else
         {
             WARN("Failed to set display mode\n");
             ret = DISP_CHANGE_FAILED;
         }
     }
-    else
-    {
-        /* no valid modes found */
-        ERR("No matching mode found %ux%ux%d @%u!\n", devmode->dmPelsWidth, devmode->dmPelsHeight,
-            bpp, devmode->dmDisplayFrequency);
-    }
 
     free_display_mode_descriptor(desc);
     CFRelease(display_modes);
-    macdrv_free_displays(displays);
+    macdrv_free_displays(macdrv_displays);
 
     return ret;
 }
 
+
+static DEVMODEW *display_get_modes(CGDirectDisplayID display_id, int *modes_count)
+{
+    int default_bpp = get_default_bpp(), synth_count = 0, count, i;
+    BOOL modes_has_8bpp = FALSE, modes_has_16bpp = FALSE;
+    struct display_mode_descriptor *desc;
+    DEVMODEW *devmodes;
+    CFArrayRef modes;
+
+    modes = copy_display_modes(display_id, TRUE);
+    if (!modes)
+        return NULL;
+
+    count = CFArrayGetCount(modes);
+    for (i = 0; i < count && !(modes_has_8bpp && modes_has_16bpp); i++)
+    {
+        CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+        int bpp = display_mode_bits_per_pixel(mode);
+        if (bpp == 8)
+            modes_has_8bpp = TRUE;
+        else if (bpp == 16)
+            modes_has_16bpp = TRUE;
+    }
+
+    if (!(devmodes = calloc(count * 3, sizeof(DEVMODEW))))
+    {
+        CFRelease(modes);
+        return NULL;
+    }
+
+    desc = create_original_display_mode_descriptor(display_id);
+    for (i = 0; i < count; i++)
+    {
+        CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+        display_mode_to_devmode(display_id, mode, devmodes + i);
+
+        if (retina_enabled && display_mode_matches_descriptor(mode, desc))
+        {
+            devmodes[i].dmPelsWidth *= 2;
+            devmodes[i].dmPelsHeight *= 2;
+        }
+    }
+    free_display_mode_descriptor(desc);
+
+    for (i = 0; !modes_has_16bpp && i < count; i++)
+    {
+        /* We only synthesize modes from those having the default bpp. */
+        if (devmodes[i].dmBitsPerPel != default_bpp) continue;
+        devmodes[count + synth_count] = devmodes[i];
+        devmodes[count + synth_count].dmBitsPerPel = 16;
+        synth_count++;
+    }
+
+    for (i = 0; !modes_has_8bpp && i < count; i++)
+    {
+        /* We only synthesize modes from those having the default bpp. */
+        if (devmodes[i].dmBitsPerPel != default_bpp) continue;
+        devmodes[count + synth_count] = devmodes[i];
+        devmodes[count + synth_count].dmBitsPerPel = 8;
+        synth_count++;
+    }
+
+    CFRelease(modes);
+    *modes_count = count + synth_count;
+    return devmodes;
+}
+
 /***********************************************************************
- *              EnumDisplaySettingsEx  (MACDRV.@)
+ *              GetCurrentDisplaySettings  (MACDRV.@)
  *
  */
-BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
-                                        LPDEVMODEW devmode, DWORD flags)
+BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR devname, LPDEVMODEW devmode)
 {
-    static const WCHAR dev_name[CCHDEVICENAME] =
-        { 'W','i','n','e',' ','M','a','c',' ','d','r','i','v','e','r',0 };
     struct macdrv_display *displays = NULL;
-    int num_displays;
+    int num_displays, display_idx;
     CGDisplayModeRef display_mode;
-    int display_mode_bpp;
-    BOOL synthesized = FALSE;
-    double rotation;
-    uint32_t io_flags;
+    CGDirectDisplayID display_id;
+    WCHAR *end;
 
-    TRACE("%s, %u, %p + %hu, %08x\n", debugstr_w(devname), mode, devmode, devmode->dmSize, flags);
+    TRACE("%s, %p + %hu\n", debugstr_w(devname), devmode, devmode->dmSize);
 
     init_original_display_mode();
 
-    memcpy(devmode->dmDeviceName, dev_name, sizeof(dev_name));
-    devmode->dmSpecVersion = DM_SPECVERSION;
-    devmode->dmDriverVersion = DM_SPECVERSION;
-    devmode->dmSize = FIELD_OFFSET(DEVMODEW, dmICMMethod);
-    devmode->dmDriverExtra = 0;
-    memset(&devmode->dmFields, 0, devmode->dmSize - FIELD_OFFSET(DEVMODEW, dmFields));
-
-    if (mode == ENUM_REGISTRY_SETTINGS)
-    {
-        TRACE("mode %d (registry) -- getting default mode\n", mode);
-        return read_registry_settings(devname, devmode);
-    }
-
     if (macdrv_get_displays(&displays, &num_displays))
-        goto failed;
+        return FALSE;
 
-    if (mode == ENUM_CURRENT_SETTINGS)
+    display_idx = wcstol(devname + 11, &end, 10) - 1;
+    if (display_idx >= num_displays)
     {
-        TRACE("mode %d (current) -- getting current mode\n", mode);
-        display_mode = CGDisplayCopyDisplayMode(displays[0].displayID);
-        display_mode_bpp = display_mode_bits_per_pixel(display_mode);
-    }
-    else
-    {
-        DWORD count, i;
-
-        pthread_mutex_lock(&modes_mutex);
-
-        if (mode == 0 || !modes)
-        {
-            if (modes) CFRelease(modes);
-            modes = copy_display_modes(displays[0].displayID, (flags & EDS_RAWMODE) != 0);
-            modes_has_8bpp = modes_has_16bpp = FALSE;
-
-            if (modes)
-            {
-                count = CFArrayGetCount(modes);
-                for (i = 0; i < count && !(modes_has_8bpp && modes_has_16bpp); i++)
-                {
-                    CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-                    int bpp = display_mode_bits_per_pixel(mode);
-                    if (bpp == 8)
-                        modes_has_8bpp = TRUE;
-                    else if (bpp == 16)
-                        modes_has_16bpp = TRUE;
-                }
-            }
-        }
-
-        display_mode = NULL;
-        if (modes)
-        {
-            int default_bpp;
-            DWORD seen_modes = 0;
-
-            count = CFArrayGetCount(modes);
-            for (i = 0; i < count; i++)
-            {
-                CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-
-                seen_modes++;
-                if (seen_modes > mode)
-                {
-                    display_mode = (CGDisplayModeRef)CFRetain(candidate);
-                    display_mode_bpp = display_mode_bits_per_pixel(display_mode);
-                    break;
-                }
-            }
-
-            default_bpp = get_default_bpp();
-
-            /* If all the real modes are exhausted, synthesize lower bpp modes. */
-            if (!display_mode && (!modes_has_16bpp || !modes_has_8bpp))
-            {
-                /* We want to synthesize higher depths first. */
-                int synth_bpps[] = { modes_has_16bpp ? 0 : 16, modes_has_8bpp ? 0 : 8 };
-                size_t synth_bpp_idx;
-                for (synth_bpp_idx = 0; synth_bpp_idx < 2; synth_bpp_idx++)
-                {
-                    int synth_bpp = synth_bpps[synth_bpp_idx];
-                    if (synth_bpp == 0)
-                        continue;
-
-                    for (i = 0; i < count; i++)
-                    {
-                        CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-                        /* We only synthesize modes from those having the default bpp. */
-                        if (display_mode_bits_per_pixel(candidate) != default_bpp)
-                            continue;
-
-                        seen_modes++;
-                        if (seen_modes > mode)
-                        {
-                            display_mode = (CGDisplayModeRef)CFRetain(candidate);
-                            display_mode_bpp = synth_bpp;
-                            synthesized = TRUE;
-                            break;
-                        }
-                    }
-
-                    if (display_mode)
-                        break;
-                }
-            }
-        }
-
-        pthread_mutex_unlock(&modes_mutex);
+        macdrv_free_displays(displays);
+        return FALSE;
     }
 
-    if (!display_mode)
-        goto failed;
+    display_id = displays[display_idx].displayID;
+    display_mode = CGDisplayCopyDisplayMode(display_id);
 
-    /* We currently only report modes for the primary display, so it's at (0, 0). */
-    devmode->dmPosition.x = 0;
-    devmode->dmPosition.y = 0;
+    devmode->dmPosition.x = CGRectGetMinX(displays[display_idx].frame);
+    devmode->dmPosition.y = CGRectGetMinY(displays[display_idx].frame);
     devmode->dmFields |= DM_POSITION;
 
-    rotation = CGDisplayRotation(displays[0].displayID);
-    devmode->dmDisplayOrientation = ((int)((rotation / 90) + 0.5)) % 4;
-    devmode->dmFields |= DM_DISPLAYORIENTATION;
-
-    io_flags = CGDisplayModeGetIOFlags(display_mode);
-    if (io_flags & kDisplayModeStretchedFlag)
-        devmode->dmDisplayFixedOutput = DMDFO_STRETCH;
-    else
-        devmode->dmDisplayFixedOutput = DMDFO_CENTER;
-    devmode->dmFields |= DM_DISPLAYFIXEDOUTPUT;
-
-    devmode->dmBitsPerPel = display_mode_bpp;
-    if (devmode->dmBitsPerPel)
-        devmode->dmFields |= DM_BITSPERPEL;
-
-    devmode->dmPelsWidth = CGDisplayModeGetWidth(display_mode);
-    devmode->dmPelsHeight = CGDisplayModeGetHeight(display_mode);
+    display_mode_to_devmode(display_id, display_mode, devmode);
     if (retina_enabled)
     {
-        struct display_mode_descriptor* desc = create_original_display_mode_descriptor(displays[0].displayID);
+        struct display_mode_descriptor *desc = create_original_display_mode_descriptor(display_id);
         if (display_mode_matches_descriptor(display_mode, desc))
         {
             devmode->dmPelsWidth *= 2;
@@ -1198,22 +957,12 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
         }
         free_display_mode_descriptor(desc);
     }
-    devmode->dmFields |= DM_PELSWIDTH | DM_PELSHEIGHT;
-
-    devmode->dmDisplayFlags = 0;
-    if (io_flags & kDisplayModeInterlacedFlag)
-        devmode->dmDisplayFlags |= DM_INTERLACED;
-    devmode->dmFields |= DM_DISPLAYFLAGS;
-
-    devmode->dmDisplayFrequency = CGDisplayModeGetRefreshRate(display_mode);
-    if (!devmode->dmDisplayFrequency)
-        devmode->dmDisplayFrequency = 60;
-    devmode->dmFields |= DM_DISPLAYFREQUENCY;
 
     CFRelease(display_mode);
     macdrv_free_displays(displays);
 
-    TRACE("mode %d -- %dx%dx%dbpp @%d Hz", mode,
+    TRACE("current mode -- %dx%d-%dx%dx%dbpp @%d Hz",
+          devmode->dmPosition.x, devmode->dmPosition.y,
           devmode->dmPelsWidth, devmode->dmPelsHeight, devmode->dmBitsPerPel,
           devmode->dmDisplayFrequency);
     if (devmode->dmDisplayOrientation)
@@ -1222,24 +971,16 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
         TRACE(" stretched");
     if (devmode->dmDisplayFlags & DM_INTERLACED)
         TRACE(" interlaced");
-    if (synthesized)
-        TRACE(" (synthesized)");
     TRACE("\n");
 
     return TRUE;
-
-failed:
-    TRACE("mode %d -- not present\n", mode);
-    if (displays) macdrv_free_displays(displays);
-    SetLastError(ERROR_NO_MORE_FILES);
-    return FALSE;
 }
 
 
 /***********************************************************************
  *              GetDeviceGammaRamp (MACDRV.@)
  */
-BOOL CDECL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
     BOOL ret = FALSE;
     DDGAMMARAMP *r = ramp;
@@ -1323,7 +1064,7 @@ done:
 /***********************************************************************
  *              SetDeviceGammaRamp (MACDRV.@)
  */
-BOOL CDECL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
     DDGAMMARAMP *r = ramp;
     struct macdrv_display *displays;
@@ -1379,16 +1120,19 @@ static void init_registry_display_settings(void)
 {
     DEVMODEW dm = {.dmSize = sizeof(dm)};
     DISPLAY_DEVICEW dd = {sizeof(dd)};
+    UNICODE_STRING str;
     DWORD i = 0;
     LONG ret;
 
-    while (EnumDisplayDevicesW(NULL, i++, &dd, 0))
+    while (!NtUserEnumDisplayDevices(NULL, i++, &dd, 0))
     {
+        RtlInitUnicodeString(&str, dd.DeviceName);
+
         /* Skip if the device already has registry display settings */
-        if (EnumDisplaySettingsExW(dd.DeviceName, ENUM_REGISTRY_SETTINGS, &dm, 0))
+        if (NtUserEnumDisplaySettings(&str, ENUM_REGISTRY_SETTINGS, &dm, 0))
             continue;
 
-        if (!EnumDisplaySettingsExW(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm, 0))
+        if (!NtUserEnumDisplaySettings(&str, ENUM_CURRENT_SETTINGS, &dm, 0))
         {
             ERR("Failed to query current display settings for %s.\n", wine_dbgstr_w(dd.DeviceName));
             continue;
@@ -1398,8 +1142,8 @@ static void init_registry_display_settings(void)
               wine_dbgstr_w(dd.DeviceName), dm.dmPelsWidth, dm.dmPelsHeight, dm.dmBitsPerPel,
               dm.dmDisplayFrequency, dm.dmPosition.x, dm.dmPosition.y);
 
-        ret = ChangeDisplaySettingsExW(dd.DeviceName, &dm, NULL,
-                                       CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL);
+        ret = NtUserChangeDisplaySettings(&str, &dm, NULL,
+                                          CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL);
         if (ret != DISP_CHANGE_SUCCESSFUL)
             ERR("Failed to save registry display settings for %s, returned %d.\n",
                 wine_dbgstr_w(dd.DeviceName), ret);
@@ -1413,7 +1157,7 @@ static void init_registry_display_settings(void)
  */
 void macdrv_displays_changed(const macdrv_event *event)
 {
-    HWND hwnd = GetDesktopWindow();
+    HWND hwnd = NtUserGetDesktopWindow();
 
     /* A system display change will get delivered to all GUI-attached threads,
        so the desktop-window-owning thread will get it and all others should
@@ -1421,52 +1165,33 @@ void macdrv_displays_changed(const macdrv_event *event)
        will only get delivered to the activated process.  So, it needs to
        process it (by sending it to the desktop window). */
     if (event->displays_changed.activating ||
-        GetWindowThreadProcessId(hwnd, NULL) == GetCurrentThreadId())
+        NtUserGetWindowThread(hwnd, NULL) == GetCurrentThreadId())
     {
-        CGDirectDisplayID mainDisplay = CGMainDisplayID();
-        CGDisplayModeRef mode = CGDisplayCopyDisplayMode(mainDisplay);
-        size_t width = CGDisplayModeGetWidth(mode);
-        size_t height = CGDisplayModeGetHeight(mode);
-        int mode_bpp = display_mode_bits_per_pixel(mode);
-        struct display_mode_descriptor* desc = create_original_display_mode_descriptor(mainDisplay);
-        BOOL is_original = display_mode_matches_descriptor(mode, desc);
-
-        free_display_mode_descriptor(desc);
-        CGDisplayModeRelease(mode);
-
         macdrv_init_display_devices(TRUE);
         init_registry_display_settings();
-
-        if (is_original && retina_enabled)
-        {
-            width *= 2;
-            height *= 2;
-        }
-
-        SendMessageW(hwnd, WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
-                     MAKELPARAM(width, height));
+        macdrv_resize_desktop();
     }
 }
 
 static BOOL force_display_devices_refresh;
 
-void CDECL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
-                                        BOOL force, void *param )
+BOOL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager, BOOL force, void *param )
 {
     struct macdrv_adapter *adapters, *adapter;
     struct macdrv_monitor *monitors, *monitor;
     struct macdrv_gpu *gpus, *gpu;
-    INT gpu_count, adapter_count, monitor_count;
+    INT gpu_count, adapter_count, monitor_count, mode_count;
+    DEVMODEW *mode, *modes;
     DWORD len;
 
-    if (!force && !force_display_devices_refresh) return;
+    if (!force && !force_display_devices_refresh) return TRUE;
     force_display_devices_refresh = FALSE;
 
     /* Initialize GPUs */
     if (macdrv_get_gpus(&gpus, &gpu_count))
     {
         ERR("could not get GPUs\n");
-        return;
+        return FALSE;
     }
     TRACE("GPU count: %d\n", gpu_count);
 
@@ -1514,6 +1239,19 @@ void CDECL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_
                 device_manager->add_monitor( &gdi_monitor, param );
             }
 
+            if (!(modes = display_get_modes(adapter->id, &mode_count))) break;
+            TRACE("adapter: %#x, mode count: %d\n", adapter->id, mode_count);
+
+            /* Initialize modes */
+            for (mode = modes; mode < modes + mode_count; mode++)
+            {
+                TRACE("mode: %dx%dx%dbpp @%d Hz, %sstretched %sinterlaced\n", mode->dmPelsWidth, mode->dmPelsHeight,
+                      mode->dmBitsPerPel, mode->dmDisplayFrequency,
+                      mode->dmDisplayFixedOutput == DMDFO_STRETCH ? "" : "un",
+                      mode->dmDisplayFlags & DM_INTERLACED ? "" : "non-");
+                device_manager->add_mode( mode, param );
+            }
+
             macdrv_free_monitors(monitors);
         }
 
@@ -1521,6 +1259,7 @@ void CDECL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_
     }
 
     macdrv_free_gpus(gpus);
+    return TRUE;
 }
 
 /***********************************************************************

@@ -3674,8 +3674,6 @@ HRESULT ensure_doc_nsevent_handler(HTMLDocumentNode *doc, nsIDOMNode *nsnode, ev
         doc->event_vector[eid] = TRUE;
         eid = EVENTID_BLUR;
         break;
-    case EVENTID_LAST:
-        return S_OK;
     default:
         break;
     }
@@ -3869,6 +3867,11 @@ HRESULT attach_event(EventTarget *event_target, BSTR name, IDispatch *disp, VARI
     listener_container_t *container;
     event_listener_t *listener;
     eventid_t eid;
+
+    if(!disp) {
+        *res = VARIANT_FALSE;
+        return S_OK;
+    }
 
     eid = attr_to_eid(name);
     if(eid == EVENTID_LAST) {
@@ -4099,6 +4102,9 @@ static HRESULT WINAPI EventTarget_addEventListener(IEventTarget *iface, BSTR typ
     event_listener_t *listener;
 
     TRACE("(%p)->(%s %p %x)\n", This, debugstr_w(type), function, capture);
+
+    if(!function)
+        return S_OK;
 
     container = get_listener_container(This, type, TRUE);
     if(!container)

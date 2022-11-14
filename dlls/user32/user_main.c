@@ -18,55 +18,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "imm.h"
-
-#include "controls.h"
 #include "user_private.h"
-#include "win.h"
+#include "controls.h"
+#include "imm.h"
+#include "ddk/imm.h"
 #include "wine/debug.h"
 
+
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
+WINE_DECLARE_DEBUG_CHANNEL(message);
 
 HMODULE user32_module = 0;
 
-static DWORD exiting_thread_id;
-
 extern void WDML_NotifyThreadDetach(void);
-
-/***********************************************************************
- *           USER_Lock
- */
-void USER_Lock(void)
-{
-    NtUserCallOneParam( 0, NtUserLock );
-}
-
-
-/***********************************************************************
- *           USER_Unlock
- */
-void USER_Unlock(void)
-{
-    NtUserCallOneParam( 1, NtUserLock );
-}
-
-
-/***********************************************************************
- *           USER_CheckNotLock
- *
- * Make sure that we don't hold the user lock.
- */
-void USER_CheckNotLock(void)
-{
-    NtUserCallOneParam( 2, NtUserLock );
-}
 
 
 /***********************************************************************
@@ -74,7 +38,7 @@ void USER_CheckNotLock(void)
  */
 UINT WINAPI UserRealizePalette( HDC hdc )
 {
-    return NtUserCallOneParam( HandleToUlong(hdc), NtUserRealizePalette );
+    return NtUserRealizePalette( hdc );
 }
 
 
@@ -134,61 +98,120 @@ static void dpiaware_init(void)
     }
 }
 
-static void CDECL notify_ime( HWND hwnd, UINT param )
+static NTSTATUS WINAPI User32CopyImage( const struct copy_image_params *params, ULONG size )
 {
-    HWND ime_default = ImmGetDefaultIMEWnd( hwnd );
-    if (ime_default) SendMessageW( ime_default, WM_IME_INTERNAL, param, HandleToUlong(hwnd) );
+    HANDLE ret = CopyImage( params->hwnd, params->type, params->dx, params->dy, params->flags );
+    return HandleToUlong( ret );
 }
 
-void WINAPI unregister_imm( HWND hwnd )
+static NTSTATUS WINAPI User32DrawScrollBar( const struct draw_scroll_bar_params *params, ULONG size )
 {
-    imm_unregister_window( hwnd );
+    RECT rect = params->rect;
+    user_api->pScrollBarDraw( params->hwnd, params->hdc, params->bar, params->hit_test,
+                              &params->tracking_info, params->arrows, params->interior,
+                              &rect, params->enable_flags, params->arrow_size, params->thumb_pos,
+                              params->thumb_size, params->vertical );
+    return 0;
 }
 
-static void CDECL free_win_ptr( WND *win )
+static NTSTATUS WINAPI User32DrawText( const struct draw_text_params *params, ULONG size )
 {
-    HeapFree( GetProcessHeap(), 0, win->text );
-    HeapFree( GetProcessHeap(), 0, win->pScroll );
-    HeapFree( GetProcessHeap(), 0, win );
+    RECT rect = params->rect;
+    int ret;
+
+    size -= FIELD_OFFSET( struct draw_text_params, str );
+    ret = DrawTextW( params->hdc, params->str, size / sizeof(WCHAR), &rect, params->flags );
+    if (params->ret_rect)
+    {
+        *params->ret_rect = rect;
+        return ret;
+    }
+    return NtCallbackReturn( &rect, sizeof(rect), ret );
 }
 
-static const struct user_callbacks user_funcs =
+static NTSTATUS WINAPI User32ImmProcessKey( const struct imm_process_key_params *params, ULONG size )
 {
-    AdjustWindowRectEx,
-    CopyImage,
-    DestroyCaret,
-    DestroyMenu,
-    EndMenu,
-    HideCaret,
-    PostMessageW,
-    SendInput,
-    SendMessageTimeoutW,
-    SendMessageW,
-    SendNotifyMessageW,
-    ShowCaret,
-    WaitForInputIdle,
-    free_win_ptr,
-    MENU_IsMenuActive,
-    notify_ime,
-    register_builtin_classes,
-    MSG_SendInternalMessageTimeout,
-    SCROLL_SetStandardScrollPainted,
-    (void *)__wine_set_user_driver,
-    set_window_pos,
-    unregister_imm,
-};
+    return ImmProcessKey( params->hwnd, params->hkl, params->vkey, params->key_data, 0 );
+}
+
+static NTSTATUS WINAPI User32ImmTranslateMessage( const struct imm_translate_message_params *params,
+                                                  ULONG size )
+{
+    return ImmTranslateMessage( params->hwnd, params->msg, params->wparam, params->key_data );
+}
+
+static NTSTATUS WINAPI User32LoadImage( const struct load_image_params *params, ULONG size )
+{
+    HANDLE ret = LoadImageW( params->hinst, params->name, params->type,
+                             params->dx, params->dy, params->flags );
+    return HandleToUlong( ret );
+}
+
+static NTSTATUS WINAPI User32LoadSysMenu( const struct load_sys_menu_params *params, ULONG size )
+{
+    HMENU ret = LoadMenuW( user32_module, params->mdi ? L"SYSMENUMDI" : L"SYSMENU" );
+    return HandleToUlong( ret );
+}
+
+static NTSTATUS WINAPI User32FreeCachedClipboardData( const struct free_cached_data_params *params,
+                                                      ULONG size )
+{
+    free_cached_data( params->format, params->handle );
+    return 0;
+}
+
+static NTSTATUS WINAPI User32PostDDEMessage( const struct post_dde_message_params *params, ULONG size )
+{
+    return post_dde_message( params->hwnd, params->msg, params->wparam, params->lparam,
+                             params->dest_tid, params->type );
+}
+
+static NTSTATUS WINAPI User32RenderSsynthesizedFormat( const struct render_synthesized_format_params *params,
+                                                       ULONG size )
+{
+    render_synthesized_format( params->format, params->from );
+    return 0;
+}
 
 static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
 {
     return LoadLibraryW( path ) != NULL;
 }
 
+static NTSTATUS WINAPI User32UnpackDDEMessage( const struct unpack_dde_message_params *params, ULONG size )
+{
+    struct unpack_dde_message_result result = { .wparam = params->wparam, .lparam = params->lparam };
+
+    size -= FIELD_OFFSET( struct unpack_dde_message_params, data );
+    if (!unpack_dde_message( params->hwnd, params->message, &result.wparam, &result.lparam,
+                             params->data, size ))
+        return FALSE;
+
+    if (params->result) *params->result = result;
+    else NtCallbackReturn( &result, sizeof(result), TRUE );
+    return TRUE;
+}
+
 static const void *kernel_callback_table[NtUserCallCount] =
 {
     User32CallEnumDisplayMonitor,
+    User32CallSendAsyncCallback,
     User32CallWinEventHook,
+    User32CallWindowProc,
     User32CallWindowsHook,
+    User32CopyImage,
+    User32DrawScrollBar,
+    User32DrawText,
+    User32FreeCachedClipboardData,
+    User32ImmProcessKey,
+    User32ImmTranslateMessage,
+    User32InitBuiltinClasses,
     User32LoadDriver,
+    User32LoadImage,
+    User32LoadSysMenu,
+    User32PostDDEMessage,
+    User32RenderSsynthesizedFormat,
+    User32UnpackDDEMessage,
 };
 
 
@@ -199,26 +222,11 @@ static BOOL process_attach(void)
 {
     NtCurrentTeb()->Peb->KernelCallbackTable = kernel_callback_table;
 
-    /* FIXME: should not be needed */
-    NtUserCallOneParam( (UINT_PTR)&user_funcs, NtUserSetCallbacks );
-
-    dpiaware_init();
     winproc_init();
-    register_desktop_class();
-
-    /* Initialize system colors and metrics */
+    dpiaware_init();
     SYSPARAMS_Init();
 
     return TRUE;
-}
-
-
-/**********************************************************************
- *           USER_IsExitingThread
- */
-BOOL USER_IsExitingThread( DWORD tid )
-{
-    return (tid == exiting_thread_id);
 }
 
 
@@ -227,18 +235,14 @@ BOOL USER_IsExitingThread( DWORD tid )
  */
 static void thread_detach(void)
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
-    exiting_thread_id = GetCurrentThreadId();
     NtUserCallNoParam( NtUserExitingThread );
 
     WDML_NotifyThreadDetach();
 
     NtUserCallNoParam( NtUserThreadDetach );
-    HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
-    HeapFree( GetProcessHeap(), 0, thread_info->rawinput );
-
-    exiting_thread_id = 0;
+    HeapFree( GetProcessHeap(), 0, (void *)(UINT_PTR)thread_info->wmchar_data );
 }
 
 
@@ -264,7 +268,6 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
-        USER_unload_driver();
         FreeLibrary(imm32_module);
         break;
     }
@@ -347,4 +350,22 @@ BOOL WINAPI ShutdownBlockReasonDestroy(HWND hwnd)
     FIXME("(%p): stub\n", hwnd);
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
+}
+
+const char *SPY_GetMsgName( UINT msg, HWND hwnd )
+{
+    char buf[128];
+    NtUserMessageCall( hwnd, msg, ARRAYSIZE(buf), 0, buf, NtUserSpyGetMsgName, FALSE );
+    return wine_dbg_sprintf( "%s", buf );
+}
+
+void SPY_EnterMessage( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, 0, NtUserSpyEnter, flag );
+}
+
+void SPY_ExitMessage( INT flag, HWND hwnd, UINT msg, LRESULT lreturn, WPARAM wparam, LPARAM lparam )
+{
+    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, (void *)lreturn,
+                                              NtUserSpyExit, flag );
 }

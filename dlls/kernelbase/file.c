@@ -3195,9 +3195,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH CancelIoEx( HANDLE handle, LPOVERLAPPED overlapped
  */
 BOOL WINAPI DECLSPEC_HOTPATCH CancelSynchronousIo( HANDLE thread )
 {
-    FIXME( "(%p): stub\n", thread );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    IO_STATUS_BLOCK io;
+
+    return set_ntstatus( NtCancelSynchronousIoFile( thread, NULL, &io ));
 }
 
 
@@ -3259,18 +3259,27 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetFileInformationByHandleEx( HANDLE handle, FILE_
 
     switch (class)
     {
-    case FileStreamInfo:
-    case FileCompressionInfo:
     case FileRemoteProtocolInfo:
-    case FileFullDirectoryInfo:
-    case FileFullDirectoryRestartInfo:
     case FileStorageInfo:
-    case FileAlignmentInfo:
-    case FileIdExtdDirectoryInfo:
-    case FileIdExtdDirectoryRestartInfo:
+    case FileDispositionInfoEx:
+    case FileRenameInfoEx:
+    case FileCaseSensitiveInfo:
+    case FileNormalizedNameInfo:
         FIXME( "%p, %u, %p, %lu\n", handle, class, info, size );
         SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
         return FALSE;
+
+    case FileStreamInfo:
+        status = NtQueryInformationFile( handle, &io, info, size, FileStreamInformation );
+        break;
+
+    case FileCompressionInfo:
+        status = NtQueryInformationFile( handle, &io, info, size, FileCompressionInformation );
+        break;
+
+    case FileAlignmentInfo:
+        status = NtQueryInformationFile( handle, &io, info, size, FileAlignmentInformation );
+        break;
 
     case FileAttributeTagInfo:
         status = NtQueryInformationFile( handle, &io, info, size, FileAttributeTagInformation );
@@ -3297,6 +3306,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetFileInformationByHandleEx( HANDLE handle, FILE_
         status = NtQueryDirectoryFile( handle, NULL, NULL, NULL, &io, info, size,
                                        FileIdBothDirectoryInformation, FALSE, NULL,
                                        (class == FileIdBothDirectoryRestartInfo) );
+        break;
+
+    case FileFullDirectoryInfo:
+    case FileFullDirectoryRestartInfo:
+        status = NtQueryDirectoryFile( handle, NULL, NULL, NULL, &io, info, size,
+                                       FileFullDirectoryInformation, FALSE, NULL,
+                                       (class == FileFullDirectoryRestartInfo) );
+        break;
+
+    case FileIdExtdDirectoryInfo:
+    case FileIdExtdDirectoryRestartInfo:
+        status = NtQueryDirectoryFile( handle, NULL, NULL, NULL, &io, info, size,
+                                       FileIdExtdDirectoryInformation, FALSE, NULL,
+                                       (class == FileIdExtdDirectoryRestartInfo) );
         break;
 
     case FileRenameInfo:

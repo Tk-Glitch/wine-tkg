@@ -22,6 +22,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "ntstatus.h"
@@ -32,7 +36,6 @@
 #include "shlobj.h"
 #include "wine/list.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
@@ -86,6 +89,9 @@ static CFDataRef export_unicodetext_to_utf16(void *data, size_t size);
 /**************************************************************************
  *              Static Variables
  **************************************************************************/
+
+static const WCHAR clipboard_classname[] =
+    {'_','_','w','i','n','e','_','c','l','i','p','b','o','a','r','d','_','m','a','n','a','g','e','r',0};
 
 /* Clipboard formats */
 static struct list format_list = LIST_INIT(format_list);
@@ -190,11 +196,10 @@ static DWORD clipboard_thread_id;
 static HWND clipboard_hwnd;
 static BOOL is_clipboard_owner;
 static macdrv_window clipboard_cocoa_window;
-static ULONG64 last_clipboard_update;
+static ULONG last_clipboard_update;
 static DWORD last_get_seqno;
 static WINE_CLIPFORMAT **current_mac_formats;
 static unsigned int nb_current_mac_formats;
-static WCHAR clipboard_pipe_name[256];
 
 
 /**************************************************************************
@@ -208,7 +213,7 @@ static WCHAR clipboard_pipe_name[256];
 /**************************************************************************
  *              debugstr_format
  */
-const char *debugstr_format(UINT id)
+static const char *debugstr_format(UINT id)
 {
     WCHAR buffer[256];
 
@@ -243,6 +248,12 @@ const char *debugstr_format(UINT id)
 #undef BUILTIN
     default: return wine_dbg_sprintf("0x%04x", id);
     }
+}
+
+
+static CFTypeRef pasteboard_from_handle(UINT64 handle)
+{
+    return (CFTypeRef)(UINT_PTR)handle;
 }
 
 
@@ -567,6 +578,21 @@ static void *import_html(CFDataRef data, size_t *ret_size)
 }
 
 
+static CPTABLEINFO *get_ansi_cp(void)
+{
+    USHORT utf8_hdr[2] = { 0, CP_UTF8 };
+    static CPTABLEINFO cp;
+    if (!cp.CodePage)
+    {
+        if (NtCurrentTeb()->Peb->AnsiCodePageData)
+            RtlInitCodePageTable(NtCurrentTeb()->Peb->AnsiCodePageData, &cp);
+        else
+            RtlInitCodePageTable(utf8_hdr, &cp);
+    }
+    return &cp;
+}
+
+
 /* based on wine_get_dos_file_name */
 static WCHAR *get_dos_file_name(const char *path)
 {
@@ -739,7 +765,7 @@ static void *import_nsfilenames_to_hdrop(CFDataRef data, size_t *ret_size)
 
     len = 1; /* for the terminating null */
     for (i = 0; i < count; i++)
-        len += strlenW(paths[i]) + 1;
+        len += wcslen(paths[i]) + 1;
 
     *ret_size = sizeof(*dropfiles) + len * sizeof(WCHAR);
     if (!(dropfiles = malloc(*ret_size)))
@@ -757,8 +783,8 @@ static void *import_nsfilenames_to_hdrop(CFDataRef data, size_t *ret_size)
     p = (WCHAR*)(dropfiles + 1);
     for (i = 0; i < count; i++)
     {
-        strcpyW(p, paths[i]);
-        p += strlenW(p) + 1;
+        wcscpy(p, paths[i]);
+        p += wcslen(p) + 1;
     }
     *p = 0;
 
@@ -808,7 +834,11 @@ static void *import_utf8_to_unicodetext(CFDataRef data, size_t *ret_size)
         dst[j++] = 0;
 
         if ((ret = malloc(j * sizeof(WCHAR))))
-            *ret_size = MultiByteToWideChar(CP_UTF8, 0, dst, j, ret, j) * sizeof(WCHAR);
+        {
+            DWORD dst_size;
+            RtlUTF8ToUnicodeN(ret, j * sizeof(WCHAR), &dst_size, dst, j);
+            *ret_size = dst_size;
+        }
 
         free(dst);
     }
@@ -938,21 +968,22 @@ static CFDataRef export_hdrop_to_filenames(void *data, size_t size)
             unixname = get_unix_file_name(p);
         else
         {
-            int len = MultiByteToWideChar(CP_ACP, 0, p, -1, NULL, 0);
-            if (len)
-            {
-                if (len > buffer_len)
-                {
-                    free(buffer);
-                    buffer_len = len * 2;
-                    buffer = malloc(buffer_len * sizeof(*buffer));
-                }
+            CPTABLEINFO *cp = get_ansi_cp();
+            DWORD len = strlen(p) + 1;
 
-                MultiByteToWideChar(CP_ACP, 0, p, -1, buffer, buffer_len);
-                unixname = get_unix_file_name(buffer);
+            if (len * 3 > buffer_len)
+            {
+                free(buffer);
+                buffer_len = len * 3;
+                buffer = malloc(buffer_len * sizeof(*buffer));
             }
+
+            if (cp->CodePage == CP_UTF8)
+                RtlUTF8ToUnicodeN(buffer, buffer_len * sizeof(WCHAR), &len, p, len);
             else
-                unixname = NULL;
+                RtlCustomCPToUnicodeN(cp, buffer, buffer_len * sizeof(WCHAR), &len, p, len);
+
+            unixname = get_unix_file_name(buffer);
         }
         if (!unixname)
         {
@@ -962,7 +993,7 @@ static CFDataRef export_hdrop_to_filenames(void *data, size_t size)
         }
 
         if (dropfiles->fWide)
-            p = (WCHAR*)p + strlenW(p) + 1;
+            p = (WCHAR*)p + wcslen(p) + 1;
         else
             p = (char*)p + strlen(p) + 1;
 
@@ -1031,10 +1062,12 @@ static CFDataRef export_html(void *data, size_t size)
 static CFDataRef export_unicodetext_to_utf8(void *data, size_t size)
 {
     CFMutableDataRef ret;
-    INT dst_len;
+    WCHAR *src = data;
+    DWORD dst_len = 0;
 
-    dst_len = WideCharToMultiByte(CP_UTF8, 0, data, -1, NULL, 0, NULL, NULL);
-    if (dst_len) dst_len--; /* Leave off null terminator. */
+    /* Leave off null terminator. */
+    if (size >= sizeof(WCHAR) && !src[size / sizeof(WCHAR) - 1]) size -= sizeof(WCHAR);
+    RtlUnicodeToUTF8N(NULL, 0, &dst_len, src, size);
     ret = CFDataCreateMutable(NULL, dst_len);
     if (ret)
     {
@@ -1043,7 +1076,7 @@ static CFDataRef export_unicodetext_to_utf8(void *data, size_t size)
 
         CFDataSetLength(ret, dst_len);
         dst = (LPSTR)CFDataGetMutableBytePtr(ret);
-        WideCharToMultiByte(CP_UTF8, 0, data, -1, dst, dst_len, NULL, NULL);
+        RtlUnicodeToUTF8N(dst, dst_len, &dst_len, src, size);
 
         /* Remove carriage returns */
         for (i = 0, j = 0; i < dst_len; i++)
@@ -1098,24 +1131,26 @@ static CFDataRef export_unicodetext_to_utf16(void *data, size_t size)
 
 
 /**************************************************************************
- *              macdrv_get_pasteboard_data
+ *              macdrv_dnd_get_data
  */
-HANDLE macdrv_get_pasteboard_data(CFTypeRef pasteboard, UINT desired_format)
+NTSTATUS macdrv_dnd_get_data(void *arg)
 {
+    struct dnd_get_data_params *params = arg;
+    CFTypeRef pasteboard = pasteboard_from_handle(params->handle);
     CFArrayRef types;
     CFIndex count;
     CFIndex i;
     CFStringRef type, best_type;
     WINE_CLIPFORMAT* best_format = NULL;
-    HANDLE data = NULL;
+    NTSTATUS status = STATUS_SUCCESS;
 
-    TRACE("pasteboard %p, desired_format %s\n", pasteboard, debugstr_format(desired_format));
+    TRACE("pasteboard %p, desired_format %s\n", pasteboard, debugstr_format(params->format));
 
     types = macdrv_copy_pasteboard_types(pasteboard);
     if (!types)
     {
         WARN("Failed to copy pasteboard types\n");
-        return NULL;
+        return STATUS_NO_MEMORY;
     }
 
     count = CFArrayGetCount(types);
@@ -1131,7 +1166,7 @@ HANDLE macdrv_get_pasteboard_data(CFTypeRef pasteboard, UINT desired_format)
         {
             TRACE("for type %s got format %p/%s\n", debugstr_cf(type), format, debugstr_format(format->format_id));
 
-            if (format->format_id == desired_format)
+            if (format->format_id == params->format)
             {
                 /* The best format is the matching one which is not synthesized.  Failing that,
                    the best format is the first matching synthesized format. */
@@ -1153,15 +1188,12 @@ HANDLE macdrv_get_pasteboard_data(CFTypeRef pasteboard, UINT desired_format)
         if (pasteboard_data)
         {
             size_t size;
-            void *import = best_format->import_func(pasteboard_data, &size), *ptr;
+            void *import = best_format->import_func(pasteboard_data, &size);
             if (import)
             {
-                data = GlobalAlloc(GMEM_FIXED, size);
-                if (data && (ptr = GlobalLock(data)))
-                {
-                    memcpy(ptr, import, size);
-                    GlobalUnlock(data);
-                }
+                if (size > params->size) status = STATUS_BUFFER_OVERFLOW;
+                else memcpy(params->data, import, size);
+                params->size = size;
                 free(import);
             }
             CFRelease(pasteboard_data);
@@ -1169,22 +1201,24 @@ HANDLE macdrv_get_pasteboard_data(CFTypeRef pasteboard, UINT desired_format)
     }
 
     CFRelease(types);
-    TRACE(" -> %p\n", data);
-    return data;
+    TRACE(" -> %#x\n", status);
+    return status;
 }
 
 
 /**************************************************************************
  *              macdrv_pasteboard_has_format
  */
-BOOL macdrv_pasteboard_has_format(CFTypeRef pasteboard, UINT desired_format)
+NTSTATUS macdrv_dnd_have_format(void *arg)
 {
+    struct dnd_have_format_params *params = arg;
+    CFTypeRef pasteboard = pasteboard_from_handle(params->handle);
     CFArrayRef types;
     int count;
     UINT i;
     BOOL found = FALSE;
 
-    TRACE("pasteboard %p, desired_format %s\n", pasteboard, debugstr_format(desired_format));
+    TRACE("pasteboard %p, desired_format %s\n", pasteboard, debugstr_format(params->format));
 
     types = macdrv_copy_pasteboard_types(pasteboard);
     if (!types)
@@ -1205,7 +1239,7 @@ BOOL macdrv_pasteboard_has_format(CFTypeRef pasteboard, UINT desired_format)
         {
             TRACE("for type %s got format %s\n", debugstr_cf(type), debugstr_format(format->format_id));
 
-            if (format->format_id == desired_format)
+            if (format->format_id == params->format)
             {
                 found = TRUE;
                 break;
@@ -1341,33 +1375,24 @@ static WINE_CLIPFORMAT** get_formats_for_pasteboard(CFTypeRef pasteboard, UINT *
 
 
 /**************************************************************************
- *              macdrv_get_pasteboard_formats
+ *              macdrv_dnd_get_formats
  */
-UINT* macdrv_get_pasteboard_formats(CFTypeRef pasteboard, UINT* num_formats)
+NTSTATUS macdrv_dnd_get_formats(void *arg)
 {
+    struct dnd_get_formats_params *params = arg;
+    CFTypeRef pasteboard = pasteboard_from_handle(params->handle);
     WINE_CLIPFORMAT** formats;
     UINT count, i;
-    UINT* format_ids;
 
     formats = get_formats_for_pasteboard(pasteboard, &count);
     if (!formats)
-        return NULL;
-
-    format_ids = malloc(count);
-    if (!format_ids)
-    {
-        WARN("Failed to allocate formats IDs array\n");
-        free(formats);
-        return NULL;
-    }
+        return 0;
+    count = min(count, ARRAYSIZE(params->formats));
 
     for (i = 0; i < count; i++)
-        format_ids[i] = formats[i]->format_id;
+        params->formats[i] = formats[i]->format_id;
 
-    free(formats);
-
-    *num_formats = count;
-    return format_ids;
+    return count;
 }
 
 
@@ -1401,7 +1426,7 @@ static UINT *get_clipboard_formats(UINT *size)
     for (;;)
     {
         if (!(ids = malloc(*size * sizeof(*ids)))) return NULL;
-        if (GetUpdatedClipboardFormats(ids, *size, size)) break;
+        if (NtUserGetUpdatedClipboardFormats(ids, *size, size)) break;
         free(ids);
         if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return NULL;
     }
@@ -1451,8 +1476,9 @@ static void set_win32_clipboard_formats_from_mac_pasteboard(CFArrayRef types)
 
     for (i = 0; i < count; i++)
     {
+        struct set_clipboard_params params = { 0 };
         TRACE("adding format %s\n", debugstr_format(formats[i]->format_id));
-        SetClipboardData(formats[i]->format_id, 0);
+        NtUserSetClipboardData(formats[i]->format_id, 0, &params);
     }
 
     free(current_mac_formats);
@@ -1519,7 +1545,7 @@ static void grab_win32_clipboard(void)
     if (!NtUserOpenClipboard(clipboard_hwnd, 0)) return;
     NtUserEmptyClipboard();
     is_clipboard_owner = TRUE;
-    last_clipboard_update = GetTickCount64();
+    last_clipboard_update = NtGetTickCount();
     set_win32_clipboard_formats_from_mac_pasteboard(types);
     NtUserCloseClipboard();
     NtUserSetTimer(clipboard_hwnd, 1, CLIPBOARD_UPDATE_DELAY, NULL, TIMERV_DEFAULT_COALESCING);
@@ -1536,15 +1562,15 @@ static void update_clipboard(void)
 {
     static BOOL updating;
 
-    TRACE("is_clipboard_owner %d last_clipboard_update %llu now %llu\n",
-          is_clipboard_owner, (unsigned long long)last_clipboard_update, (unsigned long long)GetTickCount64());
+    TRACE("is_clipboard_owner %d last_clipboard_update %u now %u\n",
+          is_clipboard_owner, last_clipboard_update, NtGetTickCount());
 
     if (updating) return;
     updating = TRUE;
 
     if (is_clipboard_owner)
     {
-        if (GetTickCount64() - last_clipboard_update > CLIPBOARD_UPDATE_DELAY)
+        if (NtGetTickCount() - last_clipboard_update > CLIPBOARD_UPDATE_DELAY)
             grab_win32_clipboard();
     }
     else if (!macdrv_is_pasteboard_owner(clipboard_cocoa_window))
@@ -1554,20 +1580,44 @@ static void update_clipboard(void)
 }
 
 
+static BOOL init_clipboard(HWND hwnd)
+{
+    struct macdrv_window_features wf;
+
+    memset(&wf, 0, sizeof(wf));
+    clipboard_cocoa_window = macdrv_create_cocoa_window(&wf, CGRectMake(100, 100, 100, 100), hwnd,
+                                                        macdrv_init_thread_data()->queue);
+    if (!clipboard_cocoa_window)
+    {
+        ERR("failed to create clipboard Cocoa window\n");
+        return FALSE;
+    }
+
+    clipboard_hwnd = hwnd;
+    clipboard_thread_id = GetCurrentThreadId();
+    NtUserAddClipboardFormatListener(clipboard_hwnd);
+    register_builtin_formats();
+    grab_win32_clipboard();
+
+    TRACE("clipboard thread %04x running\n", GetCurrentThreadId());
+    return TRUE;
+}
+
+
 /**************************************************************************
- *              clipboard_wndproc
+ *              macdrv_ClipboardWindowProc
  *
  * Window procedure for the clipboard manager.
  */
-static LRESULT CALLBACK clipboard_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+LRESULT macdrv_ClipboardWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg)
     {
         case WM_NCCREATE:
-            return TRUE;
+            return init_clipboard(hwnd);
         case WM_CLIPBOARDUPDATE:
             if (is_clipboard_owner) break;  /* ignore our own changes */
-            if ((LONG)(GetClipboardSequenceNumber() - last_get_seqno) <= 0) break;
+            if ((LONG)(NtUserGetClipboardSequenceNumber() - last_get_seqno) <= 0) break;
             set_mac_pasteboard_types_from_win32_clipboard();
             break;
         case WM_RENDERFORMAT:
@@ -1580,222 +1630,13 @@ static LRESULT CALLBACK clipboard_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
         case WM_DESTROYCLIPBOARD:
             TRACE("WM_DESTROYCLIPBOARD: lost ownership\n");
             is_clipboard_owner = FALSE;
-            KillTimer(hwnd, 1);
+            NtUserKillTimer(hwnd, 1);
+            break;
+        case WM_USER:
+            update_clipboard();
             break;
     }
-    return DefWindowProcW(hwnd, msg, wp, lp);
-}
-
-
-/**************************************************************************
- *              wait_clipboard_mutex
- *
- * Make sure that there's only one clipboard thread per window station.
- */
-static BOOL wait_clipboard_mutex(void)
-{
-    static const WCHAR prefix[] = {'_','_','w','i','n','e','_','c','l','i','p','b','o','a','r','d','_'};
-    WCHAR buffer[MAX_PATH + ARRAY_SIZE(prefix)];
-    HANDLE mutex;
-
-    memcpy(buffer, prefix, sizeof(prefix));
-    if (!GetUserObjectInformationW(GetProcessWindowStation(), UOI_NAME,
-                                   buffer + ARRAY_SIZE(prefix),
-                                   sizeof(buffer) - sizeof(prefix), NULL))
-    {
-        ERR("failed to get winstation name\n");
-        return FALSE;
-    }
-    mutex = CreateMutexW(NULL, TRUE, buffer);
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
-    {
-        TRACE("waiting for mutex %s\n", debugstr_w(buffer));
-        WaitForSingleObject(mutex, INFINITE);
-    }
-    return TRUE;
-}
-
-
-/**************************************************************************
- *              init_pipe_name
- *
- * Init-once helper for get_pipe_name.
- */
-static BOOL CALLBACK init_pipe_name(INIT_ONCE* once, void* param, void** context)
-{
-    static const WCHAR prefix[] = {'\\','\\','.','\\','p','i','p','e','\\','_','_','w','i','n','e','_','c','l','i','p','b','o','a','r','d','_'};
-
-    memcpy(clipboard_pipe_name, prefix, sizeof(prefix));
-    if (!GetUserObjectInformationW(GetProcessWindowStation(), UOI_NAME,
-                                   clipboard_pipe_name + ARRAY_SIZE(prefix),
-                                   sizeof(clipboard_pipe_name) - sizeof(prefix), NULL))
-    {
-        ERR("failed to get winstation name\n");
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-
-/**************************************************************************
- *              get_pipe_name
- *
- * Get the name of the pipe used to communicate with the per-window-station
- * clipboard manager thread.
- */
-static const WCHAR* get_pipe_name(void)
-{
-    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
-    InitOnceExecuteOnce(&once, init_pipe_name, NULL, NULL);
-    return clipboard_pipe_name[0] ? clipboard_pipe_name : NULL;
-}
-
-
-/**************************************************************************
- *              clipboard_thread
- *
- * Thread running inside the desktop process to manage the clipboard
- */
-static DWORD WINAPI clipboard_thread(void *arg)
-{
-    static const WCHAR clipboard_classname[] = {'_','_','w','i','n','e','_','c','l','i','p','b','o','a','r','d','_','m','a','n','a','g','e','r',0};
-    WNDCLASSW class;
-    struct macdrv_window_features wf;
-    const WCHAR* pipe_name;
-    HANDLE pipe = NULL;
-    HANDLE event = NULL;
-    OVERLAPPED overlapped;
-    BOOL need_connect = TRUE, pending = FALSE;
-    MSG msg;
-
-    if (!wait_clipboard_mutex()) return 0;
-
-    memset(&class, 0, sizeof(class));
-    class.lpfnWndProc   = clipboard_wndproc;
-    class.lpszClassName = clipboard_classname;
-
-    if (!RegisterClassW(&class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-    {
-        ERR("could not register clipboard window class err %u\n", GetLastError());
-        return 0;
-    }
-    if (!(clipboard_hwnd = CreateWindowW(clipboard_classname, NULL, 0, 0, 0, 0, 0,
-                                         HWND_MESSAGE, 0, 0, NULL)))
-    {
-        ERR("failed to create clipboard window err %u\n", GetLastError());
-        return 0;
-    }
-
-    memset(&wf, 0, sizeof(wf));
-    clipboard_cocoa_window = macdrv_create_cocoa_window(&wf, CGRectMake(100, 100, 100, 100), clipboard_hwnd,
-                                                        macdrv_init_thread_data()->queue);
-    if (!clipboard_cocoa_window)
-    {
-        ERR("failed to create clipboard Cocoa window\n");
-        goto done;
-    }
-
-    pipe_name = get_pipe_name();
-    if (!pipe_name)
-    {
-        ERR("failed to get pipe name\n");
-        goto done;
-    }
-
-    pipe = CreateNamedPipeW(pipe_name, PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
-                            PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, 1, 1, 0, NULL);
-    if (!pipe)
-    {
-        ERR("failed to create named pipe: %u\n", GetLastError());
-        goto done;
-    }
-
-    event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!event)
-    {
-        ERR("failed to create event: %d\n", GetLastError());
-        goto done;
-    }
-
-    clipboard_thread_id = GetCurrentThreadId();
-    NtUserAddClipboardFormatListener(clipboard_hwnd);
-    register_builtin_formats();
-    grab_win32_clipboard();
-
-    TRACE("clipboard thread %04x running\n", GetCurrentThreadId());
-    while (1)
-    {
-        DWORD result;
-
-        if (need_connect)
-        {
-            pending = FALSE;
-            memset(&overlapped, 0, sizeof(overlapped));
-            overlapped.hEvent = event;
-            if (ConnectNamedPipe(pipe, &overlapped))
-            {
-                ERR("asynchronous ConnectNamedPipe unexpectedly returned true: %d\n", GetLastError());
-                ResetEvent(event);
-            }
-            else
-            {
-                result = GetLastError();
-                switch (result)
-                {
-                    case ERROR_PIPE_CONNECTED:
-                    case ERROR_NO_DATA:
-                        SetEvent(event);
-                        need_connect = FALSE;
-                        break;
-                    case ERROR_IO_PENDING:
-                        need_connect = FALSE;
-                        pending = TRUE;
-                        break;
-                    default:
-                        ERR("failed to initiate pipe connection: %d\n", result);
-                        break;
-                }
-            }
-        }
-
-        result = MsgWaitForMultipleObjectsEx(1, &event, INFINITE, QS_ALLINPUT, MWMO_ALERTABLE | MWMO_INPUTAVAILABLE);
-        switch (result)
-        {
-            case WAIT_OBJECT_0:
-            {
-                DWORD written;
-
-                if (pending && !GetOverlappedResult(pipe, &overlapped, &written, FALSE))
-                    ERR("failed to connect pipe: %d\n", GetLastError());
-
-                update_clipboard();
-                DisconnectNamedPipe(pipe);
-                need_connect = TRUE;
-                break;
-            }
-            case WAIT_OBJECT_0 + 1:
-                while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
-                {
-                    if (msg.message == WM_QUIT)
-                        goto done;
-                    DispatchMessageW(&msg);
-                }
-                break;
-            case WAIT_IO_COMPLETION:
-                break;
-            default:
-                ERR("failed to wait for connection or input: %d\n", GetLastError());
-                break;
-        }
-    }
-
-done:
-    if (event) CloseHandle(event);
-    if (pipe) CloseHandle(pipe);
-    macdrv_destroy_cocoa_window(clipboard_cocoa_window);
-    DestroyWindow(clipboard_hwnd);
-    return 0;
+    return NtUserMessageCall(hwnd, msg, wp, lp, NULL, NtUserDefWindowProc, FALSE);
 }
 
 
@@ -1807,127 +1648,35 @@ done:
 /**************************************************************************
  *              macdrv_UpdateClipboard
  */
-void CDECL macdrv_UpdateClipboard(void)
+void macdrv_UpdateClipboard(void)
 {
     static ULONG last_update;
-    ULONG now, end;
-    const WCHAR* pipe_name;
-    HANDLE pipe;
-    BYTE dummy;
-    DWORD count;
-    OVERLAPPED overlapped = { 0 };
-    BOOL canceled = FALSE;
+    static HWND clipboard_manager;
+    ULONG now;
+    DWORD_PTR ret;
 
     if (GetCurrentThreadId() == clipboard_thread_id) return;
 
     TRACE("\n");
 
-    now = GetTickCount();
-    if ((int)(now - last_update) <= CLIPBOARD_UPDATE_DELAY) return;
+    now = NtGetTickCount();
+    if (last_update && (int)(now - last_update) <= CLIPBOARD_UPDATE_DELAY) return;
+
+    if (!NtUserIsWindow(clipboard_manager))
+    {
+        UNICODE_STRING str;
+        RtlInitUnicodeString(&str, clipboard_classname);
+        clipboard_manager = NtUserFindWindowEx(NULL, NULL, &str, NULL, 0);
+        if (!clipboard_manager)
+        {
+            ERR("clipboard manager not found\n");
+            return;
+        }
+    }
+
+    send_message_timeout(clipboard_manager, WM_USER, 0, 0,
+                         SMTO_ABORTIFHUNG, 5000, &ret);
     last_update = now;
-
-    if (!(pipe_name = get_pipe_name())) return;
-    pipe = CreateFileW(pipe_name, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
-    if (pipe == INVALID_HANDLE_VALUE)
-    {
-        WARN("failed to open pipe to clipboard manager: %d\n", GetLastError());
-        return;
-    }
-
-    overlapped.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!overlapped.hEvent)
-    {
-        ERR("failed to create event: %d\n", GetLastError());
-        goto done;
-    }
-
-    /* We expect the read to fail because the server just closes our connection.  This
-       is just waiting for that close to happen. */
-    if (ReadFile(pipe, &dummy, sizeof(dummy), NULL, &overlapped))
-    {
-        WARN("asynchronous ReadFile unexpectedly returned true: %d\n", GetLastError());
-        goto done;
-    }
-    else
-    {
-        DWORD error = GetLastError();
-        if (error == ERROR_PIPE_NOT_CONNECTED || error == ERROR_BROKEN_PIPE)
-        {
-            /* The server accepted, handled, and closed our connection before we
-               attempted the read, which is fine. */
-            goto done;
-        }
-        else if (error != ERROR_IO_PENDING)
-        {
-            ERR("failed to initiate read from pipe: %d\n", error);
-            goto done;
-        }
-    }
-
-    end = now + 500;
-    while (1)
-    {
-        DWORD result, timeout;
-
-        if (canceled)
-            timeout = INFINITE;
-        else
-        {
-            now = GetTickCount();
-            timeout = end - now;
-            if ((int)timeout < 0)
-                timeout = 0;
-        }
-
-        result = MsgWaitForMultipleObjectsEx(1, &overlapped.hEvent, timeout, QS_SENDMESSAGE, MWMO_ALERTABLE);
-        switch (result)
-        {
-            case WAIT_OBJECT_0:
-            {
-                if (GetOverlappedResult(pipe, &overlapped, &count, FALSE))
-                    WARN("unexpectedly succeeded in reading from pipe\n");
-                else
-                {
-                    result = GetLastError();
-                    if (result != ERROR_BROKEN_PIPE && result != ERROR_OPERATION_ABORTED &&
-                        result != ERROR_HANDLES_CLOSED)
-                        WARN("failed to read from pipe: %d\n", result);
-                }
-
-                goto done;
-            }
-            case WAIT_OBJECT_0 + 1:
-            {
-                MSG msg;
-                while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE))
-                    DispatchMessageW(&msg);
-                break;
-            }
-            case WAIT_IO_COMPLETION:
-                break;
-            case WAIT_TIMEOUT:
-                WARN("timed out waiting for read\n");
-                CancelIoEx(pipe, &overlapped);
-                canceled = TRUE;
-                break;
-            default:
-                if (canceled)
-                {
-                    ERR("failed to wait for cancel: %d\n", GetLastError());
-                    goto done;
-                }
-
-                ERR("failed to wait for read: %d\n", GetLastError());
-                CancelIoEx(pipe, &overlapped);
-                canceled = TRUE;
-                break;
-        }
-    }
-
-done:
-    if (overlapped.hEvent) CloseHandle(overlapped.hEvent);
-    CloseHandle(pipe);
 }
 
 
@@ -2001,13 +1750,22 @@ void macdrv_lost_pasteboard_ownership(HWND hwnd)
 
 
 /**************************************************************************
- *              macdrv_init_clipboard
+ *              macdrv_dnd_release
  */
-void macdrv_init_clipboard(void)
+NTSTATUS macdrv_dnd_release(void *arg)
 {
-    DWORD id;
-    HANDLE handle = CreateThread(NULL, 0, clipboard_thread, NULL, 0, &id);
+    UINT64 handle = *(UINT64 *)arg;
+    CFRelease(pasteboard_from_handle(handle));
+    return 0;
+}
 
-    if (handle) CloseHandle(handle);
-    else ERR("failed to create clipboard thread\n");
+
+/**************************************************************************
+ *              macdrv_dnd_retain
+ */
+NTSTATUS macdrv_dnd_retain(void *arg)
+{
+    UINT64 handle = *(UINT64 *)arg;
+    CFRetain(pasteboard_from_handle(handle));
+    return 0;
 }

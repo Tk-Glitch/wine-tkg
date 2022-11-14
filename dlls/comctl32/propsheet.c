@@ -66,6 +66,8 @@
 
 #include "wine/debug.h"
 
+#define HPROPSHEETPAGE_MAGIC 0x5A9234E3
+
 /******************************************************************************
  * Data structures
  */
@@ -95,8 +97,14 @@ typedef struct
 
 struct _PSP
 {
-    PROPSHEETPAGEW psp;
-    PROPSHEETPAGEW callback_psp;
+    DWORD magic;
+    BOOL unicode;
+    union
+    {
+        PROPSHEETPAGEA pspA;
+        PROPSHEETPAGEW pspW;
+        BYTE data[1];
+    };
 };
 
 typedef struct tagPropPageInfo
@@ -106,7 +114,6 @@ typedef struct tagPropPageInfo
   BOOL isDirty;
   LPCWSTR pszText;
   BOOL hasHelp;
-  BOOL useCallback;
   BOOL hasIcon;
 } PropPageInfo;
 
@@ -147,8 +154,6 @@ typedef struct
 
 static const WCHAR PropSheetInfoStr[] = L"PropertySheetInfo";
 
-#define PSP_INTERNAL_UNICODE 0x80000000
-
 #define MAX_CAPTION_LENGTH 255
 #define MAX_TABTEXT_LENGTH 255
 #define MAX_BUTTONTEXT_LENGTH 64
@@ -179,6 +184,13 @@ PROPSHEET_DialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 WINE_DEFAULT_DEBUG_CHANNEL(propsheet);
 
+static char *heap_strdupA(const char *str)
+{
+    int len = strlen(str) + 1;
+    char *ret = Alloc(len);
+    return strcpy(ret, str);
+}
+
 static WCHAR *heap_strdupW(const WCHAR *str)
 {
     int len = lstrlenW(str) + 1;
@@ -197,6 +209,378 @@ static WCHAR *heap_strdupAtoW(const char *str)
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
 
     return ret;
+}
+
+static char *heap_strdupWtoA(const WCHAR *str)
+{
+    char *ret;
+    INT len;
+
+    len = WideCharToMultiByte(CP_ACP, 0, str, -1, 0, 0, 0, 0);
+    ret = Alloc(len);
+    WideCharToMultiByte(CP_ACP, 0, str, -1, ret, len, 0, 0);
+
+    return ret;
+}
+
+/*
+ * Get the size of an in-memory template
+ *
+ *( Based on the code of PROPSHEET_CollectPageInfo)
+ * See also dialog.c/DIALOG_ParseTemplate32().
+ */
+
+static UINT get_template_size(const DLGTEMPLATE *template)
+{
+    const WORD *p = (const WORD *)template;
+    BOOL istemplateex = ((const MyDLGTEMPLATEEX *)template)->signature == 0xFFFF;
+    WORD nitems;
+    UINT ret;
+
+    if (istemplateex)
+    {
+        /* DLGTEMPLATEEX (not defined in any std. header file) */
+        TRACE("is DLGTEMPLATEEX\n");
+        p++;       /* dlgVer */
+        p++;       /* signature */
+        p += 2;    /* help ID */
+        p += 2;    /* ext style */
+        p += 2;    /* style */
+    }
+    else
+    {
+        /* DLGTEMPLATE */
+        TRACE("is DLGTEMPLATE\n");
+        p += 2;    /* style */
+        p += 2;    /* ext style */
+    }
+
+    nitems = *p;
+    p++;    /* nb items */
+    p++;    /* x */
+    p++;    /* y */
+    p++;    /* width */
+    p++;    /* height */
+
+    /* menu */
+    switch (*p)
+    {
+    case 0x0000:
+        p++;
+        break;
+    case 0xffff:
+        p += 2;
+        break;
+    default:
+        TRACE("menu %s\n", debugstr_w( p ));
+        p += lstrlenW( p ) + 1;
+        break;
+    }
+
+    /* class */
+    switch (*p)
+    {
+    case 0x0000:
+        p++;
+        break;
+    case 0xffff:
+        p += 2; /* 0xffff plus predefined window class ordinal value */
+        break;
+    default:
+        TRACE("class %s\n", debugstr_w( p ));
+        p += lstrlenW( p ) + 1;
+        break;
+    }
+
+    /* title */
+    TRACE("title %s\n", debugstr_w( p ));
+    p += lstrlenW( p ) + 1;
+
+    /* font, if DS_SETFONT set */
+    if ((DS_SETFONT & ((istemplateex) ? ((const MyDLGTEMPLATEEX *)template)->style :
+                    template->style)))
+    {
+        p += istemplateex ? 3 : 1;
+        TRACE("font %s\n", debugstr_w( p ));
+        p += lstrlenW( p ) + 1; /* the font name */
+    }
+
+    /* now process the DLGITEMTEMPLATE(EX) structs (plus custom data)
+     * that are following the DLGTEMPLATE(EX) data */
+    TRACE("%d items\n", nitems);
+    while (nitems > 0)
+    {
+        p = (WORD*)(((DWORD_PTR)p + 3) & ~3); /* DWORD align */
+
+        /* skip header */
+        p += (istemplateex ? sizeof(MyDLGITEMTEMPLATEEX) : sizeof(DLGITEMTEMPLATE))
+            / sizeof(WORD);
+
+        /* check class */
+        switch (*p)
+        {
+        case 0x0000:
+            p++;
+            break;
+        case 0xffff:
+            TRACE("class ordinal %#lx\n", *(const DWORD *)p);
+            p += 2;
+            break;
+        default:
+            TRACE("class %s\n", debugstr_w( p ));
+            p += lstrlenW( p ) + 1;
+            break;
+        }
+
+        /* check title text */
+        switch (*p)
+        {
+        case 0x0000:
+            p++;
+            break;
+        case 0xffff:
+            TRACE("text ordinal %#lx\n",*(const DWORD *)p);
+            p += 2;
+            break;
+        default:
+            TRACE("text %s\n",debugstr_w( p ));
+            p += lstrlenW( p ) + 1;
+            break;
+        }
+        p += *p / sizeof(WORD) + 1;    /* Skip extra data */
+        --nitems;
+    }
+
+    ret = (p - (const WORD *)template) * sizeof(WORD);
+    TRACE("%p %p size 0x%08x\n", p, template, ret);
+    return ret;
+}
+
+static DWORD HPSP_get_flags(HPROPSHEETPAGE hpsp)
+{
+    if (!hpsp) return 0;
+    return hpsp->unicode ? hpsp->pspW.dwFlags : hpsp->pspA.dwFlags;
+}
+
+static void HPSP_call_callback(HPROPSHEETPAGE hpsp, UINT msg)
+{
+    if (hpsp->unicode)
+    {
+        if (!(hpsp->pspW.dwFlags & PSP_USECALLBACK) || !hpsp->pspW.pfnCallback ||
+                (msg == PSPCB_ADDREF && hpsp->pspW.dwSize <= PROPSHEETPAGEW_V1_SIZE))
+            return;
+
+        hpsp->pspW.pfnCallback(0, msg, &hpsp->pspW);
+    }
+    else
+    {
+        if (!(hpsp->pspA.dwFlags & PSP_USECALLBACK) || !hpsp->pspA.pfnCallback ||
+                (msg == PSPCB_ADDREF && hpsp->pspA.dwSize <= PROPSHEETPAGEA_V1_SIZE))
+            return;
+
+        hpsp->pspA.pfnCallback(0, msg, &hpsp->pspA);
+    }
+}
+
+static const DLGTEMPLATE* HPSP_load_template(HPROPSHEETPAGE hpsp, DWORD *size)
+{
+    HGLOBAL template;
+    HINSTANCE hinst;
+    HRSRC res;
+
+    if (hpsp->unicode)
+    {
+        if (hpsp->pspW.dwFlags & PSP_DLGINDIRECT)
+        {
+            if (size)
+                *size = get_template_size(hpsp->pspW.u.pResource);
+            return hpsp->pspW.u.pResource;
+        }
+
+        hinst = hpsp->pspW.hInstance;
+        res = FindResourceW(hinst, hpsp->pspW.u.pszTemplate, (LPWSTR)RT_DIALOG);
+    }
+    else
+    {
+        if (hpsp->pspA.dwFlags & PSP_DLGINDIRECT)
+        {
+            if (size)
+                *size = get_template_size(hpsp->pspA.u.pResource);
+            return hpsp->pspA.u.pResource;
+        }
+
+        hinst = hpsp->pspA.hInstance;
+        res = FindResourceA(hinst, hpsp->pspA.u.pszTemplate, (LPSTR)RT_DIALOG);
+    }
+
+    if (size)
+        *size = SizeofResource(hinst, res);
+
+    template = LoadResource(hinst, res);
+    return LockResource(template);
+}
+
+static WCHAR* HPSP_get_title(HPROPSHEETPAGE hpsp, const WCHAR *template_title)
+{
+    const WCHAR *pTitle;
+    WCHAR szTitle[256];
+    const void *title;
+    HINSTANCE hinst;
+
+    if (hpsp->unicode)
+    {
+        title = hpsp->pspW.pszTitle;
+        hinst = hpsp->pspW.hInstance;
+    }
+    else
+    {
+        title = hpsp->pspA.pszTitle;
+        hinst = hpsp->pspA.hInstance;
+    }
+
+    if (IS_INTRESOURCE(title))
+    {
+        if (LoadStringW(hinst, (DWORD_PTR)title, szTitle, ARRAY_SIZE(szTitle)))
+            pTitle = szTitle;
+        else if (*template_title)
+            pTitle = template_title;
+        else
+            pTitle = L"(null)";
+
+        return heap_strdupW(pTitle);
+    }
+
+    if (hpsp->unicode)
+        return heap_strdupW(title);
+    return heap_strdupAtoW(title);
+}
+
+static HICON HPSP_get_icon(HPROPSHEETPAGE hpsp)
+{
+    HICON ret;
+
+    if (hpsp->unicode)
+    {
+        if (hpsp->pspW.dwFlags & PSP_USEICONID)
+        {
+            int cx = GetSystemMetrics(SM_CXSMICON);
+            int cy = GetSystemMetrics(SM_CYSMICON);
+
+            ret = LoadImageW(hpsp->pspW.hInstance, hpsp->pspW.u2.pszIcon, IMAGE_ICON,
+                    cx, cy, LR_DEFAULTCOLOR);
+        }
+        else
+        {
+            ret = hpsp->pspW.u2.hIcon;
+        }
+    }
+    else
+    {
+        if (hpsp->pspA.dwFlags & PSP_USEICONID)
+        {
+            int cx = GetSystemMetrics(SM_CXSMICON);
+            int cy = GetSystemMetrics(SM_CYSMICON);
+
+            ret = LoadImageA(hpsp->pspA.hInstance, hpsp->pspA.u2.pszIcon, IMAGE_ICON,
+                    cx, cy, LR_DEFAULTCOLOR);
+        }
+        else
+        {
+            ret = hpsp->pspA.u2.hIcon;
+        }
+    }
+
+    return ret;
+}
+
+static LRESULT HPSP_get_template(HPROPSHEETPAGE hpsp)
+{
+    if (hpsp->unicode)
+        return (LRESULT)hpsp->pspW.u.pszTemplate;
+    return (LRESULT)hpsp->pspA.u.pszTemplate;
+}
+
+static HWND HPSP_create_page(HPROPSHEETPAGE hpsp, DLGTEMPLATE *template, HWND parent)
+{
+    HWND hwnd;
+
+    if (hpsp->unicode)
+    {
+        hwnd = CreateDialogIndirectParamW(hpsp->pspW.hInstance, template,
+                parent, hpsp->pspW.pfnDlgProc, (LPARAM)&hpsp->pspW);
+    }
+    else
+    {
+        hwnd = CreateDialogIndirectParamA(hpsp->pspA.hInstance, template,
+                parent, hpsp->pspA.pfnDlgProc, (LPARAM)&hpsp->pspA);
+    }
+
+    return hwnd;
+}
+
+static void HPSP_set_header_title(HPROPSHEETPAGE hpsp, const WCHAR *title)
+{
+    if (hpsp->unicode)
+    {
+        if (!IS_INTRESOURCE(hpsp->pspW.pszHeaderTitle))
+            Free((void *)hpsp->pspW.pszHeaderTitle);
+
+        hpsp->pspW.pszHeaderTitle = heap_strdupW(title);
+        hpsp->pspW.dwFlags |= PSP_USEHEADERTITLE;
+    }
+    else
+    {
+        if (!IS_INTRESOURCE(hpsp->pspA.pszHeaderTitle))
+            Free((void *)hpsp->pspA.pszHeaderTitle);
+
+        hpsp->pspA.pszHeaderTitle = heap_strdupWtoA(title);
+        hpsp->pspA.dwFlags |= PSP_USEHEADERTITLE;
+    }
+}
+
+static void HPSP_set_header_subtitle(HPROPSHEETPAGE hpsp, const WCHAR *subtitle)
+{
+    if (hpsp->unicode)
+    {
+        if (!IS_INTRESOURCE(hpsp->pspW.pszHeaderTitle))
+            Free((void *)hpsp->pspW.pszHeaderTitle);
+
+        hpsp->pspW.pszHeaderTitle = heap_strdupW(subtitle);
+        hpsp->pspW.dwFlags |= PSP_USEHEADERSUBTITLE;
+    }
+    else
+    {
+        if (!IS_INTRESOURCE(hpsp->pspA.pszHeaderTitle))
+            Free((void *)hpsp->pspA.pszHeaderTitle);
+
+        hpsp->pspA.pszHeaderTitle = heap_strdupWtoA(subtitle);
+        hpsp->pspA.dwFlags |= PSP_USEHEADERSUBTITLE;
+    }
+}
+
+static void HPSP_draw_text(HPROPSHEETPAGE hpsp, HDC hdc, BOOL title, RECT *r, UINT format)
+{
+    const void *text;
+
+    if (hpsp->unicode)
+        text = title ? hpsp->pspW.pszHeaderTitle : hpsp->pspW.pszHeaderSubTitle;
+    else
+        text = title ? hpsp->pspA.pszHeaderTitle : hpsp->pspA.pszHeaderSubTitle;
+
+    if (IS_INTRESOURCE(text))
+    {
+        WCHAR buf[256];
+        INT len;
+
+        len = LoadStringW(hpsp->unicode ? hpsp->pspW.hInstance : hpsp->pspA.hInstance,
+                (UINT_PTR)text, buf, ARRAY_SIZE(buf));
+        if (len != 0)
+            DrawTextW(hdc, buf, len, r, format);
+    }
+    else if (hpsp->unicode)
+        DrawTextW(hdc, text, -1, r, format);
+    else
+        DrawTextA(hdc, text, -1, r, format);
 }
 
 #define add_flag(a) if (dwFlags & a) {strcat(string, #a );strcat(string," ");}
@@ -240,7 +624,7 @@ static void PROPSHEET_GetPageRect(const PropSheetInfo * psInfo, HWND hwndDlg,
 
         if (((psInfo->ppshheader.dwFlags & (PSH_WIZARD97_NEW | PSH_WIZARD97_OLD)) &&
              (psInfo->ppshheader.dwFlags & PSH_HEADER) &&
-             !(hpsp->psp.dwFlags & PSP_HIDEHEADER)) ||
+             !(HPSP_get_flags(hpsp) & PSP_HIDEHEADER)) ||
             (psInfo->ppshheader.dwFlags & PSH_WIZARD))
         {
             rc->left = rc->top = WIZARD_PADDING;
@@ -255,7 +639,7 @@ static void PROPSHEET_GetPageRect(const PropSheetInfo * psInfo, HWND hwndDlg,
 
         if ((psInfo->ppshheader.dwFlags & (PSH_WIZARD97_NEW | PSH_WIZARD97_OLD)) &&
             (psInfo->ppshheader.dwFlags & PSH_HEADER) &&
-            !(hpsp->psp.dwFlags & PSP_HIDEHEADER))
+            !(HPSP_get_flags(hpsp) & PSP_HIDEHEADER))
         {
             hwndChild = GetDlgItem(hwndDlg, IDC_SUNKEN_LINEHEADER);
             GetClientRect(hwndChild, &r);
@@ -282,7 +666,7 @@ static INT PROPSHEET_FindPageByResId(const PropSheetInfo * psInfo, LRESULT resId
    for (i = 0; i < psInfo->nPages; i++)
    {
       /* Fixme: if resource ID is a string shall we use strcmp ??? */
-      if (psInfo->proppage[i].hpage->psp.u.pszTemplate == (LPVOID)resId)
+      if (HPSP_get_template(psInfo->proppage[i].hpage) == resId)
          break;
    }
 
@@ -418,8 +802,7 @@ static BOOL PROPSHEET_CollectPageInfo(HPROPSHEETPAGE hpsp,
   /*
    * Process property page flags.
    */
-  dwFlags = hpsp->psp.dwFlags;
-  psInfo->proppage[index].useCallback = (dwFlags & PSP_USECALLBACK) && (hpsp->psp.pfnCallback);
+  dwFlags = HPSP_get_flags(hpsp);
   psInfo->proppage[index].hasHelp = dwFlags & PSP_HASHELP;
   psInfo->proppage[index].hasIcon = dwFlags & (PSP_USEHICON | PSP_USEICONID);
 
@@ -430,26 +813,7 @@ static BOOL PROPSHEET_CollectPageInfo(HPROPSHEETPAGE hpsp,
   /*
    * Process page template.
    */
-  if (dwFlags & PSP_DLGINDIRECT)
-    pTemplate = hpsp->psp.u.pResource;
-  else if(dwFlags & PSP_INTERNAL_UNICODE )
-  {
-    HRSRC hResource = FindResourceW(hpsp->psp.hInstance,
-                                    hpsp->psp.u.pszTemplate,
-                                    (LPWSTR)RT_DIALOG);
-    HGLOBAL hTemplate = LoadResource(hpsp->psp.hInstance,
-                                     hResource);
-    pTemplate = LockResource(hTemplate);
-  }
-  else
-  {
-    HRSRC hResource = FindResourceA(hpsp->psp.hInstance,
-                                    (LPCSTR)hpsp->psp.u.pszTemplate,
-                                    (LPSTR)RT_DIALOG);
-    HGLOBAL hTemplate = LoadResource(hpsp->psp.hInstance,
-                                     hResource);
-    pTemplate = LockResource(hTemplate);
-  }
+  pTemplate = HPSP_load_template(hpsp, NULL);
 
   /*
    * Extract the size of the page and the caption.
@@ -483,7 +847,7 @@ static BOOL PROPSHEET_CollectPageInfo(HPROPSHEETPAGE hpsp,
   width  = (WORD)*p; p++;
   height = (WORD)*p; p++;
 
-  if (hpsp->psp.dwFlags & (PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE))
+  if (HPSP_get_flags(hpsp) & (PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE))
     psInfo->ppshheader.dwFlags |= PSH_HEADER;
 
   /* Special calculation for interior wizard pages so the largest page is
@@ -546,24 +910,7 @@ static BOOL PROPSHEET_CollectPageInfo(HPROPSHEETPAGE hpsp,
   TRACE("Tab %d %s\n",index,debugstr_w( p ));
 
   if (dwFlags & PSP_USETITLE)
-  {
-    WCHAR szTitle[256];
-    const WCHAR *pTitle;
-
-    if (IS_INTRESOURCE( hpsp->psp.pszTitle ))
-    {
-      if (LoadStringW( hpsp->psp.hInstance, (DWORD_PTR)hpsp->psp.pszTitle, szTitle, ARRAY_SIZE(szTitle)))
-        pTitle = szTitle;
-      else if (*p)
-        pTitle = p;
-      else
-        pTitle = L"(null)";
-    }
-    else
-      pTitle = hpsp->psp.pszTitle;
-
-    psInfo->proppage[index].pszText = heap_strdupW( pTitle );
-  }
+      psInfo->proppage[index].pszText = HPSP_get_title(hpsp, p);
 
   /*
    * Build the image list for icons
@@ -574,13 +921,7 @@ static BOOL PROPSHEET_CollectPageInfo(HPROPSHEETPAGE hpsp,
     int icon_cx = GetSystemMetrics(SM_CXSMICON);
     int icon_cy = GetSystemMetrics(SM_CYSMICON);
 
-    if (dwFlags & PSP_USEICONID)
-      hIcon = LoadImageW(hpsp->psp.hInstance, hpsp->psp.u2.pszIcon, IMAGE_ICON,
-                         icon_cx, icon_cy, LR_DEFAULTCOLOR);
-    else
-      hIcon = hpsp->psp.u2.hIcon;
-
-    if ( hIcon )
+    if ((hIcon = HPSP_get_icon(hpsp)))
     {
       if (psInfo->hImageList == 0 )
 	psInfo->hImageList = ImageList_Create(icon_cx, icon_cy, ILC_COLOR, 1, 1);
@@ -1197,140 +1538,6 @@ PROPSHEET_WizardSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
   return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
-/*
- * Get the size of an in-memory Template
- *
- *( Based on the code of PROPSHEET_CollectPageInfo)
- * See also dialog.c/DIALOG_ParseTemplate32().
- */
-
-static UINT GetTemplateSize(const DLGTEMPLATE* pTemplate)
-
-{
-  const WORD*  p = (const WORD *)pTemplate;
-  BOOL  istemplateex = (((const MyDLGTEMPLATEEX*)pTemplate)->signature == 0xFFFF);
-  WORD nrofitems;
-  UINT ret;
-
-  if (istemplateex)
-  {
-    /* DLGTEMPLATEEX (not defined in any std. header file) */
-
-    TRACE("is DLGTEMPLATEEX\n");
-    p++;       /* dlgVer    */
-    p++;       /* signature */
-    p += 2;    /* help ID   */
-    p += 2;    /* ext style */
-    p += 2;    /* style     */
-  }
-  else
-  {
-    /* DLGTEMPLATE */
-
-    TRACE("is DLGTEMPLATE\n");
-    p += 2;    /* style     */
-    p += 2;    /* ext style */
-  }
-
-  nrofitems =   (WORD)*p; p++;    /* nb items */
-  p++;    /*   x      */
-  p++;    /*   y      */
-  p++;    /*   width  */
-  p++;    /*   height */
-
-  /* menu */
-  switch ((WORD)*p)
-  {
-    case 0x0000:
-      p++;
-      break;
-    case 0xffff:
-      p += 2;
-      break;
-    default:
-      TRACE("menu %s\n",debugstr_w( p ));
-      p += lstrlenW( p ) + 1;
-      break;
-  }
-
-  /* class */
-  switch ((WORD)*p)
-  {
-    case 0x0000:
-      p++;
-      break;
-    case 0xffff:
-      p += 2; /* 0xffff plus predefined window class ordinal value */
-      break;
-    default:
-      TRACE("class %s\n",debugstr_w( p ));
-      p += lstrlenW( p ) + 1;
-      break;
-  }
-
-  /* title */
-  TRACE("title %s\n",debugstr_w( p ));
-  p += lstrlenW( p ) + 1;
-
-  /* font, if DS_SETFONT set */
-  if ((DS_SETFONT & ((istemplateex)?  ((const MyDLGTEMPLATEEX*)pTemplate)->style :
-		     pTemplate->style)))
-    {
-      p+=(istemplateex)?3:1;
-      TRACE("font %s\n",debugstr_w( p ));
-      p += lstrlenW( p ) + 1; /* the font name */
-    }
-
-  /* now process the DLGITEMTEMPLATE(EX) structs (plus custom data)
-   * that are following the DLGTEMPLATE(EX) data */
-  TRACE("%d items\n",nrofitems);
-  while (nrofitems > 0)
-    {
-      p = (WORD*)(((DWORD_PTR)p + 3) & ~3); /* DWORD align */
-      
-      /* skip header */
-      p += (istemplateex ? sizeof(MyDLGITEMTEMPLATEEX) : sizeof(DLGITEMTEMPLATE))/sizeof(WORD);
-      
-      /* check class */
-      switch ((WORD)*p)
-	{
-	case 0x0000:
-	  p++;
-	  break;
-	case 0xffff:
-          TRACE("class ordinal %#lx\n",*(const DWORD*)p);
-	  p += 2;
-	  break;
-	default:
-	  TRACE("class %s\n",debugstr_w( p ));
-	  p += lstrlenW( p ) + 1;
-	  break;
-	}
-
-      /* check title text */
-      switch ((WORD)*p)
-	{
-	case 0x0000:
-	  p++;
-	  break;
-	case 0xffff:
-          TRACE("text ordinal %#lx\n",*(const DWORD*)p);
-	  p += 2;
-	  break;
-	default:
-	  TRACE("text %s\n",debugstr_w( p ));
-	  p += lstrlenW( p ) + 1;
-	  break;
-	}
-      p += *p / sizeof(WORD) + 1;    /* Skip extra data */
-      --nrofitems;
-    }
-  
-  ret = (p - (const WORD*)pTemplate) * sizeof(WORD);
-  TRACE("%p %p size 0x%08x\n", p, pTemplate, ret);
-  return ret;
-}
-
 /******************************************************************************
  *            PROPSHEET_CreatePage
  *
@@ -1353,55 +1560,7 @@ static BOOL PROPSHEET_CreatePage(HWND hwndParent,
     return FALSE;
   }
 
-  if (hpsp->psp.dwFlags & PSP_DLGINDIRECT)
-    {
-      pTemplate = hpsp->psp.u.pResource;
-      resSize = GetTemplateSize(pTemplate);
-    }
-  else if(hpsp->psp.dwFlags & PSP_INTERNAL_UNICODE)
-  {
-    HRSRC hResource;
-    HANDLE hTemplate;
-
-    hResource = FindResourceW(hpsp->psp.hInstance,
-                                    hpsp->psp.u.pszTemplate,
-                                    (LPWSTR)RT_DIALOG);
-    if(!hResource)
-	return FALSE;
-
-    resSize = SizeofResource(hpsp->psp.hInstance, hResource);
-
-    hTemplate = LoadResource(hpsp->psp.hInstance, hResource);
-    if(!hTemplate)
-	return FALSE;
-
-    pTemplate = LockResource(hTemplate);
-    /*
-     * Make a copy of the dialog template to make it writable
-     */
-  }
-  else
-  {
-    HRSRC hResource;
-    HANDLE hTemplate;
-
-    hResource = FindResourceA(hpsp->psp.hInstance,
-                                    (LPCSTR)hpsp->psp.u.pszTemplate,
-                                    (LPSTR)RT_DIALOG);
-    if(!hResource)
-	return FALSE;
-
-    resSize = SizeofResource(hpsp->psp.hInstance, hResource);
-
-    hTemplate = LoadResource(hpsp->psp.hInstance, hResource);
-    if(!hTemplate)
-	return FALSE;
-
-    pTemplate = LockResource(hTemplate);
-    /*
-     * Make a copy of the dialog template to make it writable
-     */
-  }
+  pTemplate = HPSP_load_template(hpsp, &resSize);
   pTemplateCopy = Alloc(resSize);
   if (!pTemplateCopy)
     return FALSE;
@@ -1436,21 +1595,8 @@ static BOOL PROPSHEET_CreatePage(HWND hwndParent,
     pTemplateCopy->dwExtendedStyle |= WS_EX_CONTROLPARENT;
   }
 
-  if (psInfo->proppage[index].useCallback)
-    (*(hpsp->psp.pfnCallback))(0, PSPCB_CREATE, &hpsp->psp);
-
-  if(hpsp->psp.dwFlags & PSP_INTERNAL_UNICODE)
-     hwndPage = CreateDialogIndirectParamW(hpsp->psp.hInstance,
-					pTemplateCopy,
-					hwndParent,
-					hpsp->psp.pfnDlgProc,
-					(LPARAM)&hpsp->psp);
-  else
-     hwndPage = CreateDialogIndirectParamA(hpsp->psp.hInstance,
-					pTemplateCopy,
-					hwndParent,
-					hpsp->psp.pfnDlgProc,
-					(LPARAM)&hpsp->psp);
+  HPSP_call_callback(hpsp, PSPCB_CREATE);
+  hwndPage = HPSP_create_page(hpsp, pTemplateCopy, hwndParent);
   /* Free a no more needed copy */
   Free(pTemplateCopy);
 
@@ -1462,7 +1608,7 @@ static BOOL PROPSHEET_CreatePage(HWND hwndParent,
   /* Subclass exterior wizard pages */
   if((psInfo->ppshheader.dwFlags & (PSH_WIZARD97_NEW | PSH_WIZARD97_OLD)) &&
      (psInfo->ppshheader.dwFlags & PSH_WATERMARK) &&
-     (hpsp->psp.dwFlags & PSP_HIDEHEADER))
+     (HPSP_get_flags(hpsp) & PSP_HIDEHEADER))
   {
       SetWindowSubclass(hwndPage, PROPSHEET_WizardSubclassProc, 1, 0);
   }
@@ -1553,7 +1699,7 @@ static BOOL PROPSHEET_ShowPage(HWND hwndDlg, int index, PropSheetInfo * psInfo)
   {
       hwndLineHeader = GetDlgItem(hwndDlg, IDC_SUNKEN_LINEHEADER);
       
-      if ((psInfo->proppage[index].hpage->psp.dwFlags & PSP_HIDEHEADER) ||
+      if ((HPSP_get_flags(psInfo->proppage[index].hpage) & PSP_HIDEHEADER) ||
               (!(psInfo->ppshheader.dwFlags & PSH_HEADER)) )
 	  ShowWindow(hwndLineHeader, SW_HIDE);
       else
@@ -2266,6 +2412,14 @@ static BOOL PROPSHEET_InsertPage(HWND hwndDlg, HPROPSHEETPAGE hpageInsertAfter, 
   if (!ppi)
       return FALSE;
 
+  if (hpage && hpage->magic != HPROPSHEETPAGE_MAGIC)
+  {
+      if (psInfo->unicode)
+          hpage = CreatePropertySheetPageW((const PROPSHEETPAGEW *)hpage);
+      else
+          hpage = CreatePropertySheetPageA((const PROPSHEETPAGEA *)hpage);
+  }
+
   /*
    * Fill in a new PropPageInfo entry.
    */
@@ -2285,7 +2439,7 @@ static BOOL PROPSHEET_InsertPage(HWND hwndDlg, HPROPSHEETPAGE hpageInsertAfter, 
 
   psInfo->proppage[index].hpage = hpage;
 
-  if (hpage->psp.dwFlags & PSP_PREMATURE)
+  if (HPSP_get_flags(hpage) & PSP_PREMATURE)
   {
      /* Create the page but don't show it */
      if (!PROPSHEET_CreatePage(hwndDlg, index, psInfo, hpage))
@@ -2398,7 +2552,7 @@ static BOOL PROPSHEET_RemovePage(HWND hwndDlg,
   /* Unsubclass the page dialog window */
   if((psInfo->ppshheader.dwFlags & (PSH_WIZARD97_NEW | PSH_WIZARD97_OLD)) &&
      (psInfo->ppshheader.dwFlags & PSH_WATERMARK) &&
-     (psInfo->proppage[index].hpage->psp.dwFlags & PSP_HIDEHEADER))
+     (HPSP_get_flags(psInfo->proppage[index].hpage) & PSP_HIDEHEADER))
   {
      RemoveWindowSubclass(psInfo->proppage[index].hwndPage,
                           PROPSHEET_WizardSubclassProc, 1);
@@ -2410,7 +2564,7 @@ static BOOL PROPSHEET_RemovePage(HWND hwndDlg,
   /* Free page resources */
   if(psInfo->proppage[index].hpage)
   {
-     if (psInfo->proppage[index].hpage->psp.dwFlags & PSP_USETITLE)
+     if (HPSP_get_flags(psInfo->proppage[index].hpage) & PSP_USETITLE)
         Free ((LPVOID)psInfo->proppage[index].pszText);
 
      DestroyPropertySheetPage(psInfo->proppage[index].hpage);
@@ -2493,20 +2647,13 @@ static void PROPSHEET_SetWizButtons(HWND hwndDlg, DWORD dwFlags)
 static void PROPSHEET_SetHeaderTitleW(HWND hwndDlg, UINT page_index, const WCHAR *title)
 {
     PropSheetInfo *psInfo = GetPropW(hwndDlg, PropSheetInfoStr);
-    PROPSHEETPAGEW *page;
 
     TRACE("(%p, %u, %s)\n", hwndDlg, page_index, debugstr_w(title));
 
     if (page_index >= psInfo->nPages)
         return;
 
-    page = &psInfo->proppage[page_index].hpage->psp;
-
-    if (!IS_INTRESOURCE(page->pszHeaderTitle))
-        Free((void *)page->pszHeaderTitle);
-
-    page->pszHeaderTitle = heap_strdupW(title);
-    page->dwFlags |= PSP_USEHEADERTITLE;
+    HPSP_set_header_title(psInfo->proppage[page_index].hpage, title);
 }
 
 /******************************************************************************
@@ -2529,20 +2676,13 @@ static void PROPSHEET_SetHeaderTitleA(HWND hwndDlg, UINT page_index, const char 
 static void PROPSHEET_SetHeaderSubTitleW(HWND hwndDlg, UINT page_index, const WCHAR *subtitle)
 {
     PropSheetInfo *psInfo = GetPropW(hwndDlg, PropSheetInfoStr);
-    PROPSHEETPAGEW *page;
 
     TRACE("(%p, %u, %s)\n", hwndDlg, page_index, debugstr_w(subtitle));
 
     if (page_index >= psInfo->nPages)
         return;
 
-    page = &psInfo->proppage[page_index].hpage->psp;
-
-    if (!IS_INTRESOURCE(page->pszHeaderSubTitle))
-        Free((void *)page->pszHeaderSubTitle);
-
-    page->pszHeaderSubTitle = heap_strdupW(subtitle);
-    page->dwFlags |= PSP_USEHEADERSUBTITLE;
+    HPSP_set_header_subtitle(psInfo->proppage[page_index].hpage, subtitle);
 }
 
 /******************************************************************************
@@ -2627,7 +2767,7 @@ static LRESULT PROPSHEET_IdToIndex(HWND hwndDlg, int iPageId)
     PropSheetInfo * psInfo = GetPropW(hwndDlg, PropSheetInfoStr);
     TRACE("(%p, %d)\n", hwndDlg, iPageId);
     for (index = 0; index < psInfo->nPages; index++) {
-        if (psInfo->proppage[index].hpage->psp.u.pszTemplate == MAKEINTRESOURCEW(iPageId))
+        if (HPSP_get_template(psInfo->proppage[index].hpage) == iPageId)
             return index;
     }
 
@@ -2640,17 +2780,20 @@ static LRESULT PROPSHEET_IdToIndex(HWND hwndDlg, int iPageId)
 static LRESULT PROPSHEET_IndexToId(HWND hwndDlg, int iPageIndex)
 {
     PropSheetInfo * psInfo = GetPropW(hwndDlg, PropSheetInfoStr);
-    LPCPROPSHEETPAGEW psp;
+    HPROPSHEETPAGE hpsp;
+    LRESULT template;
+
     TRACE("(%p, %d)\n", hwndDlg, iPageIndex);
+
     if (iPageIndex<0 || iPageIndex>=psInfo->nPages) {
         WARN("%d out of range.\n", iPageIndex);
 	return 0;
     }
-    psp = &psInfo->proppage[iPageIndex].hpage->psp;
-    if (psp->dwFlags & PSP_DLGINDIRECT || !IS_INTRESOURCE(psp->u.pszTemplate)) {
+    hpsp = psInfo->proppage[iPageIndex].hpage;
+    template = HPSP_get_template(hpsp);
+    if (HPSP_get_flags(hpsp) & PSP_DLGINDIRECT || !IS_INTRESOURCE(template))
         return 0;
-    }
-    return (LRESULT)psp->u.pszTemplate;
+    return template;
 }
 
 /******************************************************************************
@@ -2706,12 +2849,12 @@ static void PROPSHEET_CleanUp(HWND hwndDlg)
 
   for (i = 0; i < psInfo->nPages; i++)
   {
-     PROPSHEETPAGEW* psp = &psInfo->proppage[i].hpage->psp;
+     DWORD flags = HPSP_get_flags(psInfo->proppage[i].hpage);
 
      /* Unsubclass the page dialog window */
      if((psInfo->ppshheader.dwFlags & (PSH_WIZARD97_NEW | PSH_WIZARD97_OLD)) &&
         (psInfo->ppshheader.dwFlags & PSH_WATERMARK) &&
-        (psp->dwFlags & PSP_HIDEHEADER))
+        (flags & PSP_HIDEHEADER))
      {
         RemoveWindowSubclass(psInfo->proppage[i].hwndPage,
                              PROPSHEET_WizardSubclassProc, 1);
@@ -2720,13 +2863,10 @@ static void PROPSHEET_CleanUp(HWND hwndDlg)
      if(psInfo->proppage[i].hwndPage)
         DestroyWindow(psInfo->proppage[i].hwndPage);
 
-     if(psp)
-     {
-        if (psp->dwFlags & PSP_USETITLE)
-           Free ((LPVOID)psInfo->proppage[i].pszText);
+     if (flags & PSP_USETITLE)
+        Free ((LPVOID)psInfo->proppage[i].pszText);
 
-        DestroyPropertySheetPage(psInfo->proppage[i].hpage);
-     }
+     DestroyPropertySheetPage(psInfo->proppage[i].hpage);
   }
 
   DeleteObject(psInfo->hFont);
@@ -2833,7 +2973,18 @@ INT_PTR WINAPI PropertySheetA(LPCPROPSHEETHEADERA lppsh)
   for (n = i = 0; i < lppsh->nPages; i++, n++)
   {
     if (!psInfo->usePropPage)
-      psInfo->proppage[n].hpage = psInfo->ppshheader.u3.phpage[i];
+    {
+        if (psInfo->ppshheader.u3.phpage[i] &&
+                psInfo->ppshheader.u3.phpage[i]->magic == HPROPSHEETPAGE_MAGIC)
+        {
+            psInfo->proppage[n].hpage = psInfo->ppshheader.u3.phpage[i];
+        }
+        else
+        {
+            psInfo->proppage[n].hpage = CreatePropertySheetPageA(
+                    (const PROPSHEETPAGEA *)psInfo->ppshheader.u3.phpage[i]);
+        }
+    }
     else
     {
        psInfo->proppage[n].hpage = CreatePropertySheetPageA((LPCPROPSHEETPAGEA)pByte);
@@ -2873,7 +3024,18 @@ INT_PTR WINAPI PropertySheetW(LPCPROPSHEETHEADERW lppsh)
   for (n = i = 0; i < lppsh->nPages; i++, n++)
   {
     if (!psInfo->usePropPage)
-      psInfo->proppage[n].hpage = psInfo->ppshheader.u3.phpage[i];
+    {
+        if (psInfo->ppshheader.u3.phpage[i] &&
+                psInfo->ppshheader.u3.phpage[i]->magic == HPROPSHEETPAGE_MAGIC)
+        {
+            psInfo->proppage[n].hpage = psInfo->ppshheader.u3.phpage[i];
+        }
+        else
+        {
+            psInfo->proppage[n].hpage = CreatePropertySheetPageW(
+                    (const PROPSHEETPAGEW *)psInfo->ppshheader.u3.phpage[i]);
+        }
+    }
     else
     {
        psInfo->proppage[n].hpage = CreatePropertySheetPageW((LPCPROPSHEETPAGEW)pByte);
@@ -2892,42 +3054,6 @@ INT_PTR WINAPI PropertySheetW(LPCPROPSHEETHEADERW lppsh)
   return PROPSHEET_PropertySheet(psInfo, TRUE);
 }
 
-static LPWSTR load_string( HINSTANCE instance, LPCWSTR str )
-{
-    LPWSTR ret;
-
-    if (IS_INTRESOURCE(str))
-    {
-        HRSRC hrsrc;
-        HGLOBAL hmem;
-        WCHAR *ptr;
-        WORD i, id = LOWORD(str);
-        UINT len;
-
-        if (!(hrsrc = FindResourceW( instance, MAKEINTRESOURCEW((id >> 4) + 1), (LPWSTR)RT_STRING )))
-            return NULL;
-        if (!(hmem = LoadResource( instance, hrsrc ))) return NULL;
-        if (!(ptr = LockResource( hmem ))) return NULL;
-        for (i = id & 0x0f; i > 0; i--) ptr += *ptr + 1;
-        len = *ptr;
-        if (!len) return NULL;
-        ret = Alloc( (len + 1) * sizeof(WCHAR) );
-        if (ret)
-        {
-            memcpy( ret, ptr + 1, len * sizeof(WCHAR) );
-            ret[len] = 0;
-        }
-    }
-    else
-    {
-        int len = (lstrlenW(str) + 1) * sizeof(WCHAR);
-        ret = Alloc( len );
-        if (ret) memcpy( ret, str, len );
-    }
-    return ret;
-}
-
-
 /******************************************************************************
  *            CreatePropertySheetPage    (COMCTL32.@)
  *            CreatePropertySheetPageA   (COMCTL32.@)
@@ -2945,77 +3071,51 @@ static LPWSTR load_string( HINSTANCE instance, LPCWSTR str )
 HPROPSHEETPAGE WINAPI CreatePropertySheetPageA(
                           LPCPROPSHEETPAGEA lpPropSheetPage)
 {
-    PROPSHEETPAGEW *ppsp;
+    PROPSHEETPAGEA *ppsp;
     HPROPSHEETPAGE ret;
 
     if (lpPropSheetPage->dwSize < PROPSHEETPAGEA_V1_SIZE)
         return NULL;
 
-    ret = Alloc(sizeof(*ret));
-    ppsp = &ret->psp;
-    memcpy(ppsp, lpPropSheetPage, min(lpPropSheetPage->dwSize, sizeof(PROPSHEETPAGEA)));
-    /* original data is used for callback notifications */
-    if ((lpPropSheetPage->dwFlags & PSP_USECALLBACK) && lpPropSheetPage->pfnCallback)
-    {
-        memcpy(&ret->callback_psp, lpPropSheetPage,
-                min(lpPropSheetPage->dwSize, sizeof(PROPSHEETPAGEA)));
-    }
-
-    ppsp->dwFlags &= ~PSP_INTERNAL_UNICODE;
+    ret = Alloc(FIELD_OFFSET(struct _PSP, data[lpPropSheetPage->dwSize]));
+    ret->magic = HPROPSHEETPAGE_MAGIC;
+    ppsp = &ret->pspA;
+    memcpy(ppsp, lpPropSheetPage, lpPropSheetPage->dwSize);
 
     if ( !(ppsp->dwFlags & PSP_DLGINDIRECT) )
     {
         if (!IS_INTRESOURCE( ppsp->u.pszTemplate ))
-        {
-            int len = strlen(lpPropSheetPage->u.pszTemplate) + 1;
-            char *template = Alloc( len );
-
-            ppsp->u.pszTemplate = (LPWSTR)strcpy( template, lpPropSheetPage->u.pszTemplate );
-        }
+            ppsp->u.pszTemplate = heap_strdupA( lpPropSheetPage->u.pszTemplate );
     }
 
     if (ppsp->dwFlags & PSP_USEICONID)
     {
         if (!IS_INTRESOURCE( ppsp->u2.pszIcon ))
-            ppsp->u2.pszIcon = heap_strdupAtoW( lpPropSheetPage->u2.pszIcon );
+            ppsp->u2.pszIcon = heap_strdupA( lpPropSheetPage->u2.pszIcon );
     }
 
     if (ppsp->dwFlags & PSP_USETITLE)
     {
-        if (IS_INTRESOURCE( ppsp->pszTitle ))
-            ppsp->pszTitle = load_string( ppsp->hInstance, ppsp->pszTitle );
-        else
-            ppsp->pszTitle = heap_strdupAtoW( lpPropSheetPage->pszTitle );
+        if (!IS_INTRESOURCE( ppsp->pszTitle ))
+            ppsp->pszTitle = heap_strdupA( lpPropSheetPage->pszTitle );
     }
-    else
-        ppsp->pszTitle = NULL;
 
     if (ppsp->dwFlags & PSP_HIDEHEADER)
         ppsp->dwFlags &= ~(PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE);
 
     if (ppsp->dwFlags & PSP_USEHEADERTITLE)
     {
-        if (IS_INTRESOURCE( ppsp->pszHeaderTitle ))
-            ppsp->pszHeaderTitle = load_string( ppsp->hInstance, ppsp->pszHeaderTitle );
-        else
-            ppsp->pszHeaderTitle = heap_strdupAtoW( lpPropSheetPage->pszHeaderTitle );
+        if (!IS_INTRESOURCE( ppsp->pszHeaderTitle ))
+            ppsp->pszHeaderTitle = heap_strdupA( lpPropSheetPage->pszHeaderTitle );
     }
-    else
-        ppsp->pszHeaderTitle = NULL;
 
     if (ppsp->dwFlags & PSP_USEHEADERSUBTITLE)
     {
-        if (IS_INTRESOURCE( ppsp->pszHeaderSubTitle ))
-            ppsp->pszHeaderSubTitle = load_string( ppsp->hInstance, ppsp->pszHeaderSubTitle );
-        else
-            ppsp->pszHeaderSubTitle = heap_strdupAtoW( lpPropSheetPage->pszHeaderSubTitle );
+        if (!IS_INTRESOURCE( ppsp->pszHeaderSubTitle ))
+            ppsp->pszHeaderSubTitle = heap_strdupA( lpPropSheetPage->pszHeaderSubTitle );
     }
-    else
-        ppsp->pszHeaderSubTitle = NULL;
 
-    if ((ppsp->dwFlags & PSP_USECALLBACK) && ppsp->dwSize > PROPSHEETPAGEA_V1_SIZE && ppsp->pfnCallback)
-        ppsp->pfnCallback(0, PSPCB_ADDREF, ppsp + 1);
-
+    HPSP_call_callback(ret, PSPCB_ADDREF);
     return ret;
 }
 
@@ -3032,17 +3132,11 @@ HPROPSHEETPAGE WINAPI CreatePropertySheetPageW(LPCPROPSHEETPAGEW lpPropSheetPage
     if (lpPropSheetPage->dwSize < PROPSHEETPAGEW_V1_SIZE)
         return NULL;
 
-    ret = Alloc(sizeof(*ret));
-    ppsp = &ret->psp;
-    memcpy(ppsp, lpPropSheetPage, min(lpPropSheetPage->dwSize, sizeof(PROPSHEETPAGEW)));
-    /* original data is used for callback notifications */
-    if ((lpPropSheetPage->dwFlags & PSP_USECALLBACK) && lpPropSheetPage->pfnCallback)
-    {
-        memcpy(&ret->callback_psp, lpPropSheetPage,
-                min(lpPropSheetPage->dwSize, sizeof(PROPSHEETPAGEW)));
-    }
-
-    ppsp->dwFlags |= PSP_INTERNAL_UNICODE;
+    ret = Alloc(FIELD_OFFSET(struct _PSP, data[lpPropSheetPage->dwSize]));
+    ret->magic = HPROPSHEETPAGE_MAGIC;
+    ret->unicode = TRUE;
+    ppsp = &ret->pspW;
+    memcpy(ppsp, lpPropSheetPage, lpPropSheetPage->dwSize);
 
     if ( !(ppsp->dwFlags & PSP_DLGINDIRECT) )
     {
@@ -3057,26 +3151,27 @@ HPROPSHEETPAGE WINAPI CreatePropertySheetPageW(LPCPROPSHEETPAGEW lpPropSheetPage
     }
 
     if (ppsp->dwFlags & PSP_USETITLE)
-        ppsp->pszTitle = load_string( ppsp->hInstance, ppsp->pszTitle );
-    else
-        ppsp->pszTitle = NULL;
+    {
+        if (!IS_INTRESOURCE( ppsp->pszTitle ))
+            ppsp->pszTitle = heap_strdupW( lpPropSheetPage->pszTitle );
+    }
 
     if (ppsp->dwFlags & PSP_HIDEHEADER)
         ppsp->dwFlags &= ~(PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE);
 
     if (ppsp->dwFlags & PSP_USEHEADERTITLE)
-        ppsp->pszHeaderTitle = load_string( ppsp->hInstance, ppsp->pszHeaderTitle );
-    else
-        ppsp->pszHeaderTitle = NULL;
+    {
+        if (!IS_INTRESOURCE( ppsp->pszHeaderTitle ))
+            ppsp->pszHeaderTitle = heap_strdupW( ppsp->pszHeaderTitle );
+    }
 
     if (ppsp->dwFlags & PSP_USEHEADERSUBTITLE)
-        ppsp->pszHeaderSubTitle = load_string( ppsp->hInstance, ppsp->pszHeaderSubTitle );
-    else
-        ppsp->pszHeaderSubTitle = NULL;
+    {
+        if (!IS_INTRESOURCE( ppsp->pszHeaderSubTitle ))
+            ppsp->pszHeaderSubTitle = heap_strdupW( ppsp->pszHeaderSubTitle );
+    }
 
-    if ((ppsp->dwFlags & PSP_USECALLBACK) && ppsp->dwSize > PROPSHEETPAGEW_V1_SIZE && ppsp->pfnCallback)
-        ppsp->pfnCallback(0, PSPCB_ADDREF, ppsp + 1);
-
+    HPSP_call_callback(ret, PSPCB_ADDREF);
     return ret;
 }
 
@@ -3091,34 +3186,54 @@ HPROPSHEETPAGE WINAPI CreatePropertySheetPageW(LPCPROPSHEETPAGEW lpPropSheetPage
  *     Success: TRUE
  *     Failure: FALSE
  */
-BOOL WINAPI DestroyPropertySheetPage(HPROPSHEETPAGE hPropPage)
+BOOL WINAPI DestroyPropertySheetPage(HPROPSHEETPAGE hpsp)
 {
-  PROPSHEETPAGEW *psp = &hPropPage->psp;
+    if (!hpsp)
+        return FALSE;
 
-  if (!hPropPage)
-     return FALSE;
+    HPSP_call_callback(hpsp, PSPCB_RELEASE);
 
-  if ((psp->dwFlags & PSP_USECALLBACK) && psp->pfnCallback)
-     psp->pfnCallback(0, PSPCB_RELEASE, &hPropPage->callback_psp);
+    if (hpsp->unicode)
+    {
+        PROPSHEETPAGEW *psp = &hpsp->pspW;
 
-  if (!(psp->dwFlags & PSP_DLGINDIRECT) && !IS_INTRESOURCE( psp->u.pszTemplate ))
-     Free((void*)psp->u.pszTemplate);
+        if (!(psp->dwFlags & PSP_DLGINDIRECT) && !IS_INTRESOURCE(psp->u.pszTemplate))
+            Free((void *)psp->u.pszTemplate);
 
-  if ((psp->dwFlags & PSP_USEICONID) && !IS_INTRESOURCE( psp->u2.pszIcon ))
-     Free((void*)psp->u2.pszIcon);
+        if ((psp->dwFlags & PSP_USEICONID) && !IS_INTRESOURCE(psp->u2.pszIcon))
+            Free((void *)psp->u2.pszIcon);
 
-  if ((psp->dwFlags & PSP_USETITLE) && !IS_INTRESOURCE( psp->pszTitle ))
-     Free((void*)psp->pszTitle);
+        if ((psp->dwFlags & PSP_USETITLE) && !IS_INTRESOURCE(psp->pszTitle))
+            Free((void *)psp->pszTitle);
 
-  if ((psp->dwFlags & PSP_USEHEADERTITLE) && !IS_INTRESOURCE( psp->pszHeaderTitle ))
-     Free((void*)psp->pszHeaderTitle);
+        if ((psp->dwFlags & PSP_USEHEADERTITLE) && !IS_INTRESOURCE(psp->pszHeaderTitle))
+            Free((void *)psp->pszHeaderTitle);
 
-  if ((psp->dwFlags & PSP_USEHEADERSUBTITLE) && !IS_INTRESOURCE( psp->pszHeaderSubTitle ))
-     Free((void*)psp->pszHeaderSubTitle);
+        if ((psp->dwFlags & PSP_USEHEADERSUBTITLE) && !IS_INTRESOURCE(psp->pszHeaderSubTitle))
+            Free((void *)psp->pszHeaderSubTitle);
+    }
+    else
+    {
+        PROPSHEETPAGEA *psp = &hpsp->pspA;
 
-  Free(hPropPage);
+        if (!(psp->dwFlags & PSP_DLGINDIRECT) && !IS_INTRESOURCE(psp->u.pszTemplate))
+            Free((void *)psp->u.pszTemplate);
 
-  return TRUE;
+        if ((psp->dwFlags & PSP_USEICONID) && !IS_INTRESOURCE(psp->u2.pszIcon))
+            Free((void *)psp->u2.pszIcon);
+
+        if ((psp->dwFlags & PSP_USETITLE) && !IS_INTRESOURCE(psp->pszTitle))
+            Free((void *)psp->pszTitle);
+
+        if ((psp->dwFlags & PSP_USEHEADERTITLE) && !IS_INTRESOURCE(psp->pszHeaderTitle))
+            Free((void *)psp->pszHeaderTitle);
+
+        if ((psp->dwFlags & PSP_USEHEADERSUBTITLE) && !IS_INTRESOURCE(psp->pszHeaderSubTitle))
+            Free((void *)psp->pszHeaderSubTitle);
+    }
+
+    Free(hpsp);
+    return TRUE;
 }
 
 /******************************************************************************
@@ -3250,9 +3365,8 @@ static LRESULT PROPSHEET_Paint(HWND hwnd, HDC hdcParam)
     int offsety = 0;
     HBRUSH hbr;
     RECT r, rzone;
-    LPCPROPSHEETPAGEW ppshpage;
-    WCHAR szBuffer[256];
-    int nLength;
+    HPROPSHEETPAGE hpsp;
+    DWORD flags;
 
     hdc = hdcParam ? hdcParam : BeginPaint(hwnd, &ps);
     if (!hdc) return 1;
@@ -3263,11 +3377,12 @@ static LRESULT PROPSHEET_Paint(HWND hwnd, HDC hdcParam)
 	hOldPal = SelectPalette(hdc, psInfo->ppshheader.hplWatermark, FALSE);
 
     if (psInfo->active_page < 0)
-        ppshpage = NULL;
+        hpsp = NULL;
     else
-        ppshpage = &psInfo->proppage[psInfo->active_page].hpage->psp;
+        hpsp = psInfo->proppage[psInfo->active_page].hpage;
+    flags = HPSP_get_flags(hpsp);
 
-    if ( (ppshpage && !(ppshpage->dwFlags & PSP_HIDEHEADER)) &&
+    if ( hpsp && !(flags & PSP_HIDEHEADER) &&
 	 (psInfo->ppshheader.dwFlags & (PSH_WIZARD97_OLD | PSH_WIZARD97_NEW)) &&
 	 (psInfo->ppshheader.dwFlags & PSH_HEADER) ) 
     {
@@ -3339,35 +3454,15 @@ static LRESULT PROPSHEET_Paint(HWND hwnd, HDC hdcParam)
 	clrOld = SetTextColor (hdc, 0x00000000);
 	oldBkMode = SetBkMode (hdc, TRANSPARENT); 
 
-	if (ppshpage->dwFlags & PSP_USEHEADERTITLE) {
+	if (flags & PSP_USEHEADERTITLE) {
 	    SetRect(&r, 20, 10, 0, 0);
-            if (!IS_INTRESOURCE(ppshpage->pszHeaderTitle))
-                DrawTextW(hdc, ppshpage->pszHeaderTitle, -1, &r, DT_LEFT | DT_SINGLELINE | DT_NOCLIP);
-	    else
-	    {
-		nLength = LoadStringW(ppshpage->hInstance, (UINT_PTR)ppshpage->pszHeaderTitle,
-				      szBuffer, 256);
-		if (nLength != 0)
-		{
-		    DrawTextW(hdc, szBuffer, nLength, &r, DT_LEFT | DT_SINGLELINE | DT_NOCLIP);
-		}
-	    }
+            HPSP_draw_text(hpsp, hdc, TRUE, &r, DT_LEFT | DT_SINGLELINE | DT_NOCLIP);
 	}
 
-	if (ppshpage->dwFlags & PSP_USEHEADERSUBTITLE) {
+	if (flags & PSP_USEHEADERSUBTITLE) {
 	    SelectObject(hdc, psInfo->hFont);
 	    SetRect(&r, 40, 25, rzone.right - 69, rzone.bottom);
-            if (!IS_INTRESOURCE(ppshpage->pszHeaderSubTitle))
-                DrawTextW(hdc, ppshpage->pszHeaderSubTitle, -1, &r, DT_LEFT | DT_WORDBREAK);
-	    else
-	    {
-		nLength = LoadStringW(ppshpage->hInstance, (UINT_PTR)ppshpage->pszHeaderSubTitle,
-				      szBuffer, 256);
-		if (nLength != 0)
-		{
-		    DrawTextW(hdc, szBuffer, nLength, &r, DT_LEFT | DT_WORDBREAK);
-		}
-	    }
+            HPSP_draw_text(hpsp, hdc, FALSE, &r, DT_LEFT | DT_WORDBREAK);
 	}
 
 	offsety = rzone.bottom + 2;
@@ -3377,7 +3472,7 @@ static LRESULT PROPSHEET_Paint(HWND hwnd, HDC hdcParam)
 	SelectObject(hdc, hOldFont);
     }
 
-    if ( (ppshpage && (ppshpage->dwFlags & PSP_HIDEHEADER)) &&
+    if ( (flags & PSP_HIDEHEADER) &&
 	 (psInfo->ppshheader.dwFlags & (PSH_WIZARD97_OLD | PSH_WIZARD97_NEW)) &&
 	 (psInfo->ppshheader.dwFlags & PSH_WATERMARK) ) 
     {

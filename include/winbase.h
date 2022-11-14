@@ -43,6 +43,7 @@ extern "C" {
 #include <processthreadsapi.h>
 #include <synchapi.h>
 #include <threadpoolapiset.h>
+#include <memoryapi.h>
 
   /* Windows Exit Procedure flag values */
 #define	WEP_FREE_DLL        0
@@ -802,6 +803,10 @@ typedef enum _FILE_INFO_BY_HANDLE_CLASS {
     FileIdInfo,
     FileIdExtdDirectoryInfo,
     FileIdExtdDirectoryRestartInfo,
+    FileDispositionInfoEx,
+    FileRenameInfoEx,
+    FileCaseSensitiveInfo,
+    FileNormalizedNameInfo,
     MaximumFileInfoByHandlesClass
 } FILE_INFO_BY_HANDLE_CLASS, *PFILE_INFO_BY_HANDLE_CLASS;
 
@@ -2587,6 +2592,7 @@ WINBASEAPI BOOL        WINAPI QueryUmsThreadInformation(PUMS_CONTEXT,UMS_THREAD_
 WINBASEAPI DWORD       WINAPI QueueUserAPC(PAPCFUNC,HANDLE,ULONG_PTR);
 WINBASEAPI BOOL        WINAPI QueueUserWorkItem(LPTHREAD_START_ROUTINE,PVOID,ULONG);
 WINBASEAPI void        WINAPI RaiseException(DWORD,DWORD,DWORD,const ULONG_PTR *);
+WINBASEAPI HANDLE      WINAPI ReOpenFile(HANDLE,DWORD,DWORD,DWORD);
 WINADVAPI  BOOL        WINAPI ReadEventLogA(HANDLE,DWORD,DWORD,LPVOID,DWORD,DWORD *,DWORD *);
 WINADVAPI  BOOL        WINAPI ReadEventLogW(HANDLE,DWORD,DWORD,LPVOID,DWORD,DWORD *,DWORD *);
 #define                       ReadEventLog WINELIB_NAME_AW(ReadEventLog)

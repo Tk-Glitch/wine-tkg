@@ -20,26 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "win.h"
-#include "imm.h"
 #include "user_private.h"
 #include "wine/server.h"
-
-/*******************************************************************
- *		FOCUS_MouseActivate
- *
- * Activate a window as a result of a mouse click
- */
-BOOL FOCUS_MouseActivate( HWND hwnd )
-{
-    return NtUserCallHwndParam( hwnd, TRUE, NtUserSetForegroundWindow );
-}
 
 
 /*******************************************************************
@@ -47,7 +29,7 @@ BOOL FOCUS_MouseActivate( HWND hwnd )
  */
 BOOL WINAPI SetForegroundWindow( HWND hwnd )
 {
-    return NtUserCallHwndParam( hwnd, FALSE, NtUserSetForegroundWindow );
+    return NtUserSetForegroundWindow( hwnd );
 }
 
 

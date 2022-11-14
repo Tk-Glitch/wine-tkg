@@ -1351,7 +1351,7 @@ static void add_join( dibdrv_physdev *pdev, HRGN region, HRGN round_cap, const P
         /* fall through */
     case PS_JOIN_ROUND:
         NtGdiGetRgnBox( round_cap, &rect );
-        offset_rect( &rect, pt->x, pt->y );
+        OffsetRect( &rect, pt->x, pt->y );
         if (clip_rect_to_dib( &pdev->dib, &rect ))
         {
             NtGdiOffsetRgn( round_cap, pt->x, pt->y );
@@ -1497,13 +1497,13 @@ static BOOL wide_line_segment( dibdrv_physdev *pdev, HRGN total,
         }
 
         if (dx > 0 && dy > 0)
-            set_rect( &clip_rect, seg_pts[0].x, seg_pts[1].y, seg_pts[2].x, seg_pts[3].y );
+            SetRect( &clip_rect, seg_pts[0].x, seg_pts[1].y, seg_pts[2].x, seg_pts[3].y );
         else if (dx > 0 && dy < 0)
-            set_rect( &clip_rect, seg_pts[1].x, seg_pts[2].y, seg_pts[3].x, seg_pts[0].y );
+            SetRect( &clip_rect, seg_pts[1].x, seg_pts[2].y, seg_pts[3].x, seg_pts[0].y );
         else if (dx < 0 && dy > 0)
-            set_rect( &clip_rect, seg_pts[3].x, seg_pts[0].y, seg_pts[1].x, seg_pts[2].y );
+            SetRect( &clip_rect, seg_pts[3].x, seg_pts[0].y, seg_pts[1].x, seg_pts[2].y );
         else
-            set_rect( &clip_rect, seg_pts[2].x, seg_pts[3].y, seg_pts[0].x, seg_pts[1].y );
+            SetRect( &clip_rect, seg_pts[2].x, seg_pts[3].y, seg_pts[0].x, seg_pts[1].y );
         if (clip_rect_to_dib( &pdev->dib, &clip_rect ))
         {
             segment = create_polygon_region( seg_pts, 4, ALTERNATE );
@@ -1779,7 +1779,7 @@ COLORREF CDECL dibdrv_SetDCPenColor( PHYSDEV dev, COLORREF color )
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
     DC *dc = get_physdev_dc( dev );
 
-    if (dc->hPen == get_stock_object( DC_PEN ))
+    if (dc->hPen == GetStockObject( DC_PEN ))
         pdev->pen_brush.colorref = color;
 
     return color;
@@ -2145,7 +2145,7 @@ HBRUSH CDECL dibdrv_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_
 
     NtGdiExtGetObjectW( hbrush, sizeof(logbrush), &logbrush );
 
-    if (hbrush == get_stock_object( DC_BRUSH ))
+    if (hbrush == GetStockObject( DC_BRUSH ))
         logbrush.lbColor = dc->attr->brush_color;
 
     select_brush( pdev, &pdev->brush, &logbrush, pattern, TRUE );
@@ -2197,7 +2197,7 @@ HPEN CDECL dibdrv_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern 
     pdev->pen_endcap = logpen.lopnStyle & PS_ENDCAP_MASK;
     pdev->pen_width  = get_pen_device_width( dc, logpen.lopnWidth.x );
 
-    if (hpen == get_stock_object( DC_PEN ))
+    if (hpen == GetStockObject( DC_PEN ))
         logbrush.lbColor = dc->attr->pen_color;
 
     set_dash_pattern( &pdev->pen_pattern, 0, NULL );
@@ -2265,7 +2265,7 @@ COLORREF CDECL dibdrv_SetDCBrushColor( PHYSDEV dev, COLORREF color )
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
     DC *dc = get_physdev_dc( dev );
 
-    if (dc->hBrush == get_stock_object( DC_BRUSH ))
+    if (dc->hBrush == GetStockObject( DC_BRUSH ))
     {
         LOGBRUSH logbrush = { BS_SOLID, color, 0 };
         select_brush( pdev, &pdev->brush, &logbrush, NULL, TRUE );

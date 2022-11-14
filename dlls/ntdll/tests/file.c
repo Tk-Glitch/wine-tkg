@@ -3972,6 +3972,87 @@ static void test_file_attribute_tag_information(void)
     CloseHandle( h );
 }
 
+#define lok ok_(__FILE__, line)
+#define rename_file(h,f) rename_file_(__LINE__,(h),(f))
+static BOOL rename_file_( int line, HANDLE h, const WCHAR *filename )
+{
+    FILE_RENAME_INFORMATION *fri;
+    UNICODE_STRING ntpath;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    BOOLEAN ret;
+    ULONG size;
+
+    ret = pRtlDosPathNameToNtPathName_U( filename, &ntpath, NULL, NULL );
+    lok( ret, "RtlDosPathNameToNtPathName_U failed\n" );
+    if (!ret) return FALSE;
+
+    size = offsetof( FILE_RENAME_INFORMATION, FileName ) + ntpath.Length;
+    fri = HeapAlloc( GetProcessHeap(), 0, size );
+    lok( fri != NULL, "HeapAlloc failed\n" );
+    if (!fri) return FALSE;
+    fri->ReplaceIfExists = TRUE;
+    fri->RootDirectory = NULL;
+    fri->FileNameLength = ntpath.Length;
+    memcpy( fri->FileName, ntpath.Buffer, ntpath.Length );
+    pRtlFreeUnicodeString( &ntpath );
+
+    status = pNtSetInformationFile( h, &io, fri, size, FileRenameInformation );
+    HeapFree( GetProcessHeap(), 0, fri );
+    lok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    return status == STATUS_SUCCESS;
+}
+#undef lok
+
+static void test_dotfile_file_attributes(void)
+{
+    char temppath[MAX_PATH], filename[MAX_PATH];
+    WCHAR temppathW[MAX_PATH], filenameW[MAX_PATH];
+    FILE_BASIC_INFORMATION info = {};
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    DWORD attrs;
+    HANDLE h;
+
+    GetTempPathA( MAX_PATH, temppath );
+    GetTempFileNameA( temppath, ".foo", 0, filename );
+    h = CreateFileA( filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, 0 );
+    ok( h != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    if (h == INVALID_HANDLE_VALUE) return;
+
+    status = nt_get_file_attrs(filename, &attrs);
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(attrs & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    CloseHandle( h );
+
+    GetTempPathW( MAX_PATH, temppathW );
+    GetTempFileNameW( temppathW, L"foo", 0, filenameW );
+    h = CreateFileW( filenameW, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, 0 );
+    ok( h != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    if (h == INVALID_HANDLE_VALUE) return;
+
+    GetTempFileNameW( temppathW, L".foo", 0, filenameW );
+    if (!rename_file( h, filenameW )) return;
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    GetTempFileNameW( temppathW, L"foo", 0, filenameW );
+    if (!rename_file( h, filenameW )) return;
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    CloseHandle( h );
+}
+
 static void test_file_mode(void)
 {
     UNICODE_STRING file_name, pipe_dev_name, mountmgr_dev_name, mailslot_dev_name;
@@ -6023,6 +6104,7 @@ START_TEST(file)
     test_file_id_information();
     test_file_access_information();
     test_file_attribute_tag_information();
+    test_dotfile_file_attributes();
     test_file_mode();
     test_file_readonly_access();
     test_query_volume_information_file();

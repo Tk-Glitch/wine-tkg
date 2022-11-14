@@ -584,24 +584,6 @@ static BOOL is_subpixel_rendering_enabled( void )
 }
 
 
-static LPWSTR strdupW(LPCWSTR p)
-{
-    LPWSTR ret;
-    DWORD len = (lstrlenW(p) + 1) * sizeof(WCHAR);
-    ret = malloc( len );
-    memcpy(ret, p, len);
-    return ret;
-}
-
-static WCHAR *towstr(const char *str)
-{
-    DWORD len = strlen(str) + 1;
-    WCHAR *wstr = malloc( len * sizeof(WCHAR) );
-    win32u_mbtowc( NULL, wstr, len * sizeof(WCHAR), str, len );
-    return wstr;
-}
-
-
 static const LANGID mac_langid_table[] =
 {
     MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT),                /* TT_MAC_LANGID_ENGLISH */
@@ -800,9 +782,8 @@ static WCHAR *copy_name_table_string( const FT_SfntName *name )
     case TT_PLATFORM_MACINTOSH:
         if (!(cp = get_mac_code_page( name ))) return NULL;
         ret = malloc( (name->string_len + 1) * sizeof(WCHAR) );
-        i = win32u_mbtowc( cp, ret, name->string_len * sizeof(WCHAR),
-                           (char *)name->string, name->string_len );
-        ret[i / sizeof(WCHAR)] = 0;
+        i = win32u_mbtowc( cp, ret, name->string_len, (char *)name->string, name->string_len );
+        ret[i] = 0;
         return ret;
     }
     return NULL;
@@ -1119,7 +1100,7 @@ static BOOL search_family_names_callback( LANGID langid, struct opentype_name *n
     else if (data->primary_langid == langid)
     {
         data->primary_seen = TRUE;
-        if (!data->second_name.bytes) data->second_name = data->family_name;
+        if (data->family_name.bytes) data->second_name = data->family_name;
         data->family_name = *name;
     }
     else if (!data->second_name.bytes) data->second_name = *name;
@@ -1160,15 +1141,14 @@ static WCHAR *decode_opentype_name( struct opentype_name *name )
     {
         CPTABLEINFO *cptable = get_cptable( name->codepage );
         if (!cptable) return NULL;
-        len = win32u_mbtowc( cptable, buffer, sizeof(buffer), name->bytes, name->length );
-        len /= sizeof(WCHAR);
+        len = win32u_mbtowc( cptable, buffer, ARRAY_SIZE(buffer), name->bytes, name->length );
     }
 
     buffer[ARRAY_SIZE(buffer) - 1] = 0;
     if (len == ARRAY_SIZE(buffer)) WARN("Truncated font name %s -> %s\n", debugstr_an(name->bytes, name->length), debugstr_w(buffer));
     else buffer[len] = 0;
 
-    return strdupW( buffer );
+    return wcsdup( buffer );
 }
 
 struct unix_face
@@ -1947,10 +1927,18 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
 
     if(height > 0) {
         USHORT windescent = get_fixed_windescent(pOS2->usWinDescent);
+        LONG units;
+
         if(pOS2->usWinAscent + windescent == 0)
-            ppem = pFT_MulDiv(ft_face->units_per_EM, height, pHori->Ascender - pHori->Descender);
+            units = pHori->Ascender - pHori->Descender;
         else
-            ppem = pFT_MulDiv(ft_face->units_per_EM, height, pOS2->usWinAscent + windescent);
+            units = pOS2->usWinAscent + windescent;
+        ppem = pFT_MulDiv(ft_face->units_per_EM, height, units);
+
+        /* If rounding ends up getting a font exceeding height, choose a smaller ppem */
+        if(ppem > 1 && pFT_MulDiv(units, ppem, ft_face->units_per_EM) > height)
+            --ppem;
+
         if(ppem > MAX_PPEM) {
             WARN("Ignoring too large height %d, ppem %d\n", height, ppem);
             ppem = 1;
@@ -2544,7 +2532,7 @@ static BOOL freetype_get_glyph_index( struct gdi_font *font, UINT *glyph, BOOL u
             DWORD len;
             char ch;
 
-            len = win32u_wctomb( NULL, &ch, 1, &wc, sizeof(wc) );
+            len = win32u_wctomb( &ansi_cp, &ch, 1, &wc, 1 );
             if (len) *glyph = get_glyph_index_symbol( font, (unsigned char)ch );
         }
         return TRUE;
@@ -3687,7 +3675,7 @@ static BOOL freetype_set_outline_text_metrics( struct gdi_font *font )
     {
         static const WCHAR fake_nameW[] = {'f','a','k','e',' ','n','a','m','e', 0};
         FIXME("failed to read full_nameW for font %s!\n", wine_dbgstr_w((WCHAR *)font->otm.otmpFamilyName));
-        font->otm.otmpFullName = (char *)strdupW(fake_nameW);
+        font->otm.otmpFullName = (char *)wcsdup( fake_nameW );
     }
     needed = sizeof(font->otm) + (lstrlenW( (WCHAR *)font->otm.otmpFamilyName ) + 1 +
                                   lstrlenW( (WCHAR *)font->otm.otmpStyleName ) + 1 +

@@ -50,8 +50,6 @@ static GDI_HANDLE_ENTRY *next_unused;
 static LONG debug_count;
 SYSTEM_BASIC_INFORMATION system_info;
 
-const struct user_callbacks *user_callbacks = NULL;
-
 static inline HGDIOBJ entry_to_handle( GDI_HANDLE_ENTRY *entry )
 {
     unsigned int idx = entry - gdi_shared->Handles;
@@ -464,40 +462,22 @@ void make_gdi_object_system( HGDIOBJ handle, BOOL set)
 /******************************************************************************
  *      get_default_fonts
  */
-static const struct DefaultFontInfo* get_default_fonts(UINT charset)
+static const struct DefaultFontInfo* get_default_fonts(void)
 {
-        unsigned int n;
+    unsigned int n;
+    CHARSETINFO csi;
 
-        for(n = 0; n < ARRAY_SIZE( default_fonts ); n++)
-        {
-                if ( default_fonts[n].charset == charset )
-                        return &default_fonts[n];
-        }
+    if (ansi_cp.CodePage == CP_UTF8) return &default_fonts[0];
 
-        FIXME( "unhandled charset 0x%08x - use ANSI_CHARSET for default stock objects\n", charset );
-        return &default_fonts[0];
-}
-
-
-/******************************************************************************
- *      get_default_charset    (internal)
- *
- * get the language-dependent charset that can handle CP_ACP correctly.
- */
-static UINT get_default_charset( void )
-{
-    CHARSETINFO     csi;
-    UINT    uACP;
-
-    uACP = get_acp();
     csi.ciCharset = ANSI_CHARSET;
-    if ( !translate_charset_info( ULongToPtr(uACP), &csi, TCI_SRCCODEPAGE ) )
-    {
-        FIXME( "unhandled codepage %u - use ANSI_CHARSET for default stock objects\n", uACP );
-        return ANSI_CHARSET;
-    }
+    translate_charset_info( ULongToPtr(ansi_cp.CodePage), &csi, TCI_SRCCODEPAGE );
 
-    return csi.ciCharset;
+    for(n = 0; n < ARRAY_SIZE( default_fonts ); n++)
+        if ( default_fonts[n].charset == csi.ciCharset )
+            return &default_fonts[n];
+
+    FIXME( "unhandled charset 0x%08x - use ANSI_CHARSET for default stock objects\n", csi.ciCharset );
+    return &default_fonts[0];
 }
 
 
@@ -586,8 +566,8 @@ static void init_gdi_shared(void)
 {
     SIZE_T size = sizeof(*gdi_shared);
 
-    if (NtAllocateVirtualMemory( GetCurrentProcess(), (void **)&gdi_shared, 0, &size,
-                                 MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
+    if (NtAllocateVirtualMemory( GetCurrentProcess(), (void **)&gdi_shared, zero_bits(),
+                                 &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
         return;
     next_unused = gdi_shared->Handles + FIRST_GDI_HANDLE;
 
@@ -604,7 +584,10 @@ static void init_gdi_shared(void)
     NtCurrentTeb()->Peb->GdiSharedHandleTable = gdi_shared;
 }
 
-HGDIOBJ get_stock_object( INT obj )
+/***********************************************************************
+ *           GetStockObject    (win32u.so)
+ */
+HGDIOBJ WINAPI GetStockObject( INT obj )
 {
     assert( obj >= 0 && obj <= STOCK_LAST + 1 && obj != 9 );
 
@@ -656,7 +639,7 @@ static void init_stock_objects( unsigned int dpi )
     create_font( &AnsiVarFont );
 
     /* language-dependent stock fonts */
-    deffonts = get_default_fonts(get_default_charset());
+    deffonts = get_default_fonts();
     create_font( &deffonts->SystemFont );
     create_font( &deffonts->DeviceDefaultFont );
 
@@ -960,7 +943,7 @@ INT WINAPI NtGdiExtGetObjectW( HGDIOBJ handle, INT count, void *buffer )
     if (funcs && funcs->pGetObjectW)
     {
         if (buffer && ((ULONG_PTR)buffer >> 16) == 0) /* catch apps getting argument order wrong */
-            SetLastError( ERROR_NOACCESS );
+            RtlSetLastWin32Error( ERROR_NOACCESS );
         else
             result = funcs->pGetObjectW( handle, count, buffer );
     }
@@ -1061,10 +1044,14 @@ static struct unix_funcs unix_funcs =
     NtGdiCreateDIBitmapInternal,
     NtGdiCreateMetafileDC,
     NtGdiDdDDICheckVidPnExclusiveOwnership,
+    NtGdiDdDDICloseAdapter,
     NtGdiDdDDICreateDCFromMemory,
     NtGdiDdDDIDestroyDCFromMemory,
     NtGdiDdDDIDestroyDevice,
     NtGdiDdDDIEscape,
+    NtGdiDdDDIOpenAdapterFromDeviceName,
+    NtGdiDdDDIOpenAdapterFromLuid,
+    NtGdiDdDDIQueryVideoMemoryInfo,
     NtGdiDdDDISetVidPnSourceOwner,
     NtGdiDeleteObjectApp,
     NtGdiDoPalette,
@@ -1149,89 +1136,24 @@ static struct unix_funcs unix_funcs =
     NtGdiUnrealizeObject,
     NtGdiUpdateColors,
     NtGdiWidenPath,
-    NtUserActivateKeyboardLayout,
-    NtUserBeginPaint,
-    NtUserCallHwnd,
-    NtUserCallHwndParam,
-    NtUserCallNextHookEx,
-    NtUserCallNoParam,
-    NtUserCallOneParam,
-    NtUserCallTwoParam,
-    NtUserChangeDisplaySettings,
-    NtUserClipCursor,
-    NtUserCountClipboardFormats,
-    NtUserDeferWindowPosAndBand,
-    NtUserDestroyCursor,
-    NtUserDestroyWindow,
-    NtUserDrawIconEx,
-    NtUserEndDeferWindowPosEx,
+    NtUserDrawCaptionTemp,
+    NtUserDrawMenuBarTemp,
     NtUserEndPaint,
-    NtUserEnumDisplayDevices,
-    NtUserEnumDisplayMonitors,
-    NtUserEnumDisplaySettings,
-    NtUserFlashWindowEx,
-    NtUserGetAsyncKeyState,
-    NtUserGetClassInfoEx,
-    NtUserGetCursorInfo,
-    NtUserGetDCEx,
-    NtUserGetDisplayConfigBufferSizes,
-    NtUserGetIconInfo,
-    NtUserGetKeyNameText,
-    NtUserGetKeyboardLayoutList,
-    NtUserGetPriorityClipboardFormat,
-    NtUserGetQueueStatus,
-    NtUserGetUpdateRect,
-    NtUserGetUpdateRgn,
-    NtUserGetUpdatedClipboardFormats,
-    NtUserIsClipboardFormatAvailable,
-    NtUserMapVirtualKeyEx,
-    NtUserMoveWindow,
-    NtUserRedrawWindow,
-    NtUserRegisterClassExWOW,
-    NtUserRegisterHotKey,
+    NtUserExcludeUpdateRgn,
     NtUserReleaseDC,
     NtUserScrollDC,
     NtUserSelectPalette,
-    NtUserSetActiveWindow,
-    NtUserSetCapture,
-    NtUserSetClassLong,
-    NtUserSetClassLongPtr,
-    NtUserSetClassWord,
-    NtUserSetCursor,
-    NtUserSetCursorIconData,
-    NtUserSetCursorPos,
-    NtUserSetFocus,
-    NtUserSetLayeredWindowAttributes,
-    NtUserSetParent,
-    NtUserSetSysColors,
-    NtUserSetWindowLong,
-    NtUserSetWindowLongPtr,
-    NtUserSetWindowPos,
-    NtUserSetWindowRgn,
-    NtUserSetWindowWord,
-    NtUserShowCursor,
-    NtUserShowWindow,
-    NtUserShowWindowAsync,
-    NtUserSystemParametersInfo,
-    NtUserSystemParametersInfoForDpi,
-    NtUserToUnicodeEx,
-    NtUserUnregisterClass,
-    NtUserUnregisterHotKey,
     NtUserUpdateLayeredWindow,
-    NtUserVkKeyScanEx,
-    NtUserWindowFromPoint,
 
     SetDIBits,
     __wine_get_brush_bitmap_info,
     __wine_get_file_outline_text_metric,
     __wine_get_icm_profile,
-    __wine_get_vulkan_driver,
     __wine_get_wgl_driver,
-    __wine_set_display_driver,
-    __wine_set_visible_region,
+    __wine_send_input,
 };
 
-NTSTATUS gdi_init(void)
+void gdi_init(void)
 {
     pthread_mutexattr_t attr;
     unsigned int dpi;
@@ -1243,16 +1165,14 @@ NTSTATUS gdi_init(void)
 
     NtQuerySystemInformation( SystemBasicInformation, &system_info, sizeof(system_info), NULL );
     init_gdi_shared();
-    if (!gdi_shared) return STATUS_NO_MEMORY;
+    if (!gdi_shared) return;
 
     dpi = font_init();
     init_stock_objects( dpi );
-    return 0;
 }
 
 NTSTATUS callbacks_init( void *args )
 {
-    user_callbacks = *(const struct user_callbacks **)args;
     *(const struct unix_funcs **)args = &unix_funcs;
     return 0;
 }

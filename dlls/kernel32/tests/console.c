@@ -925,10 +925,16 @@ static void testScreenBuffer(HANDLE hConOut)
     SetConsoleCursorPosition(hConOutRW, c);
     ret = WriteConsoleA(hConOutRW, test_cp866, lstrlenA(test_cp866), &len, NULL);
     ok(ret && len == lstrlenA(test_cp866), "WriteConsoleA failed\n");
-    ret = ReadConsoleOutputCharacterW(hConOutRW, str_wbuf, lstrlenA(test_cp866), c, &len);
-    ok(ret && len == lstrlenA(test_cp866), "ReadConsoleOutputCharacterW failed\n");
-    str_wbuf[lstrlenA(test_cp866)] = 0;
-    ok(!lstrcmpW(str_wbuf, test_unicode), "string does not match the pattern\n");
+    ret = ReadConsoleOutputCharacterW(hConOutRW, str_wbuf, lstrlenW(test_unicode), c, &len);
+    /* Work around some broken results under Windows with some locale (ja, cn, ko...)
+     * Looks like a real bug in Win10 (at least).
+     */
+    if (ret && broken(len == lstrlenW(test_unicode) / sizeof(WCHAR)))
+        ret = ReadConsoleOutputCharacterW(hConOutRW, str_wbuf, lstrlenW(test_unicode) * sizeof(WCHAR), c, &len);
+    ok(ret, "ReadConsoleOutputCharacterW failed\n");
+    ok(len == lstrlenW(test_unicode), "unexpected len %lu %u\n", len, lstrlenW(test_unicode));
+    ok(!memcmp(str_wbuf, test_unicode, lstrlenW(test_unicode) * sizeof(WCHAR)),
+       "string does not match the pattern\n");
 
     /*
      * cp866 is OK, let's switch to cp1251.
@@ -2347,12 +2353,6 @@ static void test_WriteConsoleOutputCharacterA(HANDLE output_handle)
                                            invalid_table[i].coord,
                                            invalid_table[i].lpNumCharsWritten);
         ok(!ret, "[%d] Expected WriteConsoleOutputCharacterA to return FALSE, got %d\n", i, ret);
-        if (invalid_table[i].lpNumCharsWritten)
-        {
-            ok(count == invalid_table[i].expected_count,
-               "[%d] Expected count to be %lu, got %lu\n",
-               i, invalid_table[i].expected_count, count);
-        }
         ok(GetLastError() == invalid_table[i].last_error,
            "[%d] Expected last error to be %lu, got %lu\n",
            i, invalid_table[i].last_error, GetLastError());
@@ -2437,12 +2437,6 @@ static void test_WriteConsoleOutputCharacterW(HANDLE output_handle)
                                            invalid_table[i].coord,
                                            invalid_table[i].lpNumCharsWritten);
         ok(!ret, "[%d] Expected WriteConsoleOutputCharacterW to return FALSE, got %d\n", i, ret);
-        if (invalid_table[i].lpNumCharsWritten)
-        {
-            ok(count == invalid_table[i].expected_count,
-               "[%d] Expected count to be %lu, got %lu\n",
-               i, invalid_table[i].expected_count, count);
-        }
         ok(GetLastError() == invalid_table[i].last_error,
            "[%d] Expected last error to be %lu, got %lu\n",
            i, invalid_table[i].last_error, GetLastError());
@@ -2527,12 +2521,6 @@ static void test_WriteConsoleOutputAttribute(HANDLE output_handle)
                                           invalid_table[i].coord,
                                           invalid_table[i].lpNumAttrsWritten);
         ok(!ret, "[%d] Expected WriteConsoleOutputAttribute to return FALSE, got %d\n", i, ret);
-        if (invalid_table[i].lpNumAttrsWritten)
-        {
-            ok(count == invalid_table[i].expected_count,
-               "[%d] Expected count to be %lu, got %lu\n",
-               i, invalid_table[i].expected_count, count);
-        }
         ok(GetLastError() == invalid_table[i].last_error,
            "[%d] Expected last error to be %lu, got %lu\n",
            i, invalid_table[i].last_error, GetLastError());
@@ -2943,12 +2931,6 @@ static void test_ReadConsoleOutputCharacterA(HANDLE output_handle)
                                           invalid_table[i].coord,
                                           invalid_table[i].read_count);
         ok(!ret, "[%d] Expected ReadConsoleOutputCharacterA to return FALSE, got %d\n", i, ret);
-        if (invalid_table[i].read_count)
-        {
-            ok(count == invalid_table[i].expected_count,
-               "[%d] Expected count to be %lu, got %lu\n",
-               i, invalid_table[i].expected_count, count);
-        }
         ok(GetLastError() == invalid_table[i].last_error,
            "[%d] Expected last error to be %lu, got %lu\n",
            i, invalid_table[i].last_error, GetLastError());
@@ -3033,12 +3015,6 @@ static void test_ReadConsoleOutputCharacterW(HANDLE output_handle)
                                           invalid_table[i].coord,
                                           invalid_table[i].read_count);
         ok(!ret, "[%d] Expected ReadConsoleOutputCharacterW to return FALSE, got %d\n", i, ret);
-        if (invalid_table[i].read_count)
-        {
-            ok(count == invalid_table[i].expected_count,
-               "[%d] Expected count to be %lu, got %lu\n",
-               i, invalid_table[i].expected_count, count);
-        }
         ok(GetLastError() == invalid_table[i].last_error,
            "[%d] Expected last error to be %lu, got %lu\n",
            i, invalid_table[i].last_error, GetLastError());
@@ -3122,12 +3098,6 @@ static void test_ReadConsoleOutputAttribute(HANDLE output_handle)
                                          invalid_table[i].coord,
                                          invalid_table[i].read_count);
         ok(!ret, "[%d] Expected ReadConsoleOutputAttribute to return FALSE, got %d\n", i, ret);
-        if (invalid_table[i].read_count)
-        {
-            ok(count == invalid_table[i].expected_count,
-               "[%d] Expected count to be %lu, got %lu\n",
-               i, invalid_table[i].expected_count, count);
-        }
         ok(GetLastError() == invalid_table[i].last_error,
            "[%d] Expected last error to be %lu, got %lu\n",
            i, invalid_table[i].last_error, GetLastError());
@@ -4230,6 +4200,77 @@ static void test_SetConsoleScreenBufferInfoEx(HANDLE std_output)
     CloseHandle(std_input);
 }
 
+static void test_GetConsoleOriginalTitleA(void)
+{
+    char buf[64];
+    DWORD ret;
+    char title[] = "Original Console Title";
+
+    ret = GetConsoleOriginalTitleA(NULL, 0);
+    ok(!ret, "Unexpected string length; error %lu\n", GetLastError());
+
+    ret = GetConsoleOriginalTitleA(buf, 0);
+    ok(!ret, "Unexpected string length; error %lu\n", GetLastError());
+
+    ret = GetConsoleOriginalTitleA(buf, ARRAY_SIZE(buf));
+    todo_wine ok(ret, "GetConsoleOriginalTitleA failed: %lu\n", GetLastError());
+    todo_wine ok(!strcmp(buf, title), "got %s, expected %s\n", wine_dbgstr_a(buf), wine_dbgstr_a(title));
+
+    ret = SetConsoleTitleA("test");
+    ok(ret, "SetConsoleTitleA failed: %lu\n", GetLastError());
+
+    ret = GetConsoleOriginalTitleA(buf, ARRAY_SIZE(buf));
+    todo_wine ok(ret, "GetConsoleOriginalTitleA failed: %lu\n", GetLastError());
+    todo_wine ok(!strcmp(buf, title), "got %s, expected %s\n", wine_dbgstr_a(buf), wine_dbgstr_a(title));
+}
+
+static void test_GetConsoleOriginalTitleW(void)
+{
+    WCHAR buf[64];
+    DWORD ret;
+    WCHAR title[] = L"Original Console Title";
+
+    ret = GetConsoleOriginalTitleW(NULL, 0);
+    ok(!ret, "Unexpected string length; error %lu\n", GetLastError());
+
+    ret = GetConsoleOriginalTitleW(buf, 0);
+    ok(!ret, "Unexpected string length; error %lu\n", GetLastError());
+
+    ret = GetConsoleOriginalTitleW(buf, ARRAY_SIZE(buf));
+    todo_wine ok(ret, "GetConsoleOriginalTitleW failed: %lu\n", GetLastError());
+    buf[ret] = 0;
+    todo_wine ok(!wcscmp(buf, title), "got %s, expected %s\n", wine_dbgstr_w(buf), wine_dbgstr_w(title));
+
+    ret = SetConsoleTitleW(L"test");
+    ok(ret, "SetConsoleTitleW failed: %lu\n", GetLastError());
+
+    ret = GetConsoleOriginalTitleW(buf, ARRAY_SIZE(buf));
+    todo_wine ok(ret, "GetConsoleOriginalTitleW failed: %lu\n", GetLastError());
+    todo_wine ok(!wcscmp(buf, title), "got %s, expected %s\n", wine_dbgstr_w(buf), wine_dbgstr_w(title));
+
+    ret = GetConsoleOriginalTitleW(buf, 5);
+    todo_wine ok(ret, "GetConsoleOriginalTitleW failed: %lu\n", GetLastError());
+    todo_wine ok(!wcscmp(buf, L"Orig"), "got %s, expected 'Orig'\n", wine_dbgstr_w(buf));
+}
+
+static void test_GetConsoleOriginalTitle(void)
+{
+    STARTUPINFOA si = { sizeof(si) };
+    PROCESS_INFORMATION info;
+    char **argv, buf[MAX_PATH];
+    char title[] = "Original Console Title";
+    BOOL ret;
+
+    winetest_get_mainargs(&argv);
+    sprintf(buf, "\"%s\" console title_test", argv[0]);
+    si.lpTitle = title;
+    ret = CreateProcessA(NULL, buf, NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &info);
+    ok(ret, "CreateProcess failed: %lu\n", GetLastError());
+    CloseHandle(info.hThread);
+    wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
+}
+
 static void test_GetConsoleTitleA(void)
 {
     char buf[64], str[] = "test";
@@ -4873,6 +4914,13 @@ START_TEST(console)
         ExitProcess(exit_code);
     }
 
+    if (argc == 3 && !strcmp(argv[2], "title_test"))
+    {
+        test_GetConsoleOriginalTitleA();
+        test_GetConsoleOriginalTitleW();
+        return;
+    }
+
     test_current = argc >= 3 && !strcmp(argv[2], "--current");
     using_pseudo_console = argc >= 3 && !strcmp(argv[2], "--pseudo-console");
 
@@ -5056,6 +5104,7 @@ START_TEST(console)
     test_GetConsoleScreenBufferInfoEx(hConOut);
     test_SetConsoleScreenBufferInfoEx(hConOut);
     test_file_info(hConIn, hConOut);
+    test_GetConsoleOriginalTitle();
     test_GetConsoleTitleA();
     test_GetConsoleTitleW();
     if (!test_current)

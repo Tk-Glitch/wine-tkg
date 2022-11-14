@@ -633,9 +633,9 @@
 @ cdecl _ismbcgraph(long)
 @ cdecl _ismbcgraph_l(long ptr)
 @ cdecl _ismbchira(long)
-@ stub _ismbchira_l
+@ cdecl _ismbchira_l(long ptr)
 @ cdecl _ismbckata(long)
-@ stub _ismbckata_l
+@ cdecl _ismbckata_l(long ptr)
 @ cdecl _ismbcl0(long)
 @ cdecl _ismbcl0_l(long ptr)
 @ cdecl _ismbcl1(long)
@@ -653,13 +653,13 @@
 @ cdecl _ismbcspace(long)
 @ cdecl _ismbcspace_l(long ptr)
 @ cdecl _ismbcsymbol(long)
-@ stub _ismbcsymbol_l
+@ cdecl _ismbcsymbol_l(long ptr)
 @ cdecl _ismbcupper(long)
 @ cdecl _ismbcupper_l(long ptr)
 @ cdecl _ismbslead(ptr ptr)
-@ stub _ismbslead_l
+@ cdecl _ismbslead_l(ptr ptr ptr)
 @ cdecl _ismbstrail(ptr ptr)
-@ stub _ismbstrail_l
+@ cdecl _ismbstrail_l(ptr ptr ptr)
 @ cdecl _isnan(double)
 @ cdecl -arch=x86_64 _isnanf(float)
 @ cdecl _isprint_l(long ptr)
@@ -719,7 +719,7 @@
 @ cdecl _makepath_s(ptr long str str str str)
 @ cdecl _malloc_crt(long) malloc
 @ cdecl _mbbtombc(long)
-@ stub _mbbtombc_l
+@ cdecl _mbbtombc_l(long ptr)
 @ cdecl _mbbtype(long long)
 @ cdecl _mbbtype_l(long long ptr)
 # extern _mbcasemap
@@ -728,21 +728,21 @@
 @ cdecl _mbccpy_s(ptr long ptr ptr)
 @ cdecl _mbccpy_s_l(ptr long ptr ptr ptr)
 @ cdecl _mbcjistojms(long)
-@ stub _mbcjistojms_l
+@ cdecl _mbcjistojms_l(long ptr)
 @ cdecl _mbcjmstojis(long)
-@ stub _mbcjmstojis_l
+@ cdecl _mbcjmstojis_l(long ptr)
 @ cdecl _mbclen(ptr)
-@ stub _mbclen_l
+@ cdecl _mbclen_l(ptr ptr)
 @ cdecl _mbctohira(long)
-@ stub _mbctohira_l
+@ cdecl _mbctohira_l(long ptr)
 @ cdecl _mbctokata(long)
-@ stub _mbctokata_l
+@ cdecl _mbctokata_l(long ptr)
 @ cdecl _mbctolower(long)
-@ stub _mbctolower_l
+@ cdecl _mbctolower_l(long ptr)
 @ cdecl _mbctombb(long)
-@ stub _mbctombb_l
+@ cdecl _mbctombb_l(long ptr)
 @ cdecl _mbctoupper(long)
-@ stub _mbctoupper_l
+@ cdecl _mbctoupper_l(long ptr)
 @ extern _mbctype MSVCRT_mbctype
 @ stub _mblen_l
 @ cdecl _mbsbtype(str long)
@@ -750,7 +750,7 @@
 @ cdecl _mbscat_s(ptr long str)
 @ cdecl _mbscat_s_l(ptr long str ptr)
 @ cdecl _mbschr(str long)
-@ stub _mbschr_l
+@ cdecl _mbschr_l(str long ptr)
 @ cdecl _mbscmp(str str)
 @ cdecl _mbscmp_l(str str ptr)
 @ cdecl _mbscoll(str str)
@@ -762,17 +762,17 @@
 @ cdecl _mbsdec(ptr ptr)
 @ stub _mbsdec_l
 @ cdecl _mbsicmp(str str)
-@ stub _mbsicmp_l
+@ cdecl _mbsicmp_l(str str ptr)
 @ cdecl _mbsicoll(str str)
 @ cdecl _mbsicoll_l(str str ptr)
 @ cdecl _mbsinc(str)
-@ stub _mbsinc_l
+@ cdecl _mbsinc_l(str ptr)
 @ cdecl _mbslen(str)
 @ cdecl _mbslen_l(str ptr)
 @ cdecl _mbslwr(str)
 @ stub _mbslwr_l
 @ cdecl _mbslwr_s(str long)
-@ stub _mbslwr_s_l
+@ cdecl _mbslwr_s_l(str long ptr)
 @ cdecl _mbsnbcat(str str long)
 @ stub _mbsnbcat_l
 @ cdecl _mbsnbcat_s(str long ptr long)
@@ -852,7 +852,7 @@
 @ cdecl _mbsupr(str)
 @ stub _mbsupr_l
 @ cdecl _mbsupr_s(str long)
-@ stub _mbsupr_s_l
+@ cdecl _mbsupr_s_l(str long ptr)
 @ cdecl _mbtowc_l(ptr str long ptr)
 @ cdecl _memccpy(ptr ptr long long)
 @ cdecl _memicmp(str str long)

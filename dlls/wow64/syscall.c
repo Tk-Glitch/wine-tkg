@@ -847,6 +847,8 @@ void WINAPI Wow64ApcRoutine( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3, CON
 NTSTATUS WINAPI Wow64KiUserCallbackDispatcher( ULONG id, void *args, ULONG len,
                                                void **ret_ptr, ULONG *ret_len )
 {
+    TEB32 *teb32 = (TEB32 *)((char *)NtCurrentTeb() + NtCurrentTeb()->WowTebOffset);
+    ULONG teb_frame = teb32->Tib.ExceptionList;
     struct user_callback_frame frame;
 
     frame.prev_frame = NtCurrentTeb()->TlsSlots[WOW64_TLS_USERCALLBACKDATA];
@@ -862,13 +864,14 @@ NTSTATUS WINAPI Wow64KiUserCallbackDispatcher( ULONG id, void *args, ULONG len,
     {
     case IMAGE_FILE_MACHINE_I386:
         {
-            I386_CONTEXT orig_ctx, ctx = { CONTEXT_I386_FULL };
+            I386_CONTEXT orig_ctx, *ctx;
             void *args_data;
             ULONG *stack;
 
-            NtQueryInformationThread( GetCurrentThread(), ThreadWow64Context, &ctx, sizeof(ctx), NULL );
+            RtlWow64GetCurrentCpuArea( NULL, (void **)&ctx, NULL );
+            orig_ctx = *ctx;
 
-            stack = args_data = ULongToPtr( (ctx.Esp - len) & ~15 );
+            stack = args_data = ULongToPtr( (ctx->Esp - len) & ~15 );
             memcpy( args_data, args, len );
             *(--stack) = 0;
             *(--stack) = len;
@@ -876,16 +879,13 @@ NTSTATUS WINAPI Wow64KiUserCallbackDispatcher( ULONG id, void *args, ULONG len,
             *(--stack) = id;
             *(--stack) = 0xdeadbabe;
 
-            orig_ctx = ctx;
-            ctx.Esp = PtrToUlong( stack );
-            ctx.Eip = pLdrSystemDllInitBlock->pKiUserCallbackDispatcher;
-            NtSetInformationThread( GetCurrentThread(), ThreadWow64Context, &ctx, sizeof(ctx) );
+            ctx->Esp = PtrToUlong( stack );
+            ctx->Eip = pLdrSystemDllInitBlock->pKiUserCallbackDispatcher;
 
             if (!__wine_setjmpex( &frame.jmpbuf, NULL ))
                 cpu_simulate();
             else
-                NtSetInformationThread( GetCurrentThread(), ThreadWow64Context,
-                                        &orig_ctx, sizeof(orig_ctx) );
+                *ctx = orig_ctx;
         }
         break;
 
@@ -915,6 +915,7 @@ NTSTATUS WINAPI Wow64KiUserCallbackDispatcher( ULONG id, void *args, ULONG len,
         break;
     }
 
+    teb32->Tib.ExceptionList = teb_frame;
     NtCurrentTeb()->TlsSlots[WOW64_TLS_USERCALLBACKDATA] = frame.prev_frame;
     NtCurrentTeb()->TlsSlots[WOW64_TLS_TEMPLIST] = frame.temp_list;
     return frame.status;

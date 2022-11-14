@@ -334,7 +334,7 @@ BOOL WINAPI NtUserSetCursorIconData( HCURSOR cursor, UNICODE_STRING *module, UNI
     {
         /* already initialized */
         release_user_handle_ptr( obj );
-        SetLastError( ERROR_INVALID_CURSOR_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_CURSOR_HANDLE );
         return FALSE;
     }
 
@@ -454,7 +454,7 @@ BOOL WINAPI NtUserGetIconSize( HICON handle, UINT step, LONG *width, LONG *heigh
 
     if (!(obj = get_icon_frame_ptr( handle, step )))
     {
-        SetLastError( ERROR_INVALID_CURSOR_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_CURSOR_HANDLE );
         return FALSE;
     }
 
@@ -559,7 +559,7 @@ BOOL WINAPI NtUserGetIconInfo( HICON icon, ICONINFO *info, UNICODE_STRING *modul
 
     if (!(obj = get_icon_ptr( icon )))
     {
-        SetLastError( ERROR_INVALID_CURSOR_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_CURSOR_HANDLE );
         return FALSE;
     }
     if (!(frame_obj = get_icon_frame_ptr( icon, 0 )))
@@ -785,4 +785,40 @@ ULONG_PTR set_icon_param( HICON handle, ULONG_PTR param )
         release_user_handle_ptr( obj );
     }
     return ret;
+}
+
+/******************************************************************************
+ *	     CopyImage (win32u.so)
+ */
+HANDLE WINAPI CopyImage( HANDLE hwnd, UINT type, INT dx, INT dy, UINT flags )
+{
+    void *ret_ptr;
+    ULONG ret_len;
+    NTSTATUS ret;
+    struct copy_image_params params =
+        { .hwnd = hwnd, .type = type, .dx = dx, .dy = dy, .flags = flags };
+
+    ret = KeUserModeCallback( NtUserCopyImage, &params, sizeof(params), &ret_ptr, &ret_len );
+    return UlongToHandle( ret );
+}
+
+/******************************************************************************
+ *           LoadImage (win32u.so)
+ */
+HANDLE WINAPI LoadImageW( HINSTANCE hinst, const WCHAR *name, UINT type,
+                          INT dx, INT dy, UINT flags )
+{
+    void *ret_ptr;
+    ULONG ret_len;
+    NTSTATUS ret;
+    struct load_image_params params =
+        { .hinst = hinst, .name = name, .type = type, .dx = dx, .dy = dy, .flags = flags };
+
+    if (HIWORD(name))
+    {
+        ERR( "name %s not supported in Unix modules\n", debugstr_w( name ));
+        return 0;
+    }
+    ret = KeUserModeCallback( NtUserLoadImage, &params, sizeof(params), &ret_ptr, &ret_len );
+    return UlongToHandle( ret );
 }

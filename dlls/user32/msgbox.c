@@ -379,9 +379,9 @@ static void MSGBOX_CopyToClipbaord( HWND hwnd )
             GlobalUnlock(hMem);
 
             OpenClipboard(hwnd);
-            EmptyClipboard();
+            NtUserEmptyClipboard();
             SetClipboardData(CF_UNICODETEXT, hMem);
-            CloseClipboard();
+            NtUserCloseClipboard();
         }
 
         heap_free(text);

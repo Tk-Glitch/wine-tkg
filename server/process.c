@@ -689,6 +689,8 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->desktop         = 0;
     process->token           = NULL;
     process->trace_data      = 0;
+    process->rawinput_devices = NULL;
+    process->rawinput_device_count = 0;
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
     memset( &process->image_info, 0, sizeof(process->image_info) );
@@ -701,7 +703,6 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     list_init( &process->asyncs );
     list_init( &process->classes );
     list_init( &process->views );
-    list_init( &process->rawinput_devices );
 
     process->end_time = 0;
 
@@ -802,6 +803,7 @@ static void process_destroy( struct object *obj )
     if (process->idle_event) release_object( process->idle_event );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
+    free( process->rawinput_devices );
     free( process->dir_cache );
     free( process->image );
     if (do_esync()) close( process->esync_fd );
@@ -994,8 +996,6 @@ void kill_console_processes( struct thread *renderer, int exit_code )
 /* a process has been killed (i.e. its last thread died) */
 static void process_killed( struct process *process )
 {
-    struct list *ptr;
-
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
     close_process_desktop( process );
@@ -1007,12 +1007,6 @@ static void process_killed( struct process *process )
     process->idle_event = NULL;
     assert( !process->console );
 
-    while ((ptr = list_head( &process->rawinput_devices )))
-    {
-        struct rawinput_device_entry *entry = LIST_ENTRY( ptr, struct rawinput_device_entry, entry );
-        list_remove( &entry->entry );
-        free( entry );
-    }
     destroy_process_classes( process );
     free_mapped_views( process );
     free_process_user_handles( process );

@@ -241,33 +241,6 @@ static void remove_item_data(LB_DESCR *descr, UINT index)
         memmove(p, p + size, (descr->nb_items - index) * size);
 }
 
-/*********************************************************************
- * listbox class descriptor
- */
-const struct builtin_class_descr LISTBOX_builtin_class =
-{
-    L"ListBox",           /* name */
-    CS_DBLCLKS /*| CS_PARENTDC*/,  /* style */
-    WINPROC_LISTBOX,      /* proc */
-    sizeof(LB_DESCR *),   /* extra */
-    IDC_ARROW,            /* cursor */
-    0                     /* brush */
-};
-
-
-/*********************************************************************
- * combolbox class descriptor
- */
-const struct builtin_class_descr COMBOLBOX_builtin_class =
-{
-    L"ComboLBox",         /* name */
-    CS_DBLCLKS | CS_SAVEBITS,  /* style */
-    WINPROC_LISTBOX,      /* proc */
-    sizeof(LB_DESCR *),   /* extra */
-    IDC_ARROW,            /* cursor */
-    0                     /* brush */
-};
-
 
 /***********************************************************************
  *           LISTBOX_GetCurrentPageSize
@@ -329,7 +302,7 @@ static void LISTBOX_UpdateScroll( LB_DESCR *descr )
     SCROLLINFO info;
 
     /* Check the listbox scroll bar flags individually before we call
-       SetScrollInfo otherwise when the listbox style is WS_HSCROLL and
+       NtUserSetScrollInfo otherwise when the listbox style is WS_HSCROLL and
        no WS_VSCROLL, we end up with an uninitialized, visible horizontal
        scroll bar when we do not need one.
     if (!(descr->style & WS_VSCROLL)) return;
@@ -357,11 +330,11 @@ static void LISTBOX_UpdateScroll( LB_DESCR *descr )
         if (descr->style & LBS_DISABLENOSCROLL)
             info.fMask |= SIF_DISABLENOSCROLL;
         if (descr->style & WS_HSCROLL)
-            SetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
+            NtUserSetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
         info.nMax = 0;
         info.fMask = SIF_RANGE;
         if (descr->style & WS_VSCROLL)
-            SetScrollInfo( descr->self, SB_VERT, &info, TRUE );
+            NtUserSetScrollInfo( descr->self, SB_VERT, &info, TRUE );
     }
     else
     {
@@ -373,7 +346,7 @@ static void LISTBOX_UpdateScroll( LB_DESCR *descr )
         if (descr->style & LBS_DISABLENOSCROLL)
             info.fMask |= SIF_DISABLENOSCROLL;
         if (descr->style & WS_VSCROLL)
-            SetScrollInfo( descr->self, SB_VERT, &info, TRUE );
+            NtUserSetScrollInfo( descr->self, SB_VERT, &info, TRUE );
 
         if ((descr->style & WS_HSCROLL) && descr->horz_extent)
         {
@@ -382,7 +355,7 @@ static void LISTBOX_UpdateScroll( LB_DESCR *descr )
             info.fMask = SIF_POS | SIF_PAGE;
             if (descr->style & LBS_DISABLENOSCROLL)
                 info.fMask |= SIF_DISABLENOSCROLL;
-            SetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
+            NtUserSetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
         }
         else
         {
@@ -391,11 +364,11 @@ static void LISTBOX_UpdateScroll( LB_DESCR *descr )
                 info.nMin  = 0;
                 info.nMax  = 0;
                 info.fMask = SIF_RANGE | SIF_DISABLENOSCROLL;
-                SetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
+                NtUserSetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
             }
             else
             {
-                ShowScrollBar( descr->self, SB_HORZ, FALSE );
+                NtUserShowScrollBar( descr->self, SB_HORZ, FALSE );
             }
         }
     }
@@ -439,11 +412,11 @@ static LRESULT LISTBOX_SetTopItem( LB_DESCR *descr, INT index, BOOL scroll )
         else
             dy = (descr->top_item - index) * descr->item_height;
 
-        ScrollWindowEx( descr->self, dx, dy, NULL, NULL, 0, NULL,
-                        SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
+        NtUserScrollWindowEx( descr->self, dx, dy, NULL, NULL, 0, NULL,
+                              SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
     }
     else
-        InvalidateRect( descr->self, NULL, TRUE );
+        NtUserInvalidateRect( descr->self, NULL, TRUE );
     descr->top_item = index;
     LISTBOX_UpdateScroll( descr );
     return LB_OKAY;
@@ -465,7 +438,7 @@ static void LISTBOX_UpdatePage( LB_DESCR *descr )
     if (page_size == descr->page_size) return;
     descr->page_size = page_size;
     if (descr->style & LBS_MULTICOLUMN)
-        InvalidateRect( descr->self, NULL, TRUE );
+        NtUserInvalidateRect( descr->self, NULL, TRUE );
     LISTBOX_SetTopItem( descr, descr->top_item, FALSE );
 }
 
@@ -513,7 +486,7 @@ static void LISTBOX_UpdateSize( LB_DESCR *descr )
     /* Invalidate the focused item so it will be repainted correctly */
     if (LISTBOX_GetItemRect( descr, descr->focus_item, &rect ) == 1)
     {
-        InvalidateRect( descr->self, &rect, FALSE );
+        NtUserInvalidateRect( descr->self, &rect, FALSE );
     }
 }
 
@@ -744,7 +717,7 @@ static void LISTBOX_SetRedraw( LB_DESCR *descr, BOOL on )
         descr->style &= ~LBS_NOREDRAW;
         if (descr->style & LBS_DISPLAYCHANGED)
         {     /* page was changed while setredraw false, refresh automatically */
-            InvalidateRect(descr->self, NULL, TRUE);
+            NtUserInvalidateRect(descr->self, NULL, TRUE);
             if ((descr->top_item + descr->page_size) > descr->nb_items)
             {      /* reset top of page if less than number of items/page */
                 descr->top_item = descr->nb_items - descr->page_size;
@@ -1249,14 +1222,14 @@ static void LISTBOX_InvalidateItems( LB_DESCR *descr, INT index )
             return;
         }
         rect.bottom = descr->height;
-        InvalidateRect( descr->self, &rect, TRUE );
+        NtUserInvalidateRect( descr->self, &rect, TRUE );
         if (descr->style & LBS_MULTICOLUMN)
         {
             /* Repaint the other columns */
             rect.left  = rect.right;
             rect.right = descr->width;
             rect.top   = 0;
-            InvalidateRect( descr->self, &rect, TRUE );
+            NtUserInvalidateRect( descr->self, &rect, TRUE );
         }
     }
 }
@@ -1266,7 +1239,7 @@ static void LISTBOX_InvalidateItemRect( LB_DESCR *descr, INT index )
     RECT rect;
 
     if (LISTBOX_GetItemRect( descr, index, &rect ) == 1)
-        InvalidateRect( descr->self, &rect, TRUE );
+        NtUserInvalidateRect( descr->self, &rect, TRUE );
 }
 
 /***********************************************************************
@@ -1317,7 +1290,7 @@ static LRESULT LISTBOX_SetItemHeight( LB_DESCR *descr, INT index, INT height, BO
         LISTBOX_UpdatePage( descr );
         LISTBOX_UpdateScroll( descr );
 	if (repaint)
-	    InvalidateRect( descr->self, 0, TRUE );
+	    NtUserInvalidateRect( descr->self, 0, TRUE );
     }
     return LB_OKAY;
 }
@@ -1342,12 +1315,12 @@ static void LISTBOX_SetHorizontalPos( LB_DESCR *descr, INT pos )
         RECT rect;
         /* Invalidate the focused item so it will be repainted correctly */
         if (LISTBOX_GetItemRect( descr, descr->focus_item, &rect ) == 1)
-            InvalidateRect( descr->self, &rect, TRUE );
-        ScrollWindowEx( descr->self, diff, 0, NULL, NULL, 0, NULL,
-                          SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
+            NtUserInvalidateRect( descr->self, &rect, TRUE );
+        NtUserScrollWindowEx( descr->self, diff, 0, NULL, NULL, 0, NULL,
+                              SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
     }
     else
-        InvalidateRect( descr->self, NULL, TRUE );
+        NtUserInvalidateRect( descr->self, NULL, TRUE );
 }
 
 
@@ -1369,7 +1342,7 @@ static LRESULT LISTBOX_SetHorizontalExtent( LB_DESCR *descr, INT extent )
         info.fMask = SIF_RANGE;
         if (descr->style & LBS_DISABLENOSCROLL)
             info.fMask |= SIF_DISABLENOSCROLL;
-        SetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
+        NtUserSetScrollInfo( descr->self, SB_HORZ, &info, TRUE );
     }
     if (descr->horz_pos > extent - descr->width)
         LISTBOX_SetHorizontalPos( descr, extent - descr->width );
@@ -1866,7 +1839,7 @@ static LRESULT LISTBOX_SetCount( LB_DESCR *descr, UINT count )
     }
     else SendMessageW(descr->self, LB_RESETCONTENT, 0, 0);
 
-    InvalidateRect( descr->self, NULL, TRUE );
+    NtUserInvalidateRect( descr->self, NULL, TRUE );
     return LB_OKAY;
 }
 
@@ -2416,7 +2389,7 @@ static void LISTBOX_HandleMouseMove( LB_DESCR *descr,
     /* Start/stop the system timer */
 
     if (dir != LB_TIMER_NONE)
-        NtUserSetSystemTimer( descr->self, LB_TIMER_ID, LB_SCROLL_TIMEOUT, NULL);
+        NtUserSetSystemTimer( descr->self, LB_TIMER_ID, LB_SCROLL_TIMEOUT );
     else if (LISTBOX_Timer != LB_TIMER_NONE)
         KillSystemTimer( descr->self, LB_TIMER_ID );
     LISTBOX_Timer = dir;
@@ -2699,7 +2672,7 @@ LRESULT ListBoxWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     case LB_RESETCONTENT:
         LISTBOX_ResetContent( descr );
         LISTBOX_UpdateScroll( descr );
-        InvalidateRect( descr->self, NULL, TRUE );
+        NtUserInvalidateRect( descr->self, NULL, TRUE );
         return 0;
 
     case LB_ADDSTRING:
@@ -3079,7 +3052,7 @@ LRESULT ListBoxWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         return LISTBOX_Destroy( descr );
 
     case WM_ENABLE:
-        InvalidateRect( descr->self, NULL, TRUE );
+        NtUserInvalidateRect( descr->self, NULL, TRUE );
         return 0;
 
     case WM_SETREDRAW:
@@ -3105,7 +3078,7 @@ LRESULT ListBoxWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         return (LRESULT)descr->font;
     case WM_SETFONT:
         LISTBOX_SetFont( descr, (HFONT)wParam );
-        if (lParam) InvalidateRect( descr->self, 0, TRUE );
+        if (lParam) NtUserInvalidateRect( descr->self, 0, TRUE );
         return 0;
     case WM_SETFOCUS:
         descr->in_focus = TRUE;

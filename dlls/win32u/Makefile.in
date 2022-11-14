@@ -18,6 +18,7 @@ C_SRCS = \
 	cursoricon.c \
 	dc.c \
 	dce.c \
+	defwnd.c \
 	dib.c \
 	dibdrv/bitblt.c \
 	dibdrv/dc.c \
@@ -31,6 +32,7 @@ C_SRCS = \
 	freetype.c \
 	gdiobj.c \
 	hook.c \
+	imm.c \
 	input.c \
 	main.c \
 	mapping.c \
@@ -42,7 +44,10 @@ C_SRCS = \
 	path.c \
 	pen.c \
 	printdrv.c \
+	rawinput.c \
 	region.c \
+	scroll.c \
+	spy.c \
 	syscall.c \
 	sysparams.c \
 	vertical.c \

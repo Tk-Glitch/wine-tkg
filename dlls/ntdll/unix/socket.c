@@ -23,6 +23,7 @@
 #endif
 
 #include "config.h"
+#include <assert.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -851,9 +852,8 @@ static BOOL is_icmp_over_dgram( int fd )
 static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user, IO_STATUS_BLOCK *io,
                            int fd, struct async_recv_ioctl *async, int force_async )
 {
-    BOOL nonblocking, alerted;
-    ULONG_PTR information;
     HANDLE wait_handle;
+    BOOL nonblocking;
     NTSTATUS status;
     unsigned int i;
     ULONG options;
@@ -879,25 +879,27 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
     }
     SERVER_END_REQ;
 
-    alerted = status == STATUS_ALERTED;
-    if (alerted)
+    /* the server currently will never succeed immediately */
+    assert(status == STATUS_ALERTED || status == STATUS_PENDING || NT_ERROR(status));
+
+    if (status == STATUS_ALERTED)
     {
+        ULONG_PTR information;
+
         status = try_recv( fd, async, &information );
         if (status == STATUS_DEVICE_NOT_READY && (force_async || !nonblocking))
             status = STATUS_PENDING;
-    }
-
-    if (status != STATUS_PENDING)
-    {
-        if (!NT_ERROR(status) || (wait_handle && !alerted))
+        if (!NT_ERROR(status) && status != STATUS_PENDING)
         {
             io->Status = status;
             io->Information = information;
         }
-        release_fileio( &async->io );
+        set_async_direct_result( &wait_handle, status, information, FALSE );
     }
 
-    if (alerted) set_async_direct_result( &wait_handle, status, information, FALSE );
+    if (status != STATUS_PENDING)
+        release_fileio( &async->io );
+
     if (wait_handle) status = wait_async( wait_handle, options & FILE_SYNCHRONOUS_IO_ALERT );
     return status;
 }
@@ -1097,9 +1099,8 @@ static void sock_save_icmp_id( struct async_send_ioctl *async )
 static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                            IO_STATUS_BLOCK *io, int fd, struct async_send_ioctl *async, int force_async )
 {
-    BOOL nonblocking, alerted;
-    ULONG_PTR information;
     HANDLE wait_handle;
+    BOOL nonblocking;
     NTSTATUS status;
     ULONG options;
 
@@ -1114,12 +1115,16 @@ static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
     }
     SERVER_END_REQ;
 
+    /* the server currently will never succeed immediately */
+    assert(status == STATUS_ALERTED || status == STATUS_PENDING || NT_ERROR(status));
+
     if (!NT_ERROR(status) && is_icmp_over_dgram( fd ))
         sock_save_icmp_id( async );
 
-    alerted = status == STATUS_ALERTED;
-    if (alerted)
+    if (status == STATUS_ALERTED)
     {
+        ULONG_PTR information;
+
         status = try_send( fd, async );
         if (status == STATUS_DEVICE_NOT_READY && (force_async || !nonblocking))
             status = STATUS_PENDING;
@@ -1130,21 +1135,20 @@ static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
          * and returns EWOULDBLOCK, but we have no way of doing that. */
         if (status == STATUS_DEVICE_NOT_READY && async->sent_len)
             status = STATUS_SUCCESS;
-    }
 
-    if (status != STATUS_PENDING)
-    {
         information = async->sent_len;
-        if (!NT_ERROR(status) || (wait_handle && !alerted))
+        if (!NT_ERROR(status) && status != STATUS_PENDING)
         {
             io->Status = status;
             io->Information = information;
         }
-        release_fileio( &async->io );
-    }
-    else information = 0;
 
-    if (alerted) set_async_direct_result( &wait_handle, status, information, FALSE );
+        set_async_direct_result( &wait_handle, status, information, FALSE );
+    }
+
+    if (status != STATUS_PENDING)
+        release_fileio( &async->io );
+
     if (wait_handle) status = wait_async( wait_handle, options & FILE_SYNCHRONOUS_IO_ALERT );
     return status;
 }
@@ -1331,9 +1335,7 @@ static NTSTATUS sock_transmit( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc,
     socklen_t addr_len;
     HANDLE wait_handle;
     NTSTATUS status;
-    ULONG_PTR information;
     ULONG options;
-    BOOL alerted;
 
     addr_len = sizeof(addr);
     if (getpeername( fd, &addr.addr, &addr_len ) != 0)
@@ -1385,37 +1387,38 @@ static NTSTATUS sock_transmit( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc,
     }
     SERVER_END_REQ;
 
-    alerted = status == STATUS_ALERTED;
-    if (alerted)
+    /* the server currently will never succeed immediately */
+    assert(status == STATUS_ALERTED || status == STATUS_PENDING || NT_ERROR(status));
+
+    if (status == STATUS_ALERTED)
     {
+        ULONG_PTR information;
+
         status = try_transmit( fd, file_fd, async );
         if (status == STATUS_DEVICE_NOT_READY)
             status = STATUS_PENDING;
-    }
 
-    if (status != STATUS_PENDING)
-    {
         information = async->head_cursor + async->file_cursor + async->tail_cursor;
-        if (!NT_ERROR(status) || wait_handle)
+        if (!NT_ERROR(status) && status != STATUS_PENDING)
         {
             io->Status = status;
             io->Information = information;
         }
-        release_fileio( &async->io );
-    }
-    else information = 0;
 
-    if (alerted)
-    {
         set_async_direct_result( &wait_handle, status, information, TRUE );
-        if (!(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
-        {
-            /* Pretend we always do async I/O.  The client can always retrieve
-             * the actual I/O status via the IO_STATUS_BLOCK.
-             */
-            status = STATUS_PENDING;
-        }
     }
+
+    if (status != STATUS_PENDING)
+        release_fileio( &async->io );
+
+    if (!status && !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
+    {
+        /* Pretend we always do async I/O.  The client can always retrieve
+         * the actual I/O status via the IO_STATUS_BLOCK.
+         */
+        status = STATUS_PENDING;
+    }
+
     if (wait_handle) status = wait_async( wait_handle, options & FILE_SYNCHRONOUS_IO_ALERT );
     return status;
 }
@@ -1973,27 +1976,6 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
 
         case IOCTL_AFD_WINE_SET_SO_OOBINLINE:
             return do_setsockopt( handle, io, SOL_SOCKET, SO_OOBINLINE, in_buffer, in_size );
-
-        case IOCTL_AFD_WINE_GET_SO_REUSEADDR:
-            return do_getsockopt( handle, io, SOL_SOCKET, SO_REUSEADDR, out_buffer, out_size );
-
-        /* BSD socket SO_REUSEADDR is not 100% compatible to winsock semantics;
-         * however, using it the BSD way fixes bug 8513 and seems to be what
-         * most programmers assume, anyway */
-        case IOCTL_AFD_WINE_SET_SO_REUSEADDR:
-        {
-            int ret;
-
-            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
-                return status;
-
-            ret = setsockopt( fd, SOL_SOCKET, SO_REUSEADDR, in_buffer, in_size );
-#ifdef __APPLE__
-            if (!ret) ret = setsockopt( fd, SOL_SOCKET, SO_REUSEPORT, in_buffer, in_size );
-#endif
-            status = ret ? sock_errno_to_status( errno ) : STATUS_SUCCESS;
-            break;
-        }
 
         case IOCTL_AFD_WINE_SET_IP_ADD_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_ADD_MEMBERSHIP, in_buffer, in_size );

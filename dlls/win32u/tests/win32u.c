@@ -381,6 +381,319 @@ static void test_cursoricon(void)
     ok(ret, "Destroy icon failed, error %lu.\n", GetLastError());
 }
 
+static LRESULT WINAPI test_message_call_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch (msg)
+    {
+    case WM_SETTEXT:
+        ok( !wcscmp( (const WCHAR *)lparam, L"test" ),
+            "lparam = %s\n", wine_dbgstr_w( (const WCHAR *)lparam ));
+        return 6;
+    case WM_USER:
+        ok( wparam == 1, "wparam = %Iu\n", wparam );
+        ok( lparam == 2, "lparam = %Iu\n", lparam );
+        return 3;
+    case WM_USER + 1:
+        return lparam;
+    }
+
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void WINAPI test_message_callback( HWND hwnd, UINT msg, ULONG_PTR data, LRESULT result )
+{
+    ok( msg == WM_USER, "msg = %u\n", msg );
+    ok( data == 10, "data = %Iu\n", data );
+    ok( result == 3, "result = %Iu\n", result );
+}
+
+static void test_message_call(void)
+{
+    const LPARAM large_lparam = (LPARAM)(3 + ((ULONGLONG)1 << 60));
+    struct send_message_callback_params callback_params = {
+        .callback = test_message_callback,
+        .data = 10,
+    };
+    struct send_message_timeout_params smp;
+    WNDCLASSW cls = { 0 };
+    LRESULT res;
+    HWND hwnd;
+
+    cls.lpfnWndProc = test_message_call_proc;
+    cls.lpszClassName = L"TestClass";
+    RegisterClassW( &cls );
+
+    hwnd = CreateWindowExW( 0, L"TestClass", NULL, WS_POPUP, 0,0,0,0,0,0,0, NULL );
+
+    res = NtUserMessageCall( hwnd, WM_USER, 1, 2, NULL, NtUserSendMessage, FALSE );
+    ok( res == 3, "res = %Iu\n", res );
+
+    res = NtUserMessageCall( hwnd, WM_USER, 1, 2, NULL, NtUserSendMessage, TRUE );
+    ok( res == 3, "res = %Iu\n", res );
+
+    res = NtUserMessageCall( hwnd, WM_SETTEXT, 0, (LPARAM)L"test", NULL, NtUserSendMessage, FALSE );
+    ok( res == 6, "res = %Iu\n", res );
+
+    res = NtUserMessageCall( hwnd, WM_SETTEXT, 0, (LPARAM)"test", NULL, NtUserSendMessage, TRUE );
+    ok( res == 6, "res = %Iu\n", res );
+
+    SetLastError( 0xdeadbeef );
+    res = NtUserMessageCall( UlongToHandle(0xdeadbeef), WM_USER, 1, 2, 0, NtUserSendMessage, TRUE );
+    ok( !res, "res = %Iu\n", res );
+    ok( GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "GetLastError() = %lu\n", GetLastError());
+
+    res = NtUserMessageCall( hwnd, WM_USER + 1, 0, large_lparam, 0, NtUserSendMessage, FALSE );
+    ok( res == large_lparam, "res = %Iu\n", res );
+
+    smp.flags = 0;
+    smp.timeout = 10;
+    smp.result = 0xdeadbeef;
+    res = NtUserMessageCall( hwnd, WM_USER, 1, 2, &smp, NtUserSendMessageTimeout, FALSE );
+    ok( res == 3, "res = %Iu\n", res );
+    ok( smp.result == 1, "smp.result = %Iu\n", smp.result );
+
+    smp.flags = 0;
+    smp.timeout = 10;
+    smp.result = 0xdeadbeef;
+    res = NtUserMessageCall( hwnd, WM_USER + 1, 0, large_lparam,
+                             &smp, NtUserSendMessageTimeout, FALSE );
+    ok( res == large_lparam, "res = %Iu\n", res );
+    ok( smp.result == 1, "smp.result = %Iu\n", smp.result );
+
+    res = NtUserMessageCall( hwnd, WM_USER, 1, 2, (void *)0xdeadbeef,
+                             NtUserSendNotifyMessage, FALSE );
+    ok( res == 1, "res = %Iu\n", res );
+
+    res = NtUserMessageCall( hwnd, WM_USER, 1, 2, &callback_params,
+                             NtUserSendMessageCallback, FALSE );
+    ok( res == 1, "res = %Iu\n", res );
+
+    DestroyWindow( hwnd );
+    UnregisterClassW( L"TestClass", NULL );
+}
+
+static void test_window_text(void)
+{
+    WCHAR buf[512];
+    LRESULT res;
+    int len;
+    HWND hwnd;
+
+    hwnd = CreateWindowExW( 0, L"static", NULL, WS_POPUP, 0,0,0,0,0,0,0, NULL );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    len = NtUserInternalGetWindowText( hwnd, buf, ARRAYSIZE(buf) );
+    ok( len == 0, "len = %d\n", len );
+    ok( !buf[0], "buf = %s\n", wine_dbgstr_w(buf) );
+
+    res = NtUserMessageCall( hwnd, WM_SETTEXT, 0, (LPARAM)L"test", 0, NtUserDefWindowProc, FALSE );
+    ok( res == 1, "res = %Id\n", res );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    len = NtUserInternalGetWindowText( hwnd, buf, ARRAYSIZE(buf) );
+    ok( len == 4, "len = %d\n", len );
+    ok( !lstrcmpW( buf, L"test" ), "buf = %s\n", wine_dbgstr_w(buf) );
+
+    res = NtUserMessageCall( hwnd, WM_GETTEXTLENGTH, 0, 0, 0, NtUserDefWindowProc, TRUE );
+    ok( res == 4, "res = %Id\n", res );
+
+    res = NtUserMessageCall( hwnd, WM_GETTEXTLENGTH, 0, 0, 0, NtUserDefWindowProc, FALSE );
+    ok( res == 4, "res = %Id\n", res );
+
+    res = NtUserMessageCall( hwnd, WM_SETTEXT, 0, (LPARAM)"TestA", 0, NtUserDefWindowProc, TRUE );
+    ok( res == 1, "res = %Id\n", res );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    len = NtUserInternalGetWindowText( hwnd, buf, ARRAYSIZE(buf) );
+    ok( len == 5, "len = %d\n", len );
+    ok( !lstrcmpW( buf, L"TestA" ), "buf = %s\n", wine_dbgstr_w(buf) );
+
+    res = NtUserMessageCall( hwnd, WM_GETTEXTLENGTH, 0, 0, 0, NtUserDefWindowProc, TRUE );
+    ok( res == 5, "res = %Id\n", res );
+
+    DestroyWindow( hwnd );
+}
+
+#define test_menu_item_id(a, b, c) test_menu_item_id_(a, b, c, __LINE__)
+static void test_menu_item_id_( HMENU menu, int pos, int expect, int line )
+{
+    MENUITEMINFOW item;
+    BOOL ret;
+
+    item.cbSize = sizeof(item);
+    item.fMask = MIIM_ID;
+    ret = GetMenuItemInfoW( menu, pos, TRUE, &item );
+    ok_(__FILE__,line)( ret, "GetMenuItemInfoW failed: %lu\n", GetLastError() );
+    ok_(__FILE__,line)( item.wID == expect, "got if %d, expected %d\n", item.wID, expect );
+}
+
+static void test_menu(void)
+{
+    MENUITEMINFOW item;
+    HMENU menu;
+    int count;
+    BOOL ret;
+
+    menu = CreateMenu();
+
+    memset( &item, 0, sizeof(item) );
+    item.cbSize = sizeof(item);
+    item.fMask = MIIM_ID;
+    item.wID = 10;
+    ret = NtUserThunkedMenuItemInfo( menu, 0, MF_BYPOSITION, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 1, "count = %d\n", count );
+
+    item.wID = 20;
+    ret = NtUserThunkedMenuItemInfo( menu, 1, MF_BYPOSITION, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 2, "count = %d\n", count );
+    test_menu_item_id( menu, 0, 10 );
+    test_menu_item_id( menu, 1, 20 );
+
+    item.wID = 30;
+    ret = NtUserThunkedMenuItemInfo( menu, 1, MF_BYPOSITION, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 3, "count = %d\n", count );
+    test_menu_item_id( menu, 0, 10 );
+    test_menu_item_id( menu, 1, 30 );
+    test_menu_item_id( menu, 2, 20 );
+
+    item.wID = 50;
+    ret = NtUserThunkedMenuItemInfo( menu, 10, 0, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 4, "count = %d\n", count );
+    test_menu_item_id( menu, 0, 50 );
+    test_menu_item_id( menu, 1, 10 );
+    test_menu_item_id( menu, 2, 30 );
+    test_menu_item_id( menu, 3, 20 );
+
+    item.wID = 60;
+    ret = NtUserThunkedMenuItemInfo( menu, 1, MF_BYPOSITION, NtUserSetMenuItemInfo, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 4, "count = %d\n", count );
+    test_menu_item_id( menu, 1, 60 );
+
+    ret = NtUserDestroyMenu( menu );
+    ok( ret, "NtUserDestroyMenu failed: %lu\n", GetLastError() );
+}
+
+static MSG *msg_ptr;
+
+static LRESULT WINAPI hook_proc( INT code, WPARAM wparam, LPARAM lparam )
+{
+    msg_ptr = (MSG *)lparam;
+    ok( code == 100, "code = %d\n", code );
+    ok( msg_ptr->time == 1, "time = %lx\n", msg_ptr->time );
+    ok( msg_ptr->wParam == 10, "wParam = %Ix\n", msg_ptr->wParam );
+    ok( msg_ptr->lParam == 20, "lParam = %Ix\n", msg_ptr->lParam );
+    msg_ptr->time = 3;
+    msg_ptr->wParam = 1;
+    msg_ptr->lParam = 2;
+    return CallNextHookEx( NULL, code, wparam, lparam );
+}
+
+static void test_message_filter(void)
+{
+    HHOOK hook;
+    MSG msg;
+    BOOL ret;
+
+    hook = SetWindowsHookExW( WH_MSGFILTER, hook_proc, NULL, GetCurrentThreadId() );
+    ok( hook != NULL, "SetWindowsHookExW failed\n");
+
+    memset( &msg, 0, sizeof(msg) );
+    msg.time = 1;
+    msg.wParam = 10;
+    msg.lParam = 20;
+    ret = NtUserCallMsgFilter( &msg, 100 );
+    ok( !ret, "CallMsgFilterW returned: %x\n", ret );
+    ok( msg_ptr != &msg, "our ptr was passed directly to hook\n" );
+
+    if (sizeof(void *) == 8) /* on some Windows versions, msg is not modified on wow64 */
+    {
+        ok( msg.time == 3, "time = %lx\n", msg.time );
+        ok( msg.wParam == 1, "wParam = %Ix\n", msg.wParam );
+        ok( msg.lParam == 2, "lParam = %Ix\n", msg.lParam );
+    }
+
+    ret = NtUserUnhookWindowsHookEx( hook );
+    ok( ret, "NtUserUnhookWindowsHook failed: %lu\n", GetLastError() );
+}
+
+static char calls[128];
+
+static void WINAPI timer_func( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    sprintf( calls + strlen( calls ), "timer%Iu,", id );
+    NtUserKillTimer( hwnd, id );
+
+    if (!id)
+    {
+        MSG msg;
+        NtUserSetTimer( hwnd, 1, 1, timer_func, TIMERV_DEFAULT_COALESCING );
+        while (GetMessageW( &msg, NULL, 0, 0 ))
+        {
+            TranslateMessage( &msg );
+            NtUserDispatchMessage( &msg );
+            if (msg.message == WM_TIMER) break;
+        }
+    }
+
+    strcat( calls, "crash," );
+    *(volatile int *)0 = 0;
+}
+
+static void test_timer(void)
+{
+    HWND hwnd;
+    MSG msg;
+
+    hwnd = CreateWindowExA( 0, "static", NULL, WS_POPUP, 0,0,0,0,0,0,0, NULL );
+
+    NtUserSetTimer( hwnd, 0, 1, timer_func, TIMERV_DEFAULT_COALESCING );
+
+    calls[0] = 0;
+    while (GetMessageW( &msg, NULL, 0, 0 ))
+    {
+        TranslateMessage( &msg );
+        NtUserDispatchMessage( &msg );
+        if (msg.message == WM_TIMER) break;
+    }
+
+    ok( !strcmp( calls, "timer0,timer1,crash,crash," ), "calls = %s\n", calls );
+    DestroyWindow( hwnd );
+}
+
+static void test_NtUserDisplayConfigGetDeviceInfo(void)
+{
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME source_name;
+    NTSTATUS status;
+
+    source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    source_name.header.size = sizeof(source_name.header);
+    status = NtUserDisplayConfigGetDeviceInfo(&source_name.header);
+    ok(status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status);
+
+    source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    source_name.header.size = sizeof(source_name);
+    source_name.header.adapterId.LowPart = 0xFFFF;
+    source_name.header.adapterId.HighPart = 0xFFFF;
+    source_name.header.id = 0;
+    status = NtUserDisplayConfigGetDeviceInfo(&source_name.header);
+    ok(status == STATUS_UNSUCCESSFUL || status == STATUS_NOT_SUPPORTED, "got %#lx.\n", status);
+}
+
 START_TEST(win32u)
 {
     /* native win32u.dll fails if user32 is not loaded, so make sure it's fully initialized */
@@ -391,6 +704,12 @@ START_TEST(win32u)
     test_class();
     test_NtUserBuildHwndList();
     test_cursoricon();
+    test_message_call();
+    test_window_text();
+    test_menu();
+    test_message_filter();
+    test_timer();
 
     test_NtUserCloseWindowStation();
+    test_NtUserDisplayConfigGetDeviceInfo();
 }

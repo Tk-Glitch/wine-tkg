@@ -178,6 +178,7 @@ _ACRTIMP int           __cdecl _makepath_s(char*,size_t,const char*,const char*,
 _ACRTIMP size_t        __cdecl _mbstrlen(const char*);
 _ACRTIMP _onexit_t     __cdecl _onexit(_onexit_t);
 _ACRTIMP int           __cdecl _putenv(const char*);
+_ACRTIMP errno_t       __cdecl _putenv_s(const char*,const char*);
 #ifndef _rotl
 _ACRTIMP unsigned int  __cdecl _rotl(unsigned int,int);
 #endif
@@ -229,10 +230,6 @@ _ACRTIMP __msvcrt_long __cdecl strtol(const char*,char**,int);
 _ACRTIMP __msvcrt_ulong __cdecl strtoul(const char*,char**,int);
 _ACRTIMP __int64       __cdecl _strtoll_l(const char*,char**,int,_locale_t);
 _ACRTIMP unsigned __int64 __cdecl _strtoull_l(const char*,char**,int,_locale_t);
-_ACRTIMP __int64       __cdecl strtoimax(const char*,char**,int);
-_ACRTIMP __int64       __cdecl strtoimax_l(const char*,char**,int,_locale_t);
-_ACRTIMP unsigned __int64 __cdecl strtoumax(const char*,char**,int);
-_ACRTIMP unsigned __int64 __cdecl strtoumax_l(const char*,char**,int,_locale_t);
 _ACRTIMP __int64       __cdecl _strtoi64(const char*,char**,int);
 _ACRTIMP __int64       __cdecl _strtoi64_l(const char*,char**,int,_locale_t);
 _ACRTIMP unsigned __int64 __cdecl _strtoui64(const char*,char**,int);

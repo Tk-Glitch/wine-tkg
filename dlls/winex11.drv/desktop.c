@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
@@ -31,7 +35,6 @@
 /* avoid conflict with field names in included win32 headers */
 #undef Status
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
@@ -80,6 +83,39 @@ static struct screen_size {
 #define _NET_WM_STATE_REMOVE 0
 #define _NET_WM_STATE_ADD 1
 
+/* parse the desktop size specification */
+static BOOL parse_size( const WCHAR *size, unsigned int *width, unsigned int *height )
+{
+    WCHAR *end;
+
+    *width = wcstoul( size, &end, 10 );
+    if (end == size) return FALSE;
+    if (*end != 'x') return FALSE;
+    size = end + 1;
+    *height = wcstoul( size, &end, 10 );
+    return !*end;
+}
+
+/* retrieve the default desktop size from the registry */
+static BOOL get_default_desktop_size( unsigned int *width, unsigned int *height )
+{
+    static const WCHAR defaultW[] = {'D','e','f','a','u','l','t',0};
+    WCHAR buffer[4096];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
+    DWORD size;
+    HKEY hkey;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\Explorer\Desktops */
+    if (!(hkey = open_hkcu_key( "Software\\Wine\\Explorer\\Desktops" ))) return FALSE;
+
+    size = query_reg_value( hkey, defaultW, value, sizeof(buffer) );
+    NtClose( hkey );
+    if (!size || value->Type != REG_SZ) return FALSE;
+
+    if (!parse_size( (const WCHAR *)value->Data, width, height )) return FALSE;
+    return TRUE;
+}
+
 /* Return TRUE if Wine is currently in virtual desktop mode */
 BOOL is_virtual_desktop(void)
 {
@@ -91,7 +127,7 @@ static BOOL X11DRV_desktop_get_id( const WCHAR *device_name, ULONG_PTR *id )
 {
     WCHAR primary_adapter[CCHDEVICENAME];
 
-    if (!get_primary_adapter( primary_adapter ) || lstrcmpiW( primary_adapter, device_name ))
+    if (!get_primary_adapter( primary_adapter ) || wcsicmp( primary_adapter, device_name ))
         return FALSE;
 
     *id = 0;
@@ -115,17 +151,18 @@ static BOOL X11DRV_desktop_get_modes( ULONG_PTR id, DWORD flags, DEVMODEW **new_
 {
     UINT depth_idx, size_idx, mode_idx = 0;
     UINT screen_width, screen_height;
-    RECT primary_rect;
     DEVMODEW *modes;
 
-    primary_rect = get_primary_monitor_rect();
-    screen_width = primary_rect.right - primary_rect.left;
-    screen_height = primary_rect.bottom - primary_rect.top;
+    if (!get_default_desktop_size( &screen_width, &screen_height ))
+    {
+        screen_width = max_width;
+        screen_height = max_height;
+    }
 
     /* Allocate memory for modes in different color depths */
-    if (!(modes = heap_calloc( (ARRAY_SIZE(screen_sizes) + 2) * DEPTH_COUNT, sizeof(*modes))) )
+    if (!(modes = calloc( (ARRAY_SIZE(screen_sizes) + 2) * DEPTH_COUNT, sizeof(*modes))) )
     {
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
     }
 
@@ -161,12 +198,12 @@ static BOOL X11DRV_desktop_get_modes( ULONG_PTR id, DWORD flags, DEVMODEW **new_
 
 static void X11DRV_desktop_free_modes( DEVMODEW *modes )
 {
-    heap_free( modes );
+    free( modes );
 }
 
 static BOOL X11DRV_desktop_get_current_mode( ULONG_PTR id, DEVMODEW *mode )
 {
-    RECT primary_rect = get_primary_monitor_rect();
+    RECT primary_rect = NtUserGetPrimaryMonitorRect();
 
     mode->dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
                      DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION;
@@ -181,7 +218,7 @@ static BOOL X11DRV_desktop_get_current_mode( ULONG_PTR id, DEVMODEW *mode )
     return TRUE;
 }
 
-static LONG X11DRV_desktop_set_current_mode( ULONG_PTR id, DEVMODEW *mode )
+static LONG X11DRV_desktop_set_current_mode( ULONG_PTR id, const DEVMODEW *mode )
 {
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
         WARN("Cannot change screen color depth from %dbits to %dbits!\n", screen_bpp, mode->dmBitsPerPel);
@@ -193,12 +230,13 @@ static LONG X11DRV_desktop_set_current_mode( ULONG_PTR id, DEVMODEW *mode )
 
 static void query_desktop_work_area( RECT *rc_work )
 {
-    static const WCHAR trayW[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d',0};
+    static const WCHAR trayW[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d'};
+    UNICODE_STRING str = { sizeof(trayW), sizeof(trayW), (WCHAR *)trayW };
     RECT rect;
-    HWND hwnd = FindWindowW( trayW, NULL );
+    HWND hwnd = NtUserFindWindowEx( 0, 0, &str, NULL, 0 );
 
-    if (!hwnd || !IsWindowVisible( hwnd )) return;
-    if (!GetWindowRect( hwnd, &rect )) return;
+    if (!hwnd || !NtUserIsWindowVisible( hwnd )) return;
+    if (!NtUserGetWindowRect( hwnd, &rect )) return;
     if (rect.top) rc_work->bottom = rect.top;
     else rc_work->top = rect.bottom;
     TRACE( "found tray %p %s work area %s\n", hwnd, wine_dbgstr_rect( &rect ), wine_dbgstr_rect( rc_work ) );
@@ -209,7 +247,7 @@ static BOOL X11DRV_desktop_get_gpus( struct gdi_gpu **new_gpus, int *count )
     static const WCHAR wine_adapterW[] = {'W','i','n','e',' ','A','d','a','p','t','e','r',0};
     struct gdi_gpu *gpu;
 
-    gpu = heap_calloc( 1, sizeof(*gpu) );
+    gpu = calloc( 1, sizeof(*gpu) );
     if (!gpu) return FALSE;
 
     if (!get_host_primary_gpu( gpu ))
@@ -225,7 +263,7 @@ static BOOL X11DRV_desktop_get_gpus( struct gdi_gpu **new_gpus, int *count )
 
 static void X11DRV_desktop_free_gpus( struct gdi_gpu *gpus )
 {
-    heap_free( gpus );
+    free( gpus );
 }
 
 /* TODO: Support multi-head virtual desktop */
@@ -233,7 +271,7 @@ static BOOL X11DRV_desktop_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **
 {
     struct gdi_adapter *adapter;
 
-    adapter = heap_calloc( 1, sizeof(*adapter) );
+    adapter = calloc( 1, sizeof(*adapter) );
     if (!adapter) return FALSE;
 
     adapter->state_flags = DISPLAY_DEVICE_PRIMARY_DEVICE;
@@ -247,7 +285,7 @@ static BOOL X11DRV_desktop_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **
 
 static void X11DRV_desktop_free_adapters( struct gdi_adapter *adapters )
 {
-    heap_free( adapters );
+    free( adapters );
 }
 
 static BOOL X11DRV_desktop_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count )
@@ -257,7 +295,7 @@ static BOOL X11DRV_desktop_get_monitors( ULONG_PTR adapter_id, struct gdi_monito
         'N','o','n','-','P','n','P',' ','M','o','n','i','t','o','r',0};
     struct gdi_monitor *monitor;
 
-    monitor = heap_calloc( 1, sizeof(*monitor) );
+    monitor = calloc( 1, sizeof(*monitor) );
     if (!monitor) return FALSE;
 
     lstrcpyW( monitor->name, generic_nonpnp_monitorW );
@@ -277,7 +315,7 @@ static BOOL X11DRV_desktop_get_monitors( ULONG_PTR adapter_id, struct gdi_monito
 
 static void X11DRV_desktop_free_monitors( struct gdi_monitor *monitors, int count )
 {
-    heap_free( monitors );
+    free( monitors );
 }
 
 /***********************************************************************
@@ -297,6 +335,16 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
     max_width = primary_rect.right;
     max_height = primary_rect.bottom;
 
+    /* Initialize virtual desktop display settings handler */
+    settings_handler.name = "Virtual Desktop";
+    settings_handler.priority = 1000;
+    settings_handler.get_id = X11DRV_desktop_get_id;
+    settings_handler.get_modes = X11DRV_desktop_get_modes;
+    settings_handler.free_modes = X11DRV_desktop_free_modes;
+    settings_handler.get_current_mode = X11DRV_desktop_get_current_mode;
+    settings_handler.set_current_mode = X11DRV_desktop_set_current_mode;
+    X11DRV_Settings_SetHandler( &settings_handler );
+
     /* Initialize virtual desktop mode display device handler */
     desktop_handler.name = "Virtual Desktop";
     desktop_handler.get_gpus = X11DRV_desktop_get_gpus;
@@ -308,41 +356,31 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
     desktop_handler.register_event_handlers = NULL;
     TRACE("Display device functions are now handled by: Virtual Desktop\n");
     X11DRV_DisplayDevices_Init( TRUE );
-
-    /* Initialize virtual desktop display settings handler */
-    settings_handler.name = "Virtual Desktop";
-    settings_handler.priority = 1000;
-    settings_handler.get_id = X11DRV_desktop_get_id;
-    settings_handler.get_modes = X11DRV_desktop_get_modes;
-    settings_handler.free_modes = X11DRV_desktop_free_modes;
-    settings_handler.get_current_mode = X11DRV_desktop_get_current_mode;
-    settings_handler.set_current_mode = X11DRV_desktop_set_current_mode;
-    settings_handler.convert_coordinates = NULL;
-    X11DRV_Settings_SetHandler( &settings_handler );
 }
 
 
 /***********************************************************************
- *		X11DRV_create_desktop
+ *           x11drv_create_desktop
  *
  * Create the X11 desktop window for the desktop mode.
  */
-BOOL CDECL X11DRV_create_desktop( UINT width, UINT height )
+NTSTATUS x11drv_create_desktop( void *arg )
 {
     static const WCHAR rootW[] = {'r','o','o','t',0};
+    const struct create_desktop_params *params = arg;
     XSetWindowAttributes win_attr;
     Window win;
     Display *display = thread_init_display();
     WCHAR name[MAX_PATH];
 
-    if (!GetUserObjectInformationW( GetThreadDesktop( GetCurrentThreadId() ),
-                                    UOI_NAME, name, sizeof(name), NULL ))
+    if (!NtUserGetObjectInformation( NtUserGetThreadDesktop( GetCurrentThreadId() ),
+                                     UOI_NAME, name, sizeof(name), NULL ))
         name[0] = 0;
 
-    TRACE( "%s %ux%u\n", debugstr_w(name), width, height );
+    TRACE( "%s %ux%u\n", debugstr_w(name), params->width, params->height );
 
     /* magic: desktop "root" means use the root window */
-    if (!lstrcmpiW( name, rootW )) return FALSE;
+    if (!wcsicmp( name, rootW )) return FALSE;
 
     /* Create window */
     win_attr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | EnterWindowMask |
@@ -356,13 +394,13 @@ BOOL CDECL X11DRV_create_desktop( UINT width, UINT height )
         win_attr.colormap = None;
 
     win = XCreateWindow( display, DefaultRootWindow(display),
-                         0, 0, width, height, 0, default_visual.depth, InputOutput, default_visual.visual,
-                         CWEventMask | CWCursor | CWColormap, &win_attr );
+                         0, 0, params->width, params->height, 0, default_visual.depth, InputOutput,
+                         default_visual.visual, CWEventMask | CWCursor | CWColormap, &win_attr );
     if (!win) return FALSE;
     x11drv_xinput_enable( display, win, win_attr.event_mask );
     if (!create_desktop_win_data( win )) return FALSE;
 
-    X11DRV_init_desktop( win, width, height );
+    X11DRV_init_desktop( win, params->width, params->height );
     if (is_desktop_fullscreen())
     {
         TRACE("setting desktop to fullscreen\n");
@@ -376,7 +414,7 @@ BOOL CDECL X11DRV_create_desktop( UINT width, UINT height )
 
 BOOL is_desktop_fullscreen(void)
 {
-    RECT primary_rect = get_primary_monitor_rect();
+    RECT primary_rect = NtUserGetPrimaryMonitorRect();
     return (primary_rect.right - primary_rect.left == max_width &&
             primary_rect.bottom - primary_rect.top == max_height);
 }
@@ -417,34 +455,30 @@ static void update_desktop_fullscreen( unsigned int width, unsigned int height)
 /***********************************************************************
  *		X11DRV_resize_desktop
  */
-void X11DRV_resize_desktop( BOOL send_display_change )
+void X11DRV_resize_desktop(void)
 {
+    static RECT old_virtual_rect;
+
     RECT primary_rect, virtual_rect;
-    HWND hwnd = GetDesktopWindow();
+    HWND hwnd = NtUserGetDesktopWindow();
     INT width, height;
 
-    virtual_rect = get_virtual_screen_rect();
-    primary_rect = get_primary_monitor_rect();
+    virtual_rect = NtUserGetVirtualScreenRect();
+    primary_rect = NtUserGetPrimaryMonitorRect();
     width = primary_rect.right;
     height = primary_rect.bottom;
 
-    if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())
-    {
-        SendMessageW( hwnd, WM_X11DRV_RESIZE_DESKTOP, 0, (LPARAM)send_display_change );
-    }
-    else
-    {
-        TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
-        update_desktop_fullscreen( width, height );
-        SetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
-                      virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
-                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
-        ungrab_clipping_window();
+    TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+    update_desktop_fullscreen( width, height );
+    NtUserSetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
+                        virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
+    ungrab_clipping_window();
+    send_message_timeout( HWND_BROADCAST, WM_X11DRV_DESKTOP_RESIZED, old_virtual_rect.left,
+                          old_virtual_rect.top, SMTO_ABORTIFHUNG, 2000, FALSE );
 
-        if (send_display_change)
-        {
-            SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp, MAKELPARAM( width, height ),
-                                 SMTO_ABORTIFHUNG, 2000, NULL );
-        }
-    }
+    /* forward clip_fullscreen_window request to the foreground window */
+    send_notify_message( NtUserGetForegroundWindow(), WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );
+
+    old_virtual_rect = virtual_rect;
 }

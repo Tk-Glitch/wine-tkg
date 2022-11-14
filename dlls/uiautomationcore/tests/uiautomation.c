@@ -68,7 +68,12 @@ static HRESULT (WINAPI *pUiaDisconnectProvider)(IRawElementProviderSimple *);
 #define UIA_RUNTIME_ID_PREFIX 42
 
 DEFINE_EXPECT(winproc_GETOBJECT_CLIENT);
+DEFINE_EXPECT(prov_callback_base_hwnd);
+DEFINE_EXPECT(prov_callback_nonclient);
+DEFINE_EXPECT(prov_callback_proxy);
+DEFINE_EXPECT(prov_callback_parent_proxy);
 DEFINE_EXPECT(winproc_GETOBJECT_UiaRoot);
+DEFINE_EXPECT(child_winproc_GETOBJECT_UiaRoot);
 DEFINE_EXPECT(Accessible_accNavigate);
 DEFINE_EXPECT(Accessible_get_accParent);
 DEFINE_EXPECT(Accessible_get_accChildCount);
@@ -1092,23 +1097,39 @@ static struct Accessible Accessible_child2 =
     FALSE, 0,
 };
 
+struct Provider_prop_override
+{
+    int prop_id;
+    VARIANT val;
+};
+
 static struct Provider
 {
     IRawElementProviderSimple IRawElementProviderSimple_iface;
     IRawElementProviderFragment IRawElementProviderFragment_iface;
     IRawElementProviderFragmentRoot IRawElementProviderFragmentRoot_iface;
+    IRawElementProviderHwndOverride IRawElementProviderHwndOverride_iface;
     LONG ref;
 
     const char *prov_name;
     IRawElementProviderFragment *parent;
     IRawElementProviderFragmentRoot *frag_root;
+    IRawElementProviderFragment *prev_sibling;
+    IRawElementProviderFragment *next_sibling;
+    IRawElementProviderFragment *first_child;
+    IRawElementProviderFragment *last_child;
     enum ProviderOptions prov_opts;
     HWND hwnd;
     BOOL ret_invalid_prop_type;
     DWORD expected_tid;
     int runtime_id[2];
     DWORD last_call_tid;
+    BOOL ignore_hwnd_prop;
+    HWND override_hwnd;
+    struct Provider_prop_override *prop_override;
+    int prop_override_count;
 } Provider, Provider2, Provider_child, Provider_child2;
+static struct Provider Provider_hwnd, Provider_nc, Provider_proxy, Provider_proxy2, Provider_override;
 
 static const WCHAR *uia_bstr_prop_str = L"uia-string";
 static const ULONG uia_i4_prop_val = 0xdeadbeef;
@@ -1166,6 +1187,7 @@ enum {
     FRAG_NAVIGATE,
     FRAG_GET_RUNTIME_ID,
     FRAG_GET_FRAGMENT_ROOT,
+    HWND_OVERRIDE_GET_OVERRIDE_PROVIDER,
 };
 
 static const char *prov_method_str[] = {
@@ -1175,6 +1197,7 @@ static const char *prov_method_str[] = {
     "Navigate",
     "GetRuntimeId",
     "get_FragmentRoot",
+    "GetOverrideProviderForHwnd",
 };
 
 static const char *get_prov_method_str(int method)
@@ -1490,6 +1513,8 @@ HRESULT WINAPI ProviderSimple_QueryInterface(IRawElementProviderSimple *iface, R
         *ppv = &This->IRawElementProviderFragment_iface;
     else if (IsEqualIID(riid, &IID_IRawElementProviderFragmentRoot))
         *ppv = &This->IRawElementProviderFragmentRoot_iface;
+    else if (IsEqualIID(riid, &IID_IRawElementProviderHwndOverride))
+        *ppv = &This->IRawElementProviderHwndOverride_iface;
     else
         return E_NOINTERFACE;
 
@@ -1546,6 +1571,20 @@ HRESULT WINAPI ProviderSimple_GetPropertyValue(IRawElementProviderSimple *iface,
         ok(This->expected_tid == GetCurrentThreadId(), "Unexpected tid %ld\n", GetCurrentThreadId());
     This->last_call_tid = GetCurrentThreadId();
 
+    if (This->prop_override && This->prop_override_count)
+    {
+        int i;
+
+        for (i = 0; i < This->prop_override_count; i++)
+        {
+            if (This->prop_override[i].prop_id == prop_id)
+            {
+                *ret_val = This->prop_override[i].val;
+                return S_OK;
+            }
+        }
+    }
+
     VariantInit(ret_val);
     switch (prop_id)
     {
@@ -1555,7 +1594,7 @@ HRESULT WINAPI ProviderSimple_GetPropertyValue(IRawElementProviderSimple *iface,
             V_VT(ret_val) = VT_R8;
             V_R8(ret_val) = uia_r8_prop_val;
         }
-        else
+        else if (!This->ignore_hwnd_prop)
         {
             V_VT(ret_val) = VT_I4;
             V_I4(ret_val) = HandleToULong(This->hwnd);
@@ -1788,11 +1827,36 @@ static HRESULT WINAPI ProviderFragment_Navigate(IRawElementProviderFragment *ifa
     This->last_call_tid = GetCurrentThreadId();
 
     *ret_val = NULL;
-    if ((direction == NavigateDirection_Parent) && This->parent)
+    switch (direction)
     {
+    case NavigateDirection_Parent:
         *ret_val = This->parent;
-        IRawElementProviderFragment_AddRef(This->parent);
+        break;
+
+    case NavigateDirection_NextSibling:
+        *ret_val = This->next_sibling;
+        break;
+
+    case NavigateDirection_PreviousSibling:
+        *ret_val = This->prev_sibling;
+        break;
+
+    case NavigateDirection_FirstChild:
+        *ret_val = This->first_child;
+        break;
+
+    case NavigateDirection_LastChild:
+        *ret_val = This->last_child;
+        break;
+
+    default:
+        trace("Invalid navigate direction %d\n", direction);
+        break;
     }
+
+    if (*ret_val)
+        IRawElementProviderFragment_AddRef(*ret_val);
+
     return S_OK;
 }
 
@@ -1923,14 +1987,65 @@ static const IRawElementProviderFragmentRootVtbl ProviderFragmentRootVtbl = {
     ProviderFragmentRoot_GetFocus,
 };
 
+static inline struct Provider *impl_from_ProviderHwndOverride(IRawElementProviderHwndOverride *iface)
+{
+    return CONTAINING_RECORD(iface, struct Provider, IRawElementProviderHwndOverride_iface);
+}
+
+static HRESULT WINAPI ProviderHwndOverride_QueryInterface(IRawElementProviderHwndOverride *iface, REFIID riid,
+        void **ppv)
+{
+    struct Provider *Provider = impl_from_ProviderHwndOverride(iface);
+    return IRawElementProviderSimple_QueryInterface(&Provider->IRawElementProviderSimple_iface, riid, ppv);
+}
+
+static ULONG WINAPI ProviderHwndOverride_AddRef(IRawElementProviderHwndOverride *iface)
+{
+    struct Provider *Provider = impl_from_ProviderHwndOverride(iface);
+    return IRawElementProviderSimple_AddRef(&Provider->IRawElementProviderSimple_iface);
+}
+
+static ULONG WINAPI ProviderHwndOverride_Release(IRawElementProviderHwndOverride *iface)
+{
+    struct Provider *Provider = impl_from_ProviderHwndOverride(iface);
+    return IRawElementProviderSimple_Release(&Provider->IRawElementProviderSimple_iface);
+}
+
+static HRESULT WINAPI ProviderHwndOverride_GetOverrideProviderForHwnd(IRawElementProviderHwndOverride *iface,
+        HWND hwnd, IRawElementProviderSimple **ret_val)
+{
+    struct Provider *This = impl_from_ProviderHwndOverride(iface);
+
+    add_method_call(This, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER);
+
+    *ret_val = NULL;
+    if (This->override_hwnd == hwnd)
+    {
+        return IRawElementProviderSimple_QueryInterface(&Provider_override.IRawElementProviderSimple_iface,
+                &IID_IRawElementProviderSimple, (void **)ret_val);
+    }
+
+    return S_OK;
+}
+
+static const IRawElementProviderHwndOverrideVtbl ProviderHwndOverrideVtbl = {
+    ProviderHwndOverride_QueryInterface,
+    ProviderHwndOverride_AddRef,
+    ProviderHwndOverride_Release,
+    ProviderHwndOverride_GetOverrideProviderForHwnd,
+};
+
 static struct Provider Provider =
 {
     { &ProviderSimpleVtbl },
     { &ProviderFragmentVtbl },
     { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
     1,
     "Provider",
     NULL, NULL,
+    NULL, NULL,
+    &Provider_child.IRawElementProviderFragment_iface, &Provider_child2.IRawElementProviderFragment_iface,
     0, 0, 0,
 };
 
@@ -1939,8 +2054,11 @@ static struct Provider Provider2 =
     { &ProviderSimpleVtbl },
     { &ProviderFragmentVtbl },
     { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
     1,
     "Provider2",
+    NULL, NULL,
+    NULL, NULL,
     NULL, NULL,
     0, 0, 0,
 };
@@ -1950,9 +2068,12 @@ static struct Provider Provider_child =
     { &ProviderSimpleVtbl },
     { &ProviderFragmentVtbl },
     { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
     1,
     "Provider_child",
     &Provider.IRawElementProviderFragment_iface, &Provider.IRawElementProviderFragmentRoot_iface,
+    NULL, &Provider_child2.IRawElementProviderFragment_iface,
+    NULL, NULL,
     ProviderOptions_ServerSideProvider, 0, 0,
 };
 
@@ -1961,10 +2082,87 @@ static struct Provider Provider_child2 =
     { &ProviderSimpleVtbl },
     { &ProviderFragmentVtbl },
     { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
     1,
     "Provider_child2",
     &Provider.IRawElementProviderFragment_iface, &Provider.IRawElementProviderFragmentRoot_iface,
+    &Provider_child.IRawElementProviderFragment_iface, NULL,
+    NULL, NULL,
     ProviderOptions_ServerSideProvider, 0, 0,
+};
+
+static struct Provider Provider_hwnd =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
+    1,
+    "Provider_hwnd",
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL,
+    ProviderOptions_ClientSideProvider, 0, 0,
+};
+
+static struct Provider Provider_nc =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
+    1,
+    "Provider_nc",
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL,
+    ProviderOptions_ClientSideProvider | ProviderOptions_NonClientAreaProvider,
+    0, 0,
+};
+
+static struct Provider Provider_proxy =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
+    1,
+    "Provider_proxy",
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL,
+    ProviderOptions_ClientSideProvider,
+    0, 0,
+};
+
+static struct Provider Provider_proxy2 =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
+    1,
+    "Provider_proxy2",
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL,
+    ProviderOptions_ClientSideProvider,
+    0, 0,
+};
+
+static struct Provider Provider_override =
+{
+    { &ProviderSimpleVtbl },
+    { &ProviderFragmentVtbl },
+    { &ProviderFragmentRootVtbl },
+    { &ProviderHwndOverrideVtbl },
+    1,
+    "Provider_override",
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL,
+    ProviderOptions_ServerSideProvider | ProviderOptions_OverrideProvider,
+    0, 0,
 };
 
 static IAccessible *acc_client;
@@ -1987,6 +2185,30 @@ static LRESULT WINAPI test_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPAR
             CHECK_EXPECT(winproc_GETOBJECT_UiaRoot);
             if (prov_root)
                 return UiaReturnRawElementProvider(hwnd, wParam, lParam, prov_root);
+
+            break;
+        }
+
+        break;
+
+    default:
+        break;
+    }
+
+    return DefWindowProcA(hwnd, message, wParam, lParam);
+}
+
+static IRawElementProviderSimple *child_win_prov_root;
+static LRESULT WINAPI child_test_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_GETOBJECT:
+        if (lParam == UiaRootObjectId)
+        {
+            CHECK_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+            if (child_win_prov_root)
+                return UiaReturnRawElementProvider(hwnd, wParam, lParam, child_win_prov_root);
 
             break;
         }
@@ -3843,10 +4065,10 @@ static const struct prov_method_sequence node_from_prov5[] = {
     /* Win10v1507 and below call this. */
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
     /* Win10v1507 and below call this. */
     { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
-    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
     /* These three are only done on Win10v1507 and below. */
     { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
@@ -3868,13 +4090,13 @@ static const struct prov_method_sequence node_from_prov6[] = {
     /* Win10v1507 and below call this. */
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
     /* Win10v1507 and below call this. */
     { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
-    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
     /* Only called on Windows versions past Win10v1507. */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
     { &Provider2, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
@@ -3893,13 +4115,13 @@ static const struct prov_method_sequence node_from_prov7[] = {
     /* Win10v1507 and below call this. */
     { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
     /* Win10v1507 and below call this. */
     { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
-    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS },
     /* Only called on Windows versions past Win10v1507. */
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
     { &Provider2, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
@@ -4133,10 +4355,11 @@ static void test_UiaNodeFromProvider(void)
     SET_EXPECT(winproc_GETOBJECT_UiaRoot);
     /* Win10v1507 and below send this, Windows 7 sends it twice. */
     SET_EXPECT_MULTI(winproc_GETOBJECT_CLIENT, 2);
+    Provider.ignore_hwnd_prop = TRUE;
     hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
-    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
 
     hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
@@ -4144,33 +4367,26 @@ static void test_UiaNodeFromProvider(void)
     if (SUCCEEDED(hr))
     {
         check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
-
-        /* Newer versions of Windows have "Hwnd(parent link):" */
-        if (get_provider_desc(V_BSTR(&v), L"Hwnd(parent link):", NULL))
-        {
-            check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Hwnd", NULL, TRUE);
-        }
-        else
-        {
-            check_node_provider_desc(V_BSTR(&v), L"Annotation", NULL, TRUE);
-            check_node_provider_desc(V_BSTR(&v), L"Main", NULL, FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider", FALSE);
-        }
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", NULL, TRUE);
         VariantClear(&v);
     }
 
+    Provider.ignore_hwnd_prop = FALSE;
     ok_method_sequence(node_from_prov4, "node_from_prov4");
 
     ok(!!node, "node == NULL\n");
     ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
     ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
 
-    /* Return Provider2 in response to WM_GETOBJECT. */
+    /*
+     * Provider is our main provider, since Provider2 is also a main, it won't
+     * get added.
+     */
     Provider.hwnd = Provider2.hwnd = hwnd;
     Provider.prov_opts = Provider2.prov_opts = ProviderOptions_ServerSideProvider;
+    Provider.ignore_hwnd_prop = Provider2.ignore_hwnd_prop = TRUE;
     prov_root = &Provider2.IRawElementProviderSimple_iface;
     node = (void *)0xdeadbeef;
     SET_EXPECT(winproc_GETOBJECT_UiaRoot);
@@ -4178,11 +4394,10 @@ static void test_UiaNodeFromProvider(void)
     SET_EXPECT(winproc_GETOBJECT_CLIENT);
     hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
     ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
-    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
 
     /* Win10v1507 and below hold a reference to the root provider for the HWND */
-    ok(broken(Provider2.ref == 2) || Provider2.ref == 1, "Unexpected refcnt %ld\n", Provider2.ref);
     ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
     ok(!!node, "node == NULL\n");
 
@@ -4191,23 +4406,13 @@ static void test_UiaNodeFromProvider(void)
     if (SUCCEEDED(hr))
     {
         check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
-
-        /* Newer versions of Windows have "Hwnd(parent link):" */
-        if (get_provider_desc(V_BSTR(&v), L"Hwnd(parent link):", NULL))
-        {
-            check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Hwnd", NULL, TRUE);
-        }
-        else
-        {
-            check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider2", TRUE);
-            check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
-            check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider", FALSE);
-        }
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", NULL, TRUE);
         VariantClear(&v);
     }
 
+    Provider.ignore_hwnd_prop = Provider2.ignore_hwnd_prop = FALSE;
     ok_method_sequence(node_from_prov5, "node_from_prov5");
 
     ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
@@ -4215,8 +4420,8 @@ static void test_UiaNodeFromProvider(void)
     ok(Provider2.ref == 1, "Unexpected refcnt %ld\n", Provider2.ref);
 
     /*
-     * Windows 10 newer than v1507 only matches older behavior if
-     * Provider is a ClientSideProvider.
+     * Provider is classified as an Hwnd provider, Provider2 will become our
+     * Main provider since we don't have one already.
      */
     Provider.prov_opts = ProviderOptions_ClientSideProvider;
     Provider2.prov_opts = ProviderOptions_ServerSideProvider;
@@ -4227,7 +4432,7 @@ static void test_UiaNodeFromProvider(void)
     SET_EXPECT(winproc_GETOBJECT_CLIENT);
     hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
     ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
-    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
 
     hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
@@ -4242,7 +4447,7 @@ static void test_UiaNodeFromProvider(void)
     }
     ok_method_sequence(node_from_prov6, "node_from_prov6");
 
-    todo_wine ok(Provider2.ref == 2, "Unexpected refcnt %ld\n", Provider2.ref);
+    ok(Provider2.ref == 2, "Unexpected refcnt %ld\n", Provider2.ref);
     ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
 
     ok(!!node, "node == NULL\n");
@@ -4261,7 +4466,7 @@ static void test_UiaNodeFromProvider(void)
     SET_EXPECT(winproc_GETOBJECT_CLIENT);
     hr = UiaNodeFromProvider(&Provider_child.IRawElementProviderSimple_iface, &node);
     ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
-    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
 
     hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
@@ -4276,7 +4481,7 @@ static void test_UiaNodeFromProvider(void)
     }
     ok_method_sequence(node_from_prov7, "node_from_prov7");
 
-    todo_wine ok(Provider2.ref == 2, "Unexpected refcnt %ld\n", Provider2.ref);
+    ok(Provider2.ref == 2, "Unexpected refcnt %ld\n", Provider2.ref);
     ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
 
     ok(!!node, "node == NULL\n");
@@ -4328,14 +4533,14 @@ static const struct prov_method_sequence get_elem_arr_prop_seq[] = {
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider_child, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
     { &Provider_child2, PROV_GET_PROVIDER_OPTIONS },
     /* Win10v1507 and below call this. */
     { &Provider_child2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider_child2, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider_child2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child2, PROV_GET_PROVIDER_OPTIONS },
     { &Provider_child, PROV_GET_PROPERTY_VALUE },
     { &Provider_child2, PROV_GET_PROPERTY_VALUE },
     { 0 }
@@ -4839,7 +5044,7 @@ static void test_UiaGetRuntimeId(void)
     SET_EXPECT(winproc_GETOBJECT_CLIENT);
     hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
     ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
-    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
 
     VariantInit(&v);
@@ -4972,8 +5177,8 @@ static const struct prov_method_sequence node_from_hwnd2[] = {
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
     /* Windows 10+ calls this. */
     { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
@@ -4987,8 +5192,8 @@ static const struct prov_method_sequence node_from_hwnd3[] = {
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
     { 0 }
 };
@@ -5016,7 +5221,7 @@ static const struct prov_method_sequence node_from_hwnd5[] = {
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider_child, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
     /* Only done in Windows 8+. */
     { &Provider_child, FRAG_GET_RUNTIME_ID, METHOD_OPTIONAL },
     { &Provider_child, FRAG_GET_FRAGMENT_ROOT, METHOD_OPTIONAL },
@@ -5034,13 +5239,13 @@ static const struct prov_method_sequence node_from_hwnd6[] = {
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider_child, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
     /* Next 4 are only done in Windows 8+. */
     { &Provider_child, FRAG_GET_RUNTIME_ID, METHOD_OPTIONAL },
     { &Provider_child, FRAG_GET_FRAGMENT_ROOT, METHOD_OPTIONAL },
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
     { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
     /* Next two are only done on Win10v1809+. */
     { &Provider_child, FRAG_GET_FRAGMENT_ROOT, METHOD_OPTIONAL },
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
@@ -5059,14 +5264,14 @@ static const struct prov_method_sequence node_from_hwnd7[] = {
     { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
-    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
     { 0 }
 };
@@ -5077,8 +5282,8 @@ static const struct prov_method_sequence node_from_hwnd8[] = {
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider, PROV_GET_PROPERTY_VALUE }, /* UIA_ProviderDescriptionPropertyId */
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ControlTypePropertyId */
     { 0 }
@@ -5091,7 +5296,7 @@ static const struct prov_method_sequence node_from_hwnd9[] = {
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     /* Only done in Windows 8+. */
     { &Provider, FRAG_GET_RUNTIME_ID, METHOD_OPTIONAL },
     { &Provider, FRAG_GET_FRAGMENT_ROOT, METHOD_OPTIONAL },
@@ -5109,7 +5314,7 @@ static const struct prov_method_sequence disconnect_prov1[] = {
     { &Provider_child, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider_child, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider_child, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider_child, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider_child, PROV_GET_PROVIDER_OPTIONS },
     { &Provider_child, FRAG_GET_RUNTIME_ID },
     { &Provider_child, FRAG_GET_FRAGMENT_ROOT },
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
@@ -5124,7 +5329,7 @@ static const struct prov_method_sequence disconnect_prov2[] = {
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider, FRAG_GET_RUNTIME_ID },
     { &Provider, FRAG_GET_FRAGMENT_ROOT },
     { 0 }
@@ -5137,7 +5342,7 @@ static const struct prov_method_sequence disconnect_prov3[] = {
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, PROV_GET_PROPERTY_VALUE }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { &Provider, FRAG_GET_RUNTIME_ID },
     { 0 }
 };
@@ -5148,7 +5353,7 @@ static const struct prov_method_sequence disconnect_prov4[] = {
     { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
     { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
     { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
-    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
     { 0 }
 };
 
@@ -5181,11 +5386,7 @@ static void test_UiaNodeFromHandle_client_proc(void)
 
         ok(get_nested_provider_desc(V_BSTR(&v), L"Main", FALSE, buf), "Failed to get nested provider description\n");
         check_node_provider_desc_prefix(buf, pid, hwnd);
-        /* Win10v1507 and below have the nested provider as 'Hwnd'. */
-        if (get_provider_desc(buf, L"Hwnd(parent link):", NULL))
-            check_node_provider_desc(buf, L"Hwnd", L"Provider", TRUE);
-        else
-            check_node_provider_desc(buf, L"Main", L"Provider", TRUE);
+        check_node_provider_desc(buf, L"Main", L"Provider", TRUE);
 
         check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
         check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
@@ -5243,6 +5444,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
     Provider.runtime_id[0] = Provider.runtime_id[1] = 0;
     Provider.frag_root = NULL;
     Provider.prov_opts = ProviderOptions_ServerSideProvider;
+    Provider.ignore_hwnd_prop = TRUE;
     hr = UiaNodeFromHandle(hwnd, &node);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
@@ -5257,11 +5459,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
 
         ok(get_nested_provider_desc(V_BSTR(&v), L"Main", FALSE, buf), "Failed to get nested provider description\n");
         check_node_provider_desc_prefix(buf, GetCurrentProcessId(), hwnd);
-        /* Win10v1507 and below have the nested provider as 'Hwnd'. */
-        if (get_provider_desc(buf, L"Hwnd(parent link):", NULL))
-            check_node_provider_desc(buf, L"Hwnd", L"Provider", TRUE);
-        else
-            check_node_provider_desc(buf, L"Main", L"Provider", TRUE);
+        check_node_provider_desc(buf, L"Main", L"Provider", TRUE);
 
         check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
         check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
@@ -5269,6 +5467,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
         VariantClear(&v);
     }
 
+    Provider.ignore_hwnd_prop = FALSE;
     ok_method_sequence(node_from_hwnd3, "node_from_hwnd3");
 
     hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
@@ -5350,9 +5549,10 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
     SET_EXPECT(winproc_GETOBJECT_UiaRoot);
     /* Only sent on Win7. */
     SET_EXPECT(winproc_GETOBJECT_CLIENT);
+    Provider_child.ignore_hwnd_prop = TRUE;
     hr = UiaGetPropertyValue(node, UIA_LabeledByPropertyId, &v);
     ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
-    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
     ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider_child.ref);
 
@@ -5366,11 +5566,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
 
         ok(get_nested_provider_desc(V_BSTR(&v), L"Main", TRUE, buf), "Failed to get nested provider description\n");
         check_node_provider_desc_prefix(buf, GetCurrentProcessId(), hwnd);
-        /* Win10v1507 and below have the nested provider as 'Hwnd'. */
-        if (get_provider_desc(buf, L"Hwnd(parent link):", NULL))
-            check_node_provider_desc(buf, L"Hwnd", L"Provider_child", TRUE);
-        else
-            check_node_provider_desc(buf, L"Main", L"Provider_child", TRUE);
+        check_node_provider_desc(buf, L"Main", L"Provider_child", TRUE);
 
         check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
         check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
@@ -5378,6 +5574,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
         VariantClear(&v);
     }
 
+    Provider_child.ignore_hwnd_prop = FALSE;
     ok_method_sequence(node_from_hwnd7, "node_from_hwnd7");
     UiaNodeRelease(node2);
 
@@ -5406,6 +5603,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
     Provider.hwnd = hwnd;
     Provider.runtime_id[0] = Provider.runtime_id[1] = 0;
     Provider.frag_root = NULL;
+    Provider.ignore_hwnd_prop = TRUE;
     Provider.prov_opts = ProviderOptions_ServerSideProvider;
     hr = UiaNodeFromHandle(hwnd, &node);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -5420,11 +5618,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
 
         ok(get_nested_provider_desc(V_BSTR(&v), L"Main", FALSE, buf), "Failed to get nested provider description\n");
         check_node_provider_desc_prefix(buf, GetCurrentProcessId(), hwnd);
-        /* Win10v1507 and below have the nested provider as 'Hwnd'. */
-        if (get_provider_desc(buf, L"Hwnd(parent link):", NULL))
-            check_node_provider_desc(buf, L"Hwnd", L"Provider", TRUE);
-        else
-            check_node_provider_desc(buf, L"Main", L"Provider", TRUE);
+        check_node_provider_desc(buf, L"Main", L"Provider", TRUE);
 
         check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd);
         check_node_provider_desc(V_BSTR(&v), L"Nonclient", NULL, FALSE);
@@ -5432,6 +5626,7 @@ static DWORD WINAPI uia_node_from_handle_test_thread(LPVOID param)
         VariantClear(&v);
     }
 
+    Provider.ignore_hwnd_prop = FALSE;
     ok_method_sequence(node_from_hwnd3, "node_from_hwnd3");
 
     hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
@@ -5817,6 +6012,7 @@ static void test_UiaNodeFromHandle(const char *name)
     /* Test behavior from separate process. */
     Provider.prov_opts = ProviderOptions_ServerSideProvider;
     Provider.hwnd = hwnd;
+    Provider.ignore_hwnd_prop = TRUE;
     prov_root = &Provider.IRawElementProviderSimple_iface;
     sprintf(cmdline, "\"%s\" uiautomation UiaNodeFromHandle_client_proc", name);
     memset(&startup, 0, sizeof(startup));
@@ -5844,6 +6040,7 @@ static void test_UiaNodeFromHandle(const char *name)
     CloseHandle(proc.hProcess);
     CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
     called_winproc_GETOBJECT_CLIENT = expect_winproc_GETOBJECT_CLIENT = 0;
+    Provider.ignore_hwnd_prop = FALSE;
     ok_method_sequence(node_from_hwnd8, "node_from_hwnd8");
 
     CoUninitialize();
@@ -5851,6 +6048,1344 @@ static void test_UiaNodeFromHandle(const char *name)
     DestroyWindow(hwnd);
     UnregisterClassA("UiaNodeFromHandle class", NULL);
     prov_root = NULL;
+}
+
+static const struct prov_method_sequence reg_prov_cb1[] = {
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win10+. */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb2[] = {
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win10+. */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb3[] = {
+    { &Provider_proxy2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_TODO },
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_proxy, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* These three only done on Win10+. */
+    { &Provider_proxy, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_proxy, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb4[] = {
+    { &Provider_proxy2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_TODO },
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_override, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_proxy, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* These four only done on Win10+. */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_proxy, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_proxy, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb5[] = {
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ControlTypePropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb6[] = {
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ControlTypePropertyId */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_proxy, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb7[] = {
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ControlTypePropertyId */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_proxy, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { &Provider_proxy, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb8[] = {
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ControlTypePropertyId */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_proxy, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { &Provider_proxy, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb9[] = {
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ControlTypePropertyId */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_proxy, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { &Provider_proxy, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE }, /* UIA_ControlTypePropertyId */
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win7. */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb10[] = {
+    { &Provider_proxy2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_TODO },
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider_override, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_proxy, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* These four only done on Win10+. */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_proxy, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb11[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider_proxy2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_TODO },
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* These three only done on Win10+. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb12[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Win10v1507 and below call this. */
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_OPTIONAL }, /* Only done on Win10v1809+ */
+    { &Provider_proxy2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_TODO },
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    /* These three only done on Win10+. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static const struct prov_method_sequence reg_prov_cb13[] = {
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    /* Win10v1507 and below call this. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider, PROV_GET_HOST_RAW_ELEMENT_PROVIDER },
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider, PROV_GET_PROVIDER_OPTIONS },
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    /* Win10v1507 and below call this. */
+    { &Provider2, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    { &Provider2, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_TODO },
+    { &Provider2, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider2, PROV_GET_PROVIDER_OPTIONS, METHOD_TODO },
+    { &Provider2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_OPTIONAL }, /* Only done on Win10v1809+ */
+    /* Provider override only retrieved successfully on Win10v1809+ */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_override, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_override, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_proxy2, HWND_OVERRIDE_GET_OVERRIDE_PROVIDER, METHOD_OPTIONAL }, /* Only done on Win10v1507 and below. */
+    /* These two are only done on Win10v1809+. */
+    { &Provider_hwnd, PROV_GET_HOST_RAW_ELEMENT_PROVIDER, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */
+    /* Only done on Win10v1809+. */
+    { &Provider_override, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { &Provider, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_nc, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_hwnd, FRAG_NAVIGATE, METHOD_TODO }, /* NavigateDirection_Parent */
+    { &Provider_override, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL }, /* Only done on Win10v1809+ */
+    /* These three only done on Win10+. */
+    { &Provider, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_nc, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    { &Provider_hwnd, PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL },
+    /* Only done on Win10v1809+. */
+    { &Provider_override, PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_nc, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { &Provider_hwnd, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId */
+    { 0 }
+};
+
+static IRawElementProviderSimple *base_hwnd_prov, *proxy_prov, *parent_proxy_prov, *nc_prov;
+static SAFEARRAY WINAPI *test_uia_provider_callback(HWND hwnd, enum ProviderType prov_type)
+{
+    IRawElementProviderSimple *elprov = NULL;
+
+    switch (prov_type)
+    {
+    case ProviderType_BaseHwnd:
+        CHECK_EXPECT(prov_callback_base_hwnd);
+        elprov = base_hwnd_prov;
+        break;
+
+    case ProviderType_Proxy:
+        if (Provider_proxy.hwnd == hwnd)
+        {
+            CHECK_EXPECT(prov_callback_proxy);
+            elprov = proxy_prov;
+        }
+        else if (hwnd == GetParent(Provider_proxy.hwnd))
+        {
+            CHECK_EXPECT(prov_callback_parent_proxy);
+            elprov = parent_proxy_prov;
+        }
+        break;
+
+    case ProviderType_NonClientArea:
+        CHECK_EXPECT(prov_callback_nonclient);
+        elprov = nc_prov;
+        break;
+
+    default:
+        break;
+    }
+
+    if (elprov)
+    {
+        SAFEARRAY *sa;
+        LONG idx = 0;
+
+        sa = SafeArrayCreateVector(VT_UNKNOWN, 0, 1);
+        if (sa)
+            SafeArrayPutElement(sa, &idx, (void *)elprov);
+
+        return sa;
+    }
+
+    return NULL;
+}
+
+static void test_UiaRegisterProviderCallback(void)
+{
+    HWND hwnd, hwnd2;
+    WNDCLASSA cls;
+    HUIANODE node;
+    HRESULT hr;
+    VARIANT v;
+
+    cls.style = 0;
+    cls.lpfnWndProc = test_wnd_proc;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandleA(NULL);
+    cls.hIcon = 0;
+    cls.hCursor = NULL;
+    cls.hbrBackground = NULL;
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = "UiaRegisterProviderCallback class";
+
+    RegisterClassA(&cls);
+
+    cls.lpfnWndProc = child_test_wnd_proc;
+    cls.lpszClassName = "UiaRegisterProviderCallback child class";
+    RegisterClassA(&cls);
+
+    hwnd = CreateWindowA("UiaRegisterProviderCallback class", "Test window", WS_OVERLAPPEDWINDOW,
+            0, 0, 100, 100, NULL, NULL, NULL, NULL);
+
+    hwnd2 = CreateWindowA("UiaRegisterProviderCallback child class", "Test child window", WS_CHILD,
+            0, 0, 100, 100, hwnd, NULL, NULL, NULL);
+
+    UiaRegisterProviderCallback(test_uia_provider_callback);
+
+    /* No providers returned by UiaRootObjectId or the provider callback. */
+    Provider_proxy.hwnd = hwnd2;
+    child_win_prov_root = prov_root = NULL;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_proxy);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    /* Windows 7 returns S_OK with a NULL HUIANODE. */
+    ok(hr == E_FAIL || broken(hr == S_OK), "Unexpected hr %#lx.\n", hr);
+    ok(!node, "node != NULL\n");
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    CHECK_CALLED(prov_callback_proxy);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    /* Return only nonclient proxy provider. */
+    base_hwnd_prov = proxy_prov = parent_proxy_prov = NULL;
+    nc_prov = &Provider_nc.IRawElementProviderSimple_iface;
+    child_win_prov_root = prov_root = NULL;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_proxy);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider_nc.ref == 2, "Unexpected refcnt %ld\n", Provider_nc.ref);
+    ok(!!node, "node == NULL\n");
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    CHECK_CALLED(prov_callback_proxy);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", L"Provider_nc", TRUE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(reg_prov_cb1, "reg_prov_cb1");
+
+    UiaNodeRelease(node);
+    ok(Provider_nc.ref == 1, "Unexpected refcnt %ld\n", Provider_nc.ref);
+
+    /* Return only base_hwnd provider. */
+    nc_prov = proxy_prov = parent_proxy_prov = NULL;
+    base_hwnd_prov = &Provider_hwnd.IRawElementProviderSimple_iface;
+    child_win_prov_root = prov_root = NULL;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_proxy);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider_hwnd.ref == 2, "Unexpected refcnt %ld\n", Provider_hwnd.ref);
+    ok(!!node, "node == NULL\n");
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    CHECK_CALLED(prov_callback_proxy);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_hwnd", TRUE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(reg_prov_cb2, "reg_prov_cb2");
+
+    UiaNodeRelease(node);
+    ok(Provider_hwnd.ref == 1, "Unexpected refcnt %ld\n", Provider_hwnd.ref);
+
+    /* Return providers for all ProviderTypes. */
+    base_hwnd_prov = &Provider_hwnd.IRawElementProviderSimple_iface;
+    proxy_prov = &Provider_proxy.IRawElementProviderSimple_iface;
+    parent_proxy_prov = &Provider_proxy2.IRawElementProviderSimple_iface;
+    nc_prov = &Provider_nc.IRawElementProviderSimple_iface;
+    Provider_proxy.hwnd = hwnd2;
+    child_win_prov_root = prov_root = NULL;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_proxy);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!node, "node == NULL\n");
+    ok(Provider_proxy.ref == 2, "Unexpected refcnt %ld\n", Provider_proxy.ref);
+    ok(Provider_proxy2.ref == 1, "Unexpected refcnt %ld\n", Provider_proxy2.ref);
+    ok(Provider_nc.ref == 2, "Unexpected refcnt %ld\n", Provider_nc.ref);
+    ok(Provider_hwnd.ref == 2, "Unexpected refcnt %ld\n", Provider_hwnd.ref);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    CHECK_CALLED(prov_callback_proxy);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider_proxy", TRUE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", L"Provider_nc", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_hwnd", FALSE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(reg_prov_cb3, "reg_prov_cb3");
+
+    UiaNodeRelease(node);
+    ok(Provider_proxy.ref == 1, "Unexpected refcnt %ld\n", Provider_proxy.ref);
+    ok(Provider_nc.ref == 1, "Unexpected refcnt %ld\n", Provider_nc.ref);
+    ok(Provider_hwnd.ref == 1, "Unexpected refcnt %ld\n", Provider_hwnd.ref);
+
+    /* Return an override provider from Provider_proxy2. */
+    base_hwnd_prov = &Provider_hwnd.IRawElementProviderSimple_iface;
+    proxy_prov = &Provider_proxy.IRawElementProviderSimple_iface;
+    parent_proxy_prov = &Provider_proxy2.IRawElementProviderSimple_iface;
+    nc_prov = &Provider_nc.IRawElementProviderSimple_iface;
+    Provider_proxy2.override_hwnd = hwnd2;
+    child_win_prov_root = prov_root = NULL;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_proxy);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!node, "node == NULL\n");
+    ok(Provider_proxy.ref == 2, "Unexpected refcnt %ld\n", Provider_proxy.ref);
+    ok(Provider_proxy2.ref == 1, "Unexpected refcnt %ld\n", Provider_proxy2.ref);
+    ok(Provider_nc.ref == 2, "Unexpected refcnt %ld\n", Provider_nc.ref);
+    ok(Provider_hwnd.ref == 2, "Unexpected refcnt %ld\n", Provider_hwnd.ref);
+    todo_wine ok(Provider_override.ref == 2, "Unexpected refcnt %ld\n", Provider_override.ref);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    CHECK_CALLED(prov_callback_proxy);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Override", L"Provider_override", TRUE);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider_proxy", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", L"Provider_nc", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_hwnd", FALSE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(reg_prov_cb4, "reg_prov_cb4");
+
+    /*
+     * Test the order that Providers are queried for properties. The order is:
+     * Override provider.
+     * Main provider.
+     * Nonclient provider.
+     * Hwnd provider.
+     *
+     * UI Automation tries to get a property from each in this order until one
+     * returns a value. If none do, the property isn't supported.
+     */
+    if (Provider_override.ref == 2)
+    {
+        hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
+        ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+        ok(V_VT(&v) == VT_I4, "Unexpected vt %d\n", V_VT(&v));
+        ok(V_I4(&v) == uia_i4_prop_val, "Unexpected I4 %#lx\n", V_I4(&v));
+        ok_method_sequence(reg_prov_cb5, "reg_prov_cb5");
+    }
+
+    /* Property retrieved from Provider_proxy (Main) */
+    Provider_override.ret_invalid_prop_type = TRUE;
+    hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    ok(V_VT(&v) == VT_I4, "Unexpected vt %d\n", V_VT(&v));
+    ok(V_I4(&v) == uia_i4_prop_val, "Unexpected I4 %#lx\n", V_I4(&v));
+    ok_method_sequence(reg_prov_cb6, "reg_prov_cb6");
+
+    /* Property retrieved from Provider_nc (Nonclient) */
+    Provider_override.ret_invalid_prop_type = Provider_proxy.ret_invalid_prop_type = TRUE;
+    hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    ok(V_VT(&v) == VT_I4, "Unexpected vt %d\n", V_VT(&v));
+    ok(V_I4(&v) == uia_i4_prop_val, "Unexpected I4 %#lx\n", V_I4(&v));
+    ok_method_sequence(reg_prov_cb7, "reg_prov_cb7");
+
+    /* Property retrieved from Provider_hwnd (Hwnd) */
+    Provider_override.ret_invalid_prop_type = Provider_proxy.ret_invalid_prop_type = TRUE;
+    Provider_nc.ret_invalid_prop_type = TRUE;
+    hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    ok(V_VT(&v) == VT_I4, "Unexpected vt %d\n", V_VT(&v));
+    ok(V_I4(&v) == uia_i4_prop_val, "Unexpected I4 %#lx\n", V_I4(&v));
+    ok_method_sequence(reg_prov_cb8, "reg_prov_cb8");
+
+    /* Property retrieved from none of the providers. */
+    Provider_override.ret_invalid_prop_type = Provider_proxy.ret_invalid_prop_type = TRUE;
+    Provider_nc.ret_invalid_prop_type = Provider_hwnd.ret_invalid_prop_type = TRUE;
+    hr = UiaGetPropertyValue(node, UIA_ControlTypePropertyId, &v);
+    ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    ok(V_VT(&v) == VT_UNKNOWN, "Unexpected vt %d\n", V_VT(&v));
+    ok_method_sequence(reg_prov_cb9, "reg_prov_cb9");
+
+    UiaNodeRelease(node);
+    ok(Provider_proxy.ref == 1, "Unexpected refcnt %ld\n", Provider_proxy.ref);
+    ok(Provider_nc.ref == 1, "Unexpected refcnt %ld\n", Provider_nc.ref);
+    ok(Provider_hwnd.ref == 1, "Unexpected refcnt %ld\n", Provider_hwnd.ref);
+    ok(Provider_override.ref == 1, "Unexpected refcnt %ld\n", Provider_override.ref);
+    Provider_override.ret_invalid_prop_type = Provider_proxy.ret_invalid_prop_type = FALSE;
+    Provider_nc.ret_invalid_prop_type = Provider_hwnd.ret_invalid_prop_type = FALSE;
+
+    /*
+     * Provider_hwnd has ProviderOptions_UseComThreading, and COM hasn't been
+     * initialized. One provider failing will cause the entire node to fail
+     * creation on Win10+.
+     */
+    Provider_hwnd.prov_opts = ProviderOptions_ClientSideProvider | ProviderOptions_UseComThreading;
+    node = (void *)0xdeadbeef;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_proxy);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == CO_E_NOTINITIALIZED || broken(hr == S_OK), "Unexpected hr %#lx.\n", hr);
+    ok(!node || broken(!!node), "node != NULL\n");
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    CHECK_CALLED(prov_callback_proxy);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+    ok_method_sequence(reg_prov_cb10, "reg_prov_cb10");
+    UiaNodeRelease(node);
+    Provider_hwnd.prov_opts = ProviderOptions_ClientSideProvider;
+
+    /*
+     * Provider returned by UiaRootObjectId on hwnd2. No ProviderType_Proxy
+     * callback for hwnd2.
+     */
+    Provider.hwnd = hwnd2;
+    Provider.prov_opts = ProviderOptions_ServerSideProvider;
+    child_win_prov_root = &Provider.IRawElementProviderSimple_iface;
+    Provider_proxy2.override_hwnd = NULL;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", TRUE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_hwnd", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", L"Provider_nc", FALSE);
+        VariantClear(&v);
+    }
+    ok_method_sequence(reg_prov_cb11, "reg_prov_cb11");
+
+    UiaNodeRelease(node);
+
+    /*
+     * Provider returned by UiaRootObjectId on both HWNDs. Since Provider2
+     * doesn't give an HWND override provider, UIA will attempt to get a proxy
+     * provider to check it for an HWND override provider.
+     */
+    Provider.hwnd = hwnd2;
+    Provider2.hwnd = hwnd;
+    Provider.prov_opts = Provider2.prov_opts = ProviderOptions_ServerSideProvider;
+    child_win_prov_root = &Provider.IRawElementProviderSimple_iface;
+    prov_root = &Provider2.IRawElementProviderSimple_iface;
+    Provider_proxy2.override_hwnd = NULL;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+    todo_wine CHECK_CALLED(prov_callback_parent_proxy);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", TRUE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_hwnd", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", L"Provider_nc", FALSE);
+        VariantClear(&v);
+    }
+    ok_method_sequence(reg_prov_cb12, "reg_prov_cb12");
+
+    UiaNodeRelease(node);
+
+    /*
+     * Provider returned by UiaRootObjectId on both HWNDs. Since Provider2
+     * returns an HWND override, no ProviderType_Proxy callback for hwnd.
+     */
+    Provider.hwnd = hwnd2;
+    Provider2.hwnd = hwnd;
+    Provider2.override_hwnd = Provider_override.hwnd = hwnd2;
+    Provider2.ignore_hwnd_prop = Provider_override.ignore_hwnd_prop = TRUE;
+    Provider.prov_opts = Provider2.prov_opts = ProviderOptions_ServerSideProvider;
+    child_win_prov_root = &Provider.IRawElementProviderSimple_iface;
+    prov_root = &Provider2.IRawElementProviderSimple_iface;
+    Provider_proxy2.override_hwnd = NULL;
+    SET_EXPECT(winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(child_winproc_GETOBJECT_UiaRoot);
+    SET_EXPECT(prov_callback_base_hwnd);
+    SET_EXPECT(prov_callback_nonclient);
+    SET_EXPECT(prov_callback_parent_proxy);
+    hr = UiaNodeFromHandle(hwnd2, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+    todo_wine CHECK_CALLED(winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(child_winproc_GETOBJECT_UiaRoot);
+    CHECK_CALLED(prov_callback_base_hwnd);
+    CHECK_CALLED(prov_callback_nonclient);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), hwnd2);
+        check_node_provider_desc(V_BSTR(&v), L"Override", L"Provider_override", TRUE);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Hwnd", L"Provider_hwnd", FALSE);
+        check_node_provider_desc(V_BSTR(&v), L"Nonclient", L"Provider_nc", FALSE);
+        VariantClear(&v);
+    }
+    ok_method_sequence(reg_prov_cb13, "reg_prov_cb13");
+
+    UiaNodeRelease(node);
+
+    Provider2.ignore_hwnd_prop = Provider_override.ignore_hwnd_prop = FALSE;
+    UiaRegisterProviderCallback(NULL);
+
+    DestroyWindow(hwnd);
+    UnregisterClassA("UiaRegisterProviderCallback class", NULL);
+    UnregisterClassA("UiaRegisterProviderCallback child class", NULL);
+}
+
+static void set_cache_request(struct UiaCacheRequest *req, struct UiaCondition *view_cond, int scope,
+        PROPERTYID *prop_ids, int prop_ids_count, PATTERNID *pattern_ids, int pattern_ids_count, int elem_mode)
+{
+    req->pViewCondition = view_cond;
+    req->Scope = scope;
+
+    req->pProperties = prop_ids;
+    req->cProperties = prop_ids_count;
+    req->pPatterns = pattern_ids;
+    req->cPatterns = pattern_ids_count;
+
+    req->automationElementMode = elem_mode;
+}
+
+static void set_property_condition(struct UiaPropertyCondition *cond, int prop_id, VARIANT *val, int flags)
+{
+    cond->ConditionType = ConditionType_Property;
+    cond->PropertyId = prop_id;
+    cond->Value = *val;
+    cond->Flags = flags;
+}
+
+static void set_and_or_condition(struct UiaAndOrCondition *cond, int cond_type,
+        struct UiaCondition **conds, int cond_count)
+{
+    cond->ConditionType = cond_type;
+    cond->ppConditions = conds;
+    cond->cConditions = cond_count;
+}
+
+static void set_not_condition(struct UiaNotCondition *cond, struct UiaCondition *not_cond)
+{
+    cond->ConditionType = ConditionType_Not;
+    cond->pConditions = not_cond;
+}
+
+#define MAX_NODE_PROVIDERS 4
+struct node_provider_desc {
+    DWORD pid;
+    HWND hwnd;
+
+    const WCHAR *prov_type[MAX_NODE_PROVIDERS];
+    const WCHAR *prov_name[MAX_NODE_PROVIDERS];
+    BOOL parent_link[MAX_NODE_PROVIDERS];
+    int prov_count;
+};
+
+static void init_node_provider_desc(struct node_provider_desc *desc, DWORD pid, HWND hwnd)
+{
+    memset(desc, 0, sizeof(*desc));
+    desc->pid = pid;
+    desc->hwnd = hwnd;
+}
+
+static void add_provider_desc(struct node_provider_desc *desc, const WCHAR *prov_type, const WCHAR *prov_name,
+        BOOL parent_link)
+{
+    desc->prov_type[desc->prov_count] = prov_type;
+    desc->prov_name[desc->prov_count] = prov_name;
+    desc->parent_link[desc->prov_count] = parent_link;
+    desc->prov_count++;
+}
+
+#define test_node_provider_desc( desc, desc_str ) \
+        test_node_provider_desc_( (desc), (desc_str), __FILE__, __LINE__)
+static void test_node_provider_desc_(struct node_provider_desc *desc, BSTR desc_str, const char *file, int line)
+{
+    int i;
+
+    check_node_provider_desc_prefix_(desc_str, desc->pid, desc->hwnd, file, line);
+    for (i = 0; i < desc->prov_count; i++)
+        check_node_provider_desc_(desc_str, desc->prov_type[i], desc->prov_name[i], desc->parent_link[i], file, line);
+}
+
+/*
+ * Cache requests are returned as a two dimensional safearray, with the first
+ * dimension being the element index, and the second index being the
+ * node/property/pattern value index for the element. The first element value is
+ * always an HUIANODE, followed by requested property values, and finally
+ * requested pattern handles.
+ */
+#define test_cache_req_sa( sa, exp_lbound, exp_elems, exp_node_desc ) \
+        test_cache_req_sa_( (sa), (exp_lbound), (exp_elems), (exp_node_desc), __FILE__, __LINE__)
+static void test_cache_req_sa_(SAFEARRAY *sa, LONG exp_lbound[2], LONG exp_elems[2],
+        struct node_provider_desc *exp_node_desc, const char *file, int line)
+{
+    HUIANODE node;
+    HRESULT hr;
+    VARTYPE vt;
+    VARIANT v;
+    UINT dims;
+    int i;
+
+    hr = SafeArrayGetVartype(sa, &vt);
+    ok_(file, line)(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok_(file, line)(vt == VT_VARIANT, "Unexpected vt %d\n", vt);
+
+    dims = SafeArrayGetDim(sa);
+    ok_(file, line)(dims == 2, "Unexpected dims %d\n", dims);
+
+    for (i = 0; i < 2; i++)
+    {
+        LONG lbound, ubound, elems;
+
+        lbound = ubound = elems = 0;
+        hr = SafeArrayGetLBound(sa, 1 + i, &lbound);
+        ok_(file, line)(hr == S_OK, "Unexpected hr %#lx for SafeArrayGetLBound\n", hr);
+        ok_(file, line)(exp_lbound[i] == lbound, "Unexpected lbound[%d] %ld\n", i, lbound);
+
+        hr = SafeArrayGetUBound(sa, 1 + i, &ubound);
+        ok_(file, line)(hr == S_OK, "Unexpected hr %#lx for SafeArrayGetUBound\n", hr);
+
+        elems = (ubound - lbound) + 1;
+        ok_(file, line)(exp_elems[i] == elems, "Unexpected elems[%d] %ld\n", i, elems);
+    }
+
+    for (i = 0; i < exp_elems[0]; i++)
+    {
+        LONG idx[2] = { (exp_lbound[0] + i), exp_lbound[1] };
+
+        hr = SafeArrayGetElement(sa, idx, &v);
+        ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+
+        hr = UiaHUiaNodeFromVariant(&v, &node);
+        ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+        VariantClear(&v);
+
+        hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+        todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+        if (SUCCEEDED(hr))
+            test_node_provider_desc_(&exp_node_desc[i], V_BSTR(&v), file, line);
+        VariantClear(&v);
+
+        UiaNodeRelease(node);
+    }
+}
+
+/*
+ * This sequence of method calls is always used when creating an HUIANODE from
+ * an IRawElementProviderSimple.
+ */
+#define NODE_CREATE_SEQ(prov) \
+    { prov , PROV_GET_PROVIDER_OPTIONS }, \
+    /* Win10v1507 and below call this. */ \
+    { prov , PROV_GET_PROPERTY_VALUE, METHOD_OPTIONAL }, /* UIA_NativeWindowHandlePropertyId */ \
+    { prov , PROV_GET_HOST_RAW_ELEMENT_PROVIDER }, \
+    { prov , PROV_GET_PROPERTY_VALUE }, \
+    { prov , FRAG_NAVIGATE }, /* NavigateDirection_Parent */ \
+    { prov , PROV_GET_PROVIDER_OPTIONS, METHOD_OPTIONAL } \
+
+static const struct prov_method_sequence cache_req_seq1[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId. */
+    { 0 }
+};
+
+/*
+ * Win10v1507 and below will attempt to do parent navigation if the
+ * conditional check fails.
+ */
+static const struct prov_method_sequence cache_req_seq2[] = {
+    { &Provider, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { 0 }
+};
+
+static const struct prov_method_sequence cache_req_seq3[] = {
+    { &Provider, FRAG_NAVIGATE }, /* NavigateDirection_FirstChild */
+    NODE_CREATE_SEQ(&Provider_child),
+    { &Provider_child, FRAG_NAVIGATE }, /* NavigateDirection_NextSibling */
+    NODE_CREATE_SEQ(&Provider_child2),
+    { &Provider_child2, FRAG_NAVIGATE }, /* NavigateDirection_NextSibling */
+    /* Navigates towards parent to check for clientside provider siblings. */
+    { &Provider_child2, FRAG_NAVIGATE }, /* NavigateDirection_Parent */
+    NODE_CREATE_SEQ(&Provider),
+    { &Provider_child, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId. */
+    { &Provider_child2, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId. */
+    { 0 }
+};
+
+static const struct prov_method_sequence cache_req_seq4[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE }, /* Dependent upon property condition. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId. */
+    { 0 }
+};
+
+/* Sequence for non-matching property condition. */
+static const struct prov_method_sequence cache_req_seq5[] = {
+    { &Provider, PROV_GET_PROPERTY_VALUE }, /* Dependent upon property condition. */
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* Dependent upon property condition. */
+    /* Only done on Win10v1507 and below. */
+    { &Provider, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { 0 }
+};
+
+static const struct prov_method_sequence cache_req_seq6[] = {
+    { &Provider, FRAG_GET_RUNTIME_ID },
+    { &Provider, PROV_GET_PROPERTY_VALUE, METHOD_TODO }, /* UIA_ProviderDescriptionPropertyId. */
+    /* Only done on Win10v1507 and below. */
+    { &Provider, FRAG_NAVIGATE, METHOD_OPTIONAL }, /* NavigateDirection_Parent */
+    { 0 }
+};
+
+static const struct UiaCondition UiaTrueCondition  = { ConditionType_True };
+static const struct UiaCondition UiaFalseCondition = { ConditionType_False };
+static void test_UiaGetUpdatedCache(void)
+{
+    struct Provider_prop_override prop_override;
+    struct node_provider_desc exp_node_desc[2];
+    struct UiaPropertyCondition prop_cond;
+    struct UiaAndOrCondition and_or_cond;
+    LONG exp_lbound[2], exp_elems[2], i;
+    struct UiaCacheRequest cache_req;
+    struct UiaCondition *cond_arr[2];
+    struct UiaNotCondition not_cond;
+    SAFEARRAY *out_req;
+    BSTR tree_struct;
+    HUIANODE node;
+    HRESULT hr;
+    VARIANT v;
+
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+    for (i = 0; i < ARRAY_SIZE(exp_node_desc); i++)
+        init_node_provider_desc(&exp_node_desc[i], GetCurrentProcessId(), NULL);
+
+    Provider.prov_opts = ProviderOptions_ServerSideProvider;
+    Provider.hwnd = NULL;
+    hr = UiaNodeFromProvider(&Provider.IRawElementProviderSimple_iface, &node);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(Provider.ref == 2, "Unexpected refcnt %ld\n", Provider.ref);
+
+    hr = UiaGetPropertyValue(node, UIA_ProviderDescriptionPropertyId, &v);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        check_node_provider_desc_prefix(V_BSTR(&v), GetCurrentProcessId(), NULL);
+        check_node_provider_desc(V_BSTR(&v), L"Main", L"Provider", TRUE);
+        VariantClear(&v);
+    }
+
+    ok_method_sequence(node_from_prov2, NULL);
+
+    /* NULL arg tests. */
+    set_cache_request(&cache_req, NULL, TreeScope_Element, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_None, NULL, &out_req, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = UiaGetUpdatedCache(node, NULL, NormalizeState_None, NULL, &out_req, &tree_struct);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = UiaGetUpdatedCache(NULL, &cache_req, NormalizeState_None, NULL, &out_req, &tree_struct);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    /*
+     * Cache request with NULL view condition, doesn't matter with
+     * NormalizeState_None as passed in HUIANODE isn't evaluated against any
+     * condition.
+     */
+    tree_struct = NULL; out_req = NULL;
+    add_provider_desc(&exp_node_desc[0], L"Main", L"Provider", TRUE);
+    set_cache_request(&cache_req, NULL, TreeScope_Element, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_None, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq1, "cache_req_seq1");
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    /*
+     * NormalizeState_View, HUIANODE gets checked against the ConditionType_False
+     * condition within the cache request structure, nothing is returned.
+     */
+    tree_struct = NULL; out_req = NULL;
+    set_cache_request(&cache_req, (struct UiaCondition *)&UiaFalseCondition, TreeScope_Element, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!out_req, "out_req != NULL\n");
+
+    /* Empty tree structure string. */
+    ok(!!tree_struct, "tree_struct == NULL\n");
+    ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+    SysFreeString(tree_struct);
+    ok_method_sequence(cache_req_seq2, "cache_req_seq2");
+
+    /*
+     * NormalizeState_View, HUIANODE gets checked against the ConditionType_True
+     * condition within the cache request structure, returns this HUIANODE.
+     */
+    tree_struct = NULL; out_req = NULL;
+    set_cache_request(&cache_req, (struct UiaCondition *)&UiaTrueCondition, TreeScope_Element, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq1, "cache_req_seq1");
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    /*
+     * NormalizeState_Custom, HUIANODE gets checked against our passed in
+     * ConditionType_False condition.
+     */
+    set_cache_request(&cache_req, (struct UiaCondition *)&UiaTrueCondition, TreeScope_Element, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_Custom, (struct UiaCondition *)&UiaFalseCondition, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!out_req, "out_req != NULL\n");
+
+    /* Empty tree structure string. */
+    ok(!!tree_struct, "tree_struct == NULL\n");
+    ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+    SysFreeString(tree_struct);
+
+    ok_method_sequence(cache_req_seq2, "cache_req_seq2");
+
+    /*
+     * NormalizeState_Custom, HUIANODE gets checked against the ConditionType_True
+     * condition we pass in, returns this HUIANODE.
+     */
+    tree_struct = NULL; out_req = NULL;
+    set_cache_request(&cache_req, (struct UiaCondition *)&UiaTrueCondition, TreeScope_Element, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_Custom, (struct UiaCondition *)&UiaTrueCondition, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq1, "cache_req_seq1");
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    /*
+     * CacheRequest with TreeScope_Children.
+     */
+    for (i = 0; i < ARRAY_SIZE(exp_node_desc); i++)
+        init_node_provider_desc(&exp_node_desc[i], GetCurrentProcessId(), NULL);
+    add_provider_desc(&exp_node_desc[0], L"Main", L"Provider_child", TRUE);
+    add_provider_desc(&exp_node_desc[1], L"Main", L"Provider_child2", TRUE);
+    tree_struct = NULL; out_req = NULL;
+    set_cache_request(&cache_req, (struct UiaCondition *)&UiaTrueCondition, TreeScope_Children, NULL, 0, NULL, 0, AutomationElementMode_Full);
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_None, NULL, &out_req, &tree_struct);
+    todo_wine ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine ok(!!out_req, "out_req == NULL\n");
+    todo_wine ok(!!tree_struct, "tree_struct == NULL\n");
+    todo_wine ok(Provider_child.ref == 2, "Unexpected refcnt %ld\n", Provider_child.ref);
+    todo_wine ok(Provider_child2.ref == 2, "Unexpected refcnt %ld\n", Provider_child2.ref);
+    if (out_req)
+    {
+        exp_elems[0] = 2;
+        exp_elems[1] = 1;
+        test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+
+        ok(!wcscmp(tree_struct, L"(P)P))"), "tree structure %s\n", debugstr_w(tree_struct));
+        ok_method_sequence(cache_req_seq3, "cache_req_seq3");
+    }
+
+    ok(Provider_child.ref == 1, "Unexpected refcnt %ld\n", Provider_child.ref);
+    ok(Provider_child2.ref == 1, "Unexpected refcnt %ld\n", Provider_child2.ref);
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    /*
+     * ConditionType_And tests.
+     */
+    for (i = 0; i < ARRAY_SIZE(exp_node_desc); i++)
+        init_node_provider_desc(&exp_node_desc[i], GetCurrentProcessId(), NULL);
+    add_provider_desc(&exp_node_desc[0], L"Main", L"Provider", TRUE);
+    cond_arr[0] = (struct UiaCondition *)&UiaTrueCondition;
+    cond_arr[1] = (struct UiaCondition *)&UiaTrueCondition;
+    set_and_or_condition(&and_or_cond, ConditionType_And, cond_arr, ARRAY_SIZE(cond_arr));
+    set_cache_request(&cache_req, (struct UiaCondition *)&and_or_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    /* Equivalent to: if (1 && 1) */
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq1, NULL);
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    cond_arr[0] = (struct UiaCondition *)&UiaTrueCondition;
+    cond_arr[1] = (struct UiaCondition *)&UiaFalseCondition;
+    set_and_or_condition(&and_or_cond, ConditionType_And, cond_arr, ARRAY_SIZE(cond_arr));
+    set_cache_request(&cache_req, (struct UiaCondition *)&and_or_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    /* Equivalent to: if (1 && 0) */
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok_method_sequence(cache_req_seq2, NULL);
+    ok(!out_req, "out_req != NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+    ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+
+    SysFreeString(tree_struct);
+
+    /*
+     * ConditionType_Or tests.
+     */
+    cond_arr[0] = (struct UiaCondition *)&UiaTrueCondition;
+    cond_arr[1] = (struct UiaCondition *)&UiaFalseCondition;
+    set_and_or_condition(&and_or_cond, ConditionType_Or, cond_arr, ARRAY_SIZE(cond_arr));
+    set_cache_request(&cache_req, (struct UiaCondition *)&and_or_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    /* Equivalent to: if (1 || 0) */
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq1, NULL);
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    cond_arr[0] = (struct UiaCondition *)&UiaFalseCondition;
+    cond_arr[1] = (struct UiaCondition *)&UiaFalseCondition;
+    set_and_or_condition(&and_or_cond, ConditionType_Or, cond_arr, ARRAY_SIZE(cond_arr));
+    set_cache_request(&cache_req, (struct UiaCondition *)&and_or_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    /* Equivalent to: if (0 || 0) */
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok_method_sequence(cache_req_seq2, NULL);
+    ok(!out_req, "out_req != NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+    ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+
+    SysFreeString(tree_struct);
+
+    /*
+     * ConditionType_Not tests.
+     */
+    set_not_condition(&not_cond, (struct UiaCondition *)&UiaFalseCondition);
+    set_cache_request(&cache_req, (struct UiaCondition *)&not_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    /* Equivalent to: if (!0) */
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq1, NULL);
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+
+    set_not_condition(&not_cond, (struct UiaCondition *)&UiaTrueCondition);
+    set_cache_request(&cache_req, (struct UiaCondition *)&not_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    /* Equivalent to: if (!1) */
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!out_req, "out_req != NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+    ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+    SysFreeString(tree_struct);
+    ok_method_sequence(cache_req_seq2, NULL);
+
+    /*
+     * ConditionType_Property tests.
+     */
+    Provider.ret_invalid_prop_type = FALSE;
+
+    /* Test UIAutomationType_IntArray property conditions. */
+    if (UiaLookupId(AutomationIdentifierType_Property, &OutlineColor_Property_GUID))
+    {
+        V_VT(&v) = VT_I4 | VT_ARRAY;
+        V_ARRAY(&v) = create_i4_safearray();
+        set_property_condition(&prop_cond, UIA_OutlineColorPropertyId, &v, PropertyConditionFlags_None);
+        set_cache_request(&cache_req, (struct UiaCondition *)&prop_cond, TreeScope_Element, NULL, 0, NULL, 0,
+                AutomationElementMode_Full);
+        tree_struct = NULL; out_req = NULL;
+
+        hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(!!out_req, "out_req == NULL\n");
+        ok(!!tree_struct, "tree_struct == NULL\n");
+
+        exp_lbound[0] = exp_lbound[1] = 0;
+        exp_elems[0] = exp_elems[1] = 1;
+        test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+        ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+        ok_method_sequence(cache_req_seq4, NULL);
+
+        SafeArrayDestroy(out_req);
+        SysFreeString(tree_struct);
+        VariantClear(&v);
+
+        /* Same values, except we're short by one element. */
+        V_VT(&v) = VT_I4 | VT_ARRAY;
+        V_ARRAY(&v) = SafeArrayCreateVector(VT_I4, 0, ARRAY_SIZE(uia_i4_arr_prop_val) - 1);
+
+        for (i = 0; i < ARRAY_SIZE(uia_i4_arr_prop_val) - 1; i++)
+            SafeArrayPutElement(V_ARRAY(&prop_cond.Value), &i, (void *)&uia_i4_arr_prop_val[i]);
+
+        set_property_condition(&prop_cond, UIA_OutlineColorPropertyId, &v, PropertyConditionFlags_None);
+        set_cache_request(&cache_req, (struct UiaCondition *)&prop_cond, TreeScope_Element, NULL, 0, NULL, 0,
+                AutomationElementMode_Full);
+        tree_struct = NULL; out_req = NULL;
+
+        hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok_method_sequence(cache_req_seq5, NULL);
+        ok(!out_req, "out_req != NULL\n");
+        ok(!!tree_struct, "tree_struct == NULL\n");
+        ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+
+        SysFreeString(tree_struct);
+        VariantClear(&v);
+    }
+    else
+        win_skip("UIA_OutlineColorPropertyId unavailable, skipping property condition tests for it.\n");
+
+    /* UIA_RuntimeIdPropertyId comparison. */
+    Provider.runtime_id[0] = 0xdeadbeef; Provider.runtime_id[1] = 0xfeedbeef;
+    V_VT(&v) = VT_I4 | VT_ARRAY;
+    V_ARRAY(&v) = SafeArrayCreateVector(VT_I4, 0, ARRAY_SIZE(Provider.runtime_id));
+    for (i = 0; i < ARRAY_SIZE(Provider.runtime_id); i++)
+        SafeArrayPutElement(V_ARRAY(&v), &i, (void *)&Provider.runtime_id[i]);
+
+    set_property_condition(&prop_cond, UIA_RuntimeIdPropertyId, &v, PropertyConditionFlags_None);
+    set_cache_request(&cache_req, (struct UiaCondition *)&prop_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq6, NULL);
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+    VariantClear(&prop_cond.Value);
+
+    /* UIAutomationType_Bool property condition tests. */
+    prop_override.prop_id = UIA_IsControlElementPropertyId;
+    V_VT(&prop_override.val) = VT_BOOL;
+    V_BOOL(&prop_override.val) = VARIANT_FALSE;
+    Provider.prop_override = &prop_override;
+    Provider.prop_override_count = 1;
+
+    V_VT(&v) = VT_BOOL;
+    V_BOOL(&v) = VARIANT_FALSE;
+    set_property_condition(&prop_cond, UIA_IsControlElementPropertyId, &v, PropertyConditionFlags_None);
+    set_cache_request(&cache_req, (struct UiaCondition *)&prop_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!!out_req, "out_req == NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+
+    exp_lbound[0] = exp_lbound[1] = 0;
+    exp_elems[0] = exp_elems[1] = 1;
+    test_cache_req_sa(out_req, exp_lbound, exp_elems, exp_node_desc);
+    ok(!wcscmp(tree_struct, L"P)"), "tree structure %s\n", debugstr_w(tree_struct));
+    ok_method_sequence(cache_req_seq4, NULL);
+
+    SafeArrayDestroy(out_req);
+    SysFreeString(tree_struct);
+    VariantClear(&v);
+
+    /*
+     * Provider now returns VARIANT_TRUE for UIA_IsControlElementPropertyId,
+     * conditional check will fail.
+     */
+    prop_override.prop_id = UIA_IsControlElementPropertyId;
+    V_VT(&prop_override.val) = VT_BOOL;
+    V_BOOL(&prop_override.val) = VARIANT_TRUE;
+    Provider.prop_override = &prop_override;
+    Provider.prop_override_count = 1;
+
+    V_VT(&v) = VT_BOOL;
+    V_BOOL(&v) = VARIANT_FALSE;
+    set_property_condition(&prop_cond, UIA_IsControlElementPropertyId, &v, PropertyConditionFlags_None);
+    set_cache_request(&cache_req, (struct UiaCondition *)&prop_cond, TreeScope_Element, NULL, 0, NULL, 0,
+            AutomationElementMode_Full);
+    tree_struct = NULL; out_req = NULL;
+
+    hr = UiaGetUpdatedCache(node, &cache_req, NormalizeState_View, NULL, &out_req, &tree_struct);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok_method_sequence(cache_req_seq5, NULL);
+    ok(!out_req, "out_req != NULL\n");
+    ok(!!tree_struct, "tree_struct == NULL\n");
+    ok(!wcscmp(tree_struct, L""), "tree structure %s\n", debugstr_w(tree_struct));
+
+    SysFreeString(tree_struct);
+    VariantClear(&v);
+
+    Provider.prop_override = NULL;
+    Provider.prop_override_count = 0;
+
+    ok(UiaNodeRelease(node), "UiaNodeRelease returned FALSE\n");
+    ok(Provider.ref == 1, "Unexpected refcnt %ld\n", Provider.ref);
+
+    CoUninitialize();
 }
 
 /*
@@ -5900,6 +7435,8 @@ START_TEST(uiautomation)
             test_UiaNodeFromHandle(argv[0]);
         else if (!strcmp(argv[2], "UiaNodeFromHandle_client_proc"))
             test_UiaNodeFromHandle_client_proc();
+        else if (!strcmp(argv[2], "UiaRegisterProviderCallback"))
+            test_UiaRegisterProviderCallback();
 
         FreeLibrary(uia_dll);
         return;
@@ -5913,6 +7450,8 @@ START_TEST(uiautomation)
     test_UiaGetRuntimeId();
     test_UiaHUiaNodeFromVariant();
     launch_test_process(argv[0], "UiaNodeFromHandle");
+    launch_test_process(argv[0], "UiaRegisterProviderCallback");
+    test_UiaGetUpdatedCache();
     if (uia_dll)
     {
         pUiaProviderFromIAccessible = (void *)GetProcAddress(uia_dll, "UiaProviderFromIAccessible");

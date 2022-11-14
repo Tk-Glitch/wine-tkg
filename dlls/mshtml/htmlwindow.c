@@ -128,7 +128,7 @@ static void detach_inner_window(HTMLInnerWindow *window)
     }
 
     if(outer_window && is_main_content_window(outer_window))
-        window->doc->basedoc.cp_container.forward_container = NULL;
+        window->doc->cp_container.forward_container = NULL;
 
     if(doc)
         detach_document_node(doc);
@@ -259,7 +259,7 @@ static void release_inner_window(HTMLInnerWindow *This)
 
     if(This->doc) {
         This->doc->window = NULL;
-        htmldoc_release(&This->doc->basedoc);
+        IHTMLDOMNode_Release(&This->doc->node.IHTMLDOMNode_iface);
     }
 
     release_event_target(&This->event_target);
@@ -1256,7 +1256,7 @@ static HRESULT WINAPI HTMLWindow2_get_document(IHTMLWindow2 *iface, IHTMLDocumen
 
     if(This->inner_window->doc) {
         /* FIXME: We should return a wrapper object here */
-        *p = &This->inner_window->doc->basedoc.IHTMLDocument2_iface;
+        *p = &This->inner_window->doc->IHTMLDocument2_iface;
         IHTMLDocument2_AddRef(*p);
     }else {
         *p = NULL;
@@ -3607,7 +3607,7 @@ static HRESULT WINAPI WindowDispEx_GetDispID(IDispatchEx *iface, BSTR bstrName, 
         global_prop_t *prop;
         IHTMLElement *elem;
 
-        hres = IHTMLDocument3_getElementById(&window->base.inner_window->doc->basedoc.IHTMLDocument3_iface,
+        hres = IHTMLDocument3_getElementById(&window->base.inner_window->doc->IHTMLDocument3_iface,
                                              bstrName, &elem);
         if(SUCCEEDED(hres) && elem) {
             IHTMLElement_Release(elem);
@@ -3742,7 +3742,7 @@ static HRESULT WINAPI HTMLWindowSP_QueryService(IServiceProvider *iface, REFGUID
     if(!This->outer_window || !This->outer_window->browser)
         return E_NOINTERFACE;
 
-    return IServiceProvider_QueryService(&This->outer_window->browser->doc->basedoc.IServiceProvider_iface,
+    return IServiceProvider_QueryService(&This->outer_window->browser->doc->IServiceProvider_iface,
             guidService, riid, ppv);
 }
 
@@ -3813,7 +3813,7 @@ static HRESULT HTMLWindow_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD 
         case DISPATCH_PROPERTYGET: {
             IHTMLElement *elem;
 
-            hres = IHTMLDocument3_getElementById(&This->base.inner_window->doc->basedoc.IHTMLDocument3_iface,
+            hres = IHTMLDocument3_getElementById(&This->base.inner_window->doc->IHTMLDocument3_iface,
                     prop->name, &elem);
             if(FAILED(hres))
                 return hres;
@@ -3828,7 +3828,7 @@ static HRESULT HTMLWindow_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD 
         case DISPATCH_PROPERTYPUT: {
             DISPID dispex_id;
 
-            hres = dispex_get_dynid(&This->event_target.dispex, prop->name, &dispex_id);
+            hres = dispex_get_dynid(&This->event_target.dispex, prop->name, TRUE, &dispex_id);
             if(FAILED(hres))
                 return hres;
 
@@ -4186,10 +4186,10 @@ HRESULT update_window_doc(HTMLInnerWindow *window)
 
     if(is_main_content_window(outer_window) || !outer_window->browser->content_window) {
         HTMLDocumentObj *doc_obj = outer_window->browser->doc;
-        if(doc_obj->basedoc.doc_node)
-            htmldoc_release(&doc_obj->basedoc.doc_node->basedoc);
-        doc_obj->basedoc.doc_node = window->doc;
-        htmldoc_addref(&window->doc->basedoc);
+        if(doc_obj->doc_node)
+            IHTMLDOMNode_Release(&doc_obj->doc_node->node.IHTMLDOMNode_iface);
+        doc_obj->doc_node = window->doc;
+        IHTMLDOMNode_AddRef(&window->doc->node.IHTMLDOMNode_iface);
     }
 
     return hres;

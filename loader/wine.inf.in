@@ -67,7 +67,6 @@ AddReg=\
     MCI,\
     Misc,\
     OLE,\
-    Packages,\
     Printing,\
     Services, \
     SessionMgr,\
@@ -92,7 +91,7 @@ AddReg=\
     MCI,\
     Misc,\
     OLE,\
-    Packages.ntamd64,\
+    Packages,\
     Printing,\
     Services, \
     SessionMgr,\
@@ -119,7 +118,7 @@ AddReg=\
     MCI,\
     Misc,\
     OLE,\
-    Packages.ntarm64,\
+    Packages.ntamd64,\
     Printing,\
     Services, \
     SessionMgr,\
@@ -145,6 +144,7 @@ AddReg=\
     MCI,\
     Misc,\
     OLE,\
+    Packages.ntarm64,\
     Printing,\
     Services, \
     SessionMgr,\

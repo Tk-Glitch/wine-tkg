@@ -50,7 +50,7 @@ static HRESULT set_frame_doc(HTMLFrameBase *frame, nsIDOMDocument *nsdoc)
     window = mozwindow_to_window(mozwindow);
     if(!window && frame->element.node.doc->browser)
         hres = create_outer_window(frame->element.node.doc->browser, mozwindow,
-                frame->element.node.doc->basedoc.window, &window);
+                frame->element.node.doc->outer_window, &window);
     mozIDOMWindowProxy_Release(mozwindow);
     if(FAILED(hres))
         return hres;
@@ -127,7 +127,7 @@ static HRESULT WINAPI HTMLFrameBase_put_src(IHTMLFrameBase *iface, BSTR v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->content_window || !This->element.node.doc || !This->element.node.doc->basedoc.window) {
+    if(!This->content_window || !This->element.node.doc || !This->element.node.doc->outer_window) {
         nsAString nsstr;
         nsresult nsres;
 
@@ -145,7 +145,7 @@ static HRESULT WINAPI HTMLFrameBase_put_src(IHTMLFrameBase *iface, BSTR v)
         return S_OK;
     }
 
-    return navigate_url(This->content_window, v, This->element.node.doc->basedoc.window->uri, BINDING_NAVIGATED);
+    return navigate_url(This->content_window, v, This->element.node.doc->outer_window->uri, BINDING_NAVIGATED);
 }
 
 static HRESULT WINAPI HTMLFrameBase_get_src(IHTMLFrameBase *iface, BSTR *p)
@@ -655,7 +655,7 @@ static HRESULT WINAPI HTMLFrameBase2_get_readyState(IHTMLFrameBase2 *iface, BSTR
         return E_FAIL;
     }
 
-    return IHTMLDocument2_get_readyState(&This->content_window->base.inner_window->doc->basedoc.IHTMLDocument2_iface, p);
+    return IHTMLDocument2_get_readyState(&This->content_window->base.inner_window->doc->IHTMLDocument2_iface, p);
 }
 
 static HRESULT WINAPI HTMLFrameBase2_put_allowTransparency(IHTMLFrameBase2 *iface, VARIANT_BOOL v)
@@ -919,7 +919,7 @@ static HRESULT HTMLFrameElement_get_document(HTMLDOMNode *iface, IDispatch **p)
         return S_OK;
     }
 
-    *p = (IDispatch*)&This->framebase.content_window->base.inner_window->doc->basedoc.IHTMLDocument2_iface;
+    *p = (IDispatch*)&This->framebase.content_window->base.inner_window->doc->IHTMLDocument2_iface;
     IDispatch_AddRef(*p);
     return S_OK;
 }
@@ -1512,7 +1512,7 @@ static HRESULT HTMLIFrame_get_document(HTMLDOMNode *iface, IDispatch **p)
         return S_OK;
     }
 
-    *p = (IDispatch*)&This->framebase.content_window->base.inner_window->doc->basedoc.IHTMLDocument2_iface;
+    *p = (IDispatch*)&This->framebase.content_window->base.inner_window->doc->IHTMLDocument2_iface;
     IDispatch_AddRef(*p);
     return S_OK;
 }

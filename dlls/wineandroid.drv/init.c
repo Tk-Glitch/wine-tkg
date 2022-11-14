@@ -260,12 +260,11 @@ static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 
 
 /***********************************************************************
- *           ANDROID_ChangeDisplaySettingsEx
+ *           ANDROID_ChangeDisplaySettings
  */
-LONG ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
-                                      HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG ANDROID_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
-    FIXME( "(%s,%p,%p,0x%08x,%p)\n", debugstr_w( devname ), devmode, hwnd, flags, lpvoid );
+    FIXME( "(%p,%p,0x%08x,%p)\n", displays, hwnd, flags, lpvoid );
     return DISP_CHANGE_SUCCESSFUL;
 }
 
@@ -273,59 +272,57 @@ LONG ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
 /***********************************************************************
  *           ANDROID_UpdateDisplayDevices
  */
-void ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
-                                   BOOL force, void *param )
+BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manager, BOOL force, void *param )
 {
     if (force || force_display_devices_refresh)
     {
+        static const struct gdi_gpu gpu;
+        static const struct gdi_adapter adapter =
+        {
+            .state_flags = DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE | DISPLAY_DEVICE_VGA_COMPATIBLE,
+        };
         struct gdi_monitor gdi_monitor =
         {
             .rc_monitor = virtual_screen_rect,
             .rc_work = monitor_rc_work,
             .state_flags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED,
         };
+        const DEVMODEW mode =
+        {
+            .dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
+            .dmBitsPerPel = screen_bpp, .dmPelsWidth = screen_width, .dmPelsHeight = screen_height, .dmDisplayFrequency = 60,
+        };
+        device_manager->add_gpu( &gpu, param );
+        device_manager->add_adapter( &adapter, param );
         device_manager->add_monitor( &gdi_monitor, param );
+        device_manager->add_mode( &mode, param );
         force_display_devices_refresh = FALSE;
     }
+
+    return TRUE;
 }
 
 
 /***********************************************************************
- *           ANDROID_EnumDisplaySettingsEx
+ *           ANDROID_GetCurrentDisplaySettings
  */
-BOOL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags )
+BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode )
 {
-    static const WCHAR dev_name[CCHDEVICENAME] =
-        { 'W','i','n','e',' ','A','n','d','r','o','i','d',' ','d','r','i','v','e','r',0 };
-
-    devmode->dmSize = offsetof( DEVMODEW, dmICMMethod );
-    devmode->dmSpecVersion = DM_SPECVERSION;
-    devmode->dmDriverVersion = DM_SPECVERSION;
-    memcpy( devmode->dmDeviceName, dev_name, sizeof(dev_name) );
-    devmode->dmDriverExtra = 0;
     devmode->u2.dmDisplayFlags = 0;
-    devmode->dmDisplayFrequency = 0;
     devmode->u1.s2.dmPosition.x = 0;
     devmode->u1.s2.dmPosition.y = 0;
     devmode->u1.s2.dmDisplayOrientation = 0;
     devmode->u1.s2.dmDisplayFixedOutput = 0;
-
-    if (n == ENUM_CURRENT_SETTINGS || n == ENUM_REGISTRY_SETTINGS) n = 0;
-    if (n == 0)
-    {
-        devmode->dmPelsWidth = screen_width;
-        devmode->dmPelsHeight = screen_height;
-        devmode->dmBitsPerPel = screen_bpp;
-        devmode->dmDisplayFrequency = 60;
-        devmode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
-        TRACE( "mode %d -- %dx%d %d bpp @%d Hz\n", n,
-               devmode->dmPelsWidth, devmode->dmPelsHeight,
-               devmode->dmBitsPerPel, devmode->dmDisplayFrequency );
-        return TRUE;
-    }
-    TRACE( "mode %d -- not present\n", n );
-    SetLastError( ERROR_NO_MORE_FILES );
-    return FALSE;
+    devmode->dmPelsWidth = screen_width;
+    devmode->dmPelsHeight = screen_height;
+    devmode->dmBitsPerPel = screen_bpp;
+    devmode->dmDisplayFrequency = 60;
+    devmode->dmFields = DM_POSITION | DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT |
+                        DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
+    TRACE( "current mode -- %dx%d %d bpp @%d Hz\n",
+           devmode->dmPelsWidth, devmode->dmPelsHeight,
+           devmode->dmBitsPerPel, devmode->dmDisplayFrequency );
+    return TRUE;
 }
 
 
@@ -349,8 +346,8 @@ static const struct user_driver_funcs android_drv_funcs =
     .pMapVirtualKeyEx = ANDROID_MapVirtualKeyEx,
     .pVkKeyScanEx = ANDROID_VkKeyScanEx,
     .pSetCursor = ANDROID_SetCursor,
-    .pChangeDisplaySettingsEx = ANDROID_ChangeDisplaySettingsEx,
-    .pEnumDisplaySettingsEx = ANDROID_EnumDisplaySettingsEx,
+    .pChangeDisplaySettings = ANDROID_ChangeDisplaySettings,
+    .pGetCurrentDisplaySettings = ANDROID_GetCurrentDisplaySettings,
     .pUpdateDisplayDevices = ANDROID_UpdateDisplayDevices,
     .pCreateWindow = ANDROID_CreateWindow,
     .pDesktopWindowProc = ANDROID_DesktopWindowProc,
@@ -562,10 +559,6 @@ JavaVM **p_java_vm = NULL;
 jobject *p_java_object = NULL;
 unsigned short *p_java_gdt_sel = NULL;
 
-static NTSTATUS CDECL unix_call( enum android_funcs code, void *params );
-NTSTATUS (WINAPI *pNtWaitForMultipleObjects)( ULONG,const HANDLE*,BOOLEAN,
-                                              BOOLEAN,const LARGE_INTEGER* );
-
 static HRESULT android_init( void *arg )
 {
     struct init_params *params = arg;
@@ -611,8 +604,6 @@ static HRESULT android_init( void *arg )
 #endif
     }
     __wine_set_user_driver( &android_drv_funcs, WINE_GDI_DRIVER_VERSION );
-    pNtWaitForMultipleObjects = params->pNtWaitForMultipleObjects;
-    params->unix_call = unix_call;
     return STATUS_SUCCESS;
 }
 
@@ -628,10 +619,3 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
 
 
 C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
-
-
-/* FIXME: Use __wine_unix_call instead */
-static NTSTATUS CDECL unix_call( enum android_funcs code, void *params )
-{
-    return __wine_unix_call_funcs[code]( params );
-}

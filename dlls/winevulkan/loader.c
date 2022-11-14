@@ -17,6 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdlib.h>
 #include "vulkan_loader.h"
 #include "winreg.h"
 #include "ntuser.h"
@@ -34,7 +35,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
 DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_GPU_VULKAN_UUID, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5c, 2);
 
-const struct unix_funcs *unix_funcs;
+NTSTATUS (WINAPI *p_vk_direct_unix_call)(unixlib_handle_t handle, unsigned int code, void *args);
 unixlib_handle_t unix_handle;
 
 static HINSTANCE hinstance;
@@ -88,6 +89,25 @@ static void *wine_vk_get_global_proc_addr(const char *name)
     return NULL;
 }
 
+static BOOL is_available_instance_function(VkInstance instance, const char *name)
+{
+    struct is_available_instance_function_params params = { .instance = instance, .name = name };
+    return vk_unix_call(unix_is_available_instance_function, &params);
+}
+
+static BOOL is_available_device_function(VkDevice device, const char *name)
+{
+    struct is_available_device_function_params params = { .device = device, .name = name };
+    return vk_unix_call(unix_is_available_device_function, &params);
+}
+
+static void *alloc_vk_object(size_t size)
+{
+    struct wine_vk_base *object = calloc(1, size);
+    object->loader_magic = VULKAN_ICD_MAGIC_VALUE;
+    return object;
+}
+
 PFN_vkVoidFunction WINAPI vkGetInstanceProcAddr(VkInstance instance, const char *name)
 {
     void *func;
@@ -111,7 +131,7 @@ PFN_vkVoidFunction WINAPI vkGetInstanceProcAddr(VkInstance instance, const char 
         return NULL;
     }
 
-    if (!unix_funcs->p_is_available_instance_function(instance, name))
+    if (!is_available_instance_function(instance, name))
         return NULL;
 
     func = wine_vk_get_instance_proc_addr(name);
@@ -142,7 +162,7 @@ PFN_vkVoidFunction WINAPI vkGetDeviceProcAddr(VkDevice device, const char *name)
      * vkCommandBuffer or vkQueue.
      * Loader takes care of filtering of extensions which are enabled or not.
      */
-    if (unix_funcs->p_is_available_device_function(device, name))
+    if (is_available_device_function(device, name))
     {
         func = wine_vk_get_device_proc_addr(name);
         if (func)
@@ -160,8 +180,8 @@ PFN_vkVoidFunction WINAPI vkGetDeviceProcAddr(VkDevice device, const char *name)
      * https://github.com/KhronosGroup/Vulkan-LoaderAndValidationLayers/issues/2323
      * https://github.com/KhronosGroup/Vulkan-Docs/issues/655
      */
-    if (((struct wine_vk_device_base *)device)->quirks & WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR
-            && ((func = wine_vk_get_instance_proc_addr(name))
+    if ((device->quirks & WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR)
+        && ((func = wine_vk_get_instance_proc_addr(name))
              || (func = wine_vk_get_phys_dev_proc_addr(name))))
     {
         WARN("Returning instance function %s.\n", debugstr_a(name));
@@ -176,7 +196,7 @@ void * WINAPI vk_icdGetPhysicalDeviceProcAddr(VkInstance instance, const char *n
 {
     TRACE("%p, %s\n", instance, debugstr_a(name));
 
-    if (!unix_funcs->p_is_available_instance_function(instance, name))
+    if (!is_available_instance_function(instance, name))
         return NULL;
 
     return wine_vk_get_phys_dev_proc_addr(name);
@@ -215,23 +235,12 @@ VkResult WINAPI vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t *supported_ver
 
 static BOOL WINAPI wine_vk_init(INIT_ONCE *once, void *param, void **context)
 {
-    const void *driver;
-
-    driver = __wine_get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
-    if (!driver)
-    {
-        ERR("Failed to load Wine graphics driver supporting Vulkan.\n");
-        return FALSE;
-    }
-
     if (NtQueryVirtualMemory(GetCurrentProcess(), hinstance, MemoryWineUnixFuncs,
                              &unix_handle, sizeof(unix_handle), NULL))
         return FALSE;
 
-    if (vk_unix_call(unix_init, &driver) || !driver)
-        return FALSE;
-
-    unix_funcs = driver;
+    if (vk_unix_call(unix_init, &p_vk_direct_unix_call)) return FALSE;
+    if (!p_vk_direct_unix_call) p_vk_direct_unix_call = __wine_unix_call;
     return TRUE;
 }
 
@@ -243,19 +252,48 @@ static BOOL  wine_vk_init_once(void)
 }
 
 VkResult WINAPI vkCreateInstance(const VkInstanceCreateInfo *create_info,
-        const VkAllocationCallbacks *allocator, VkInstance *instance)
+        const VkAllocationCallbacks *allocator, VkInstance *ret)
 {
     struct vkCreateInstance_params params;
+    struct VkInstance_T *instance;
+    uint32_t phys_dev_count = 8, i;
 
-    TRACE("create_info %p, allocator %p, instance %p\n", create_info, allocator, instance);
+    TRACE("create_info %p, allocator %p, instance %p\n", create_info, allocator, ret);
 
-    if(!wine_vk_init_once())
+    if (!wine_vk_init_once())
         return VK_ERROR_INITIALIZATION_FAILED;
 
-    params.pCreateInfo = create_info;
-    params.pAllocator = allocator;
-    params.pInstance = instance;
-    return unix_funcs->p_vk_call(unix_vkCreateInstance, &params);
+    for (;;)
+    {
+        if (!(instance = alloc_vk_object(FIELD_OFFSET(struct VkInstance_T, phys_devs[phys_dev_count]))))
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        instance->phys_dev_count = phys_dev_count;
+        for (i = 0; i < phys_dev_count; i++)
+            instance->phys_devs[i].base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
+
+        params.pCreateInfo = create_info;
+        params.pAllocator = allocator;
+        params.pInstance = ret;
+        params.client_ptr = instance;
+        vk_unix_call(unix_vkCreateInstance, &params);
+        if (instance->phys_dev_count <= phys_dev_count)
+            break;
+        phys_dev_count = instance->phys_dev_count;
+        free(instance);
+    }
+
+    if (!instance->base.unix_handle)
+        free(instance);
+    return params.result;
+}
+
+void WINAPI vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *pAllocator)
+{
+    struct vkDestroyInstance_params params;
+    params.instance = instance;
+    params.pAllocator = pAllocator;
+    vk_unix_call(unix_vkDestroyInstance, &params);
+    free(instance);
 }
 
 VkResult WINAPI vkEnumerateInstanceExtensionProperties(const char *layer_name,
@@ -280,7 +318,8 @@ VkResult WINAPI vkEnumerateInstanceExtensionProperties(const char *layer_name,
     params.pLayerName = layer_name;
     params.pPropertyCount = count;
     params.pProperties = properties;
-    return unix_funcs->p_vk_call(unix_vkEnumerateInstanceExtensionProperties, &params);
+    vk_unix_call(unix_vkEnumerateInstanceExtensionProperties, &params);
+    return params.result;
 }
 
 VkResult WINAPI vkEnumerateInstanceVersion(uint32_t *version)
@@ -296,7 +335,8 @@ VkResult WINAPI vkEnumerateInstanceVersion(uint32_t *version)
     }
 
     params.pApiVersion = version;
-    return unix_funcs->p_vk_call(unix_vkEnumerateInstanceVersion, &params);
+    vk_unix_call(unix_vkEnumerateInstanceVersion, &params);
+    return params.result;
 }
 
 static HANDLE get_display_device_init_mutex(void)
@@ -390,40 +430,6 @@ static void fill_luid_property(VkPhysicalDeviceProperties2 *properties2)
             device_node_mask);
 }
 
-static void update_driver_version( VkPhysicalDeviceProperties *properties )
-{
-    if (properties->vendorID == 0x1002 && properties->deviceID == 0x163f)
-    {
-        /* AMD VANGOGH */
-        properties->driverVersion = VK_MAKE_VERSION(21, 20, 1);
-    }
-}
-
-void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice physical_device,
-        VkPhysicalDeviceProperties *properties)
-{
-    struct vkGetPhysicalDeviceProperties_params params;
-
-    TRACE("%p, %p\n", physical_device, properties);
-
-    params.physicalDevice = physical_device;
-    params.pProperties = properties;
-    vk_unix_call(unix_vkGetPhysicalDeviceProperties, &params);
-
-    {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            if (properties->vendorID == 0x10de /* NVIDIA */)
-            {
-                properties->vendorID = 0x1002; /* AMD */
-                properties->deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
-    update_driver_version(properties);
-}
-
 void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
         VkPhysicalDeviceProperties2 *properties2)
 {
@@ -435,19 +441,6 @@ void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
     params.pProperties = properties2;
     vk_unix_call(unix_vkGetPhysicalDeviceProperties2, &params);
     fill_luid_property(properties2);
-
-    {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
-            {
-                properties2->properties.vendorID = 0x1002; /* AMD */
-                properties2->properties.deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
-    update_driver_version(&properties2->properties);
 }
 
 void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
@@ -461,19 +454,169 @@ void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
     params.pProperties = properties2;
     vk_unix_call(unix_vkGetPhysicalDeviceProperties2KHR, &params);
     fill_luid_property(properties2);
+}
 
+VkResult WINAPI vkCreateDevice(VkPhysicalDevice phys_dev, const VkDeviceCreateInfo *create_info,
+                               const VkAllocationCallbacks *allocator, VkDevice *ret)
+{
+    struct vkCreateDevice_params params;
+    uint32_t queue_count = 0, i;
+    VkDevice device;
+
+    for (i = 0; i < create_info->queueCreateInfoCount; i++)
+        queue_count += create_info->pQueueCreateInfos[i].queueCount;
+    if (!(device = alloc_vk_object(FIELD_OFFSET(struct VkDevice_T, queues[queue_count]))))
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (i = 0; i < queue_count; i++)
+        device->queues[i].base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
+
+    params.physicalDevice = phys_dev;
+    params.pCreateInfo = create_info;
+    params.pAllocator = allocator;
+    params.pDevice = ret;
+    params.client_ptr = device;
+    vk_unix_call(unix_vkCreateDevice, &params);
+    if (!device->base.unix_handle)
+        free(device);
+    return params.result;
+}
+
+void WINAPI vkDestroyDevice(VkDevice device, const VkAllocationCallbacks *allocator)
+{
+    struct vkDestroyDevice_params params;
+
+    params.device = device;
+    params.pAllocator = allocator;
+    vk_unix_call(unix_vkDestroyDevice, &params);
+    free(device);
+}
+
+VkResult WINAPI vkCreateCommandPool(VkDevice device, const VkCommandPoolCreateInfo *create_info,
+                                    const VkAllocationCallbacks *allocator, VkCommandPool *ret)
+{
+    struct vkCreateCommandPool_params params;
+    struct vk_command_pool *cmd_pool;
+
+    if (!(cmd_pool = malloc(sizeof(*cmd_pool))))
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    cmd_pool->unix_handle = 0;
+    list_init(&cmd_pool->command_buffers);
+
+    params.device = device;
+    params.pCreateInfo = create_info;
+    params.pAllocator = allocator;
+    params.pCommandPool = ret;
+    params.client_ptr = cmd_pool;
+    vk_unix_call(unix_vkCreateCommandPool, &params);
+    if (!cmd_pool->unix_handle)
+        free(cmd_pool);
+    return params.result;
+}
+
+void WINAPI vkDestroyCommandPool(VkDevice device, VkCommandPool handle, const VkAllocationCallbacks *allocator)
+{
+    struct vk_command_pool *cmd_pool = command_pool_from_handle(handle);
+    struct vkDestroyCommandPool_params params;
+    VkCommandBuffer buffer, cursor;
+
+    if (!cmd_pool)
+        return;
+
+    /* The Vulkan spec says:
+     *
+     * "When a pool is destroyed, all command buffers allocated from the pool are freed."
+     */
+    LIST_FOR_EACH_ENTRY_SAFE(buffer, cursor, &cmd_pool->command_buffers, struct VkCommandBuffer_T, pool_link)
     {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
+        vkFreeCommandBuffers(device, handle, 1, &buffer);
+    }
+
+    params.device = device;
+    params.commandPool = handle;
+    params.pAllocator = allocator;
+    vk_unix_call(unix_vkDestroyCommandPool, &params);
+    free(cmd_pool);
+}
+
+VkResult WINAPI vkAllocateCommandBuffers(VkDevice device, const VkCommandBufferAllocateInfo *allocate_info,
+                                         VkCommandBuffer *buffers)
+{
+    struct vk_command_pool *pool = command_pool_from_handle(allocate_info->commandPool);
+    struct vkAllocateCommandBuffers_params params;
+    uint32_t i;
+
+    for (i = 0; i < allocate_info->commandBufferCount; i++)
+        buffers[i] = alloc_vk_object(sizeof(*buffers[i]));
+
+    params.device = device;
+    params.pAllocateInfo = allocate_info;
+    params.pCommandBuffers = buffers;
+    vk_unix_call(unix_vkAllocateCommandBuffers, &params);
+    if (params.result == VK_SUCCESS)
+    {
+        for (i = 0; i < allocate_info->commandBufferCount; i++)
+            list_add_tail(&pool->command_buffers, &buffers[i]->pool_link);
+    }
+    else
+    {
+        for (i = 0; i < allocate_info->commandBufferCount; i++)
         {
-            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
-            {
-                properties2->properties.vendorID = 0x1002; /* AMD */
-                properties2->properties.deviceID = 0x67df; /* RX 480 */
-            }
+            free(buffers[i]);
+            buffers[i] = NULL;
         }
     }
-    update_driver_version(&properties2->properties);
+    return params.result;
+}
+
+void WINAPI vkFreeCommandBuffers(VkDevice device, VkCommandPool cmd_pool, uint32_t count,
+                                 const VkCommandBuffer *buffers)
+{
+    struct vkFreeCommandBuffers_params params;
+    uint32_t i;
+
+    params.device = device;
+    params.commandPool = cmd_pool;
+    params.commandBufferCount = count;
+    params.pCommandBuffers = buffers;
+    vk_unix_call(unix_vkFreeCommandBuffers, &params);
+    for (i = 0; i < count; i++)
+    {
+        list_remove(&buffers[i]->pool_link);
+        free(buffers[i]);
+    }
+}
+
+VkResult WINAPI vkGetCalibratedTimestampsEXT(VkDevice device, uint32_t timestampCount, const VkCalibratedTimestampInfoEXT *pTimestampInfos, uint64_t *pTimestamps, uint64_t *pMaxDeviation)
+{
+    struct vkGetCalibratedTimestampsEXT_params params;
+    static LARGE_INTEGER freq;
+    VkResult res;
+    uint32_t i;
+
+    if (!freq.QuadPart)
+    {
+        LARGE_INTEGER temp;
+
+        QueryPerformanceFrequency(&temp);
+        InterlockedCompareExchange64(&freq.QuadPart, temp.QuadPart, 0);
+    }
+
+    params.device = device;
+    params.timestampCount = timestampCount;
+    params.pTimestampInfos = pTimestampInfos;
+    params.pTimestamps = pTimestamps;
+    params.pMaxDeviation = pMaxDeviation;
+    res = vk_unix_call(unix_vkGetCalibratedTimestampsEXT, &params);
+    if (res != VK_SUCCESS)
+        return res;
+
+    for (i = 0; i < timestampCount; i++)
+    {
+        if (pTimestampInfos[i].timeDomain != VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT) continue;
+        pTimestamps[i] *= freq.QuadPart / 10000000;
+    }
+
+    return VK_SUCCESS;
 }
 
 static BOOL WINAPI call_vulkan_debug_report_callback( struct wine_vk_debug_report_params *params, ULONG size )

@@ -159,6 +159,8 @@ extern void free_brush_pattern( struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 /* clipping.c */
 extern BOOL clip_device_rect( DC *dc, RECT *dst, const RECT *src ) DECLSPEC_HIDDEN;
 extern BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src ) DECLSPEC_HIDDEN;
+extern void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
+                                const RECT *device_rect, struct window_surface *surface );
 extern void update_dc_clipping( DC * dc ) DECLSPEC_HIDDEN;
 
 /* Return the total DC region (if any) */
@@ -179,6 +181,7 @@ extern struct dce *get_dc_dce( HDC hdc ) DECLSPEC_HIDDEN;
 extern void set_dc_dce( HDC hdc, struct dce *dce ) DECLSPEC_HIDDEN;
 extern WORD set_dce_flags( HDC hdc, WORD flags ) DECLSPEC_HIDDEN;
 extern DWORD set_stretch_blt_mode( HDC hdc, DWORD mode ) DECLSPEC_HIDDEN;
+extern BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point ) DECLSPEC_HIDDEN;
 extern void DC_InitDC( DC * dc ) DECLSPEC_HIDDEN;
 extern void DC_UpdateXforms( DC * dc ) DECLSPEC_HIDDEN;
 
@@ -337,7 +340,6 @@ extern int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
                          DWORD ntmflags, DWORD version, DWORD flags,
                          const struct bitmap_font_size *size ) DECLSPEC_HIDDEN;
 extern UINT font_init(void) DECLSPEC_HIDDEN;
-extern UINT get_acp(void) DECLSPEC_HIDDEN;
 extern CPTABLEINFO *get_cptable( WORD cp ) DECLSPEC_HIDDEN;
 extern const struct font_backend_funcs *init_freetype_lib(void) DECLSPEC_HIDDEN;
 
@@ -380,7 +382,6 @@ extern void GDI_ReleaseObj( HGDIOBJ ) DECLSPEC_HIDDEN;
 extern UINT GDI_get_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
-extern HGDIOBJ get_stock_object( INT obj ) DECLSPEC_HIDDEN;
 extern DWORD get_gdi_object_type( HGDIOBJ obj ) DECLSPEC_HIDDEN;
 extern void make_gdi_object_system( HGDIOBJ handle, BOOL set ) DECLSPEC_HIDDEN;
 
@@ -390,7 +391,6 @@ extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL set_map_mode( DC *dc, int mode ) DECLSPEC_HIDDEN;
 extern void combine_transform( XFORM *result, const XFORM *xform1,
                                const XFORM *xform2 ) DECLSPEC_HIDDEN;
-extern int muldiv( int a, int b, int c ) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern BOOL is_display_device( LPCWSTR name ) DECLSPEC_HIDDEN;
@@ -531,38 +531,13 @@ static inline DC *get_physdev_dc( PHYSDEV dev )
     return get_nulldrv_dc( dev );
 }
 
-BOOL WINAPI FontIsLinked(HDC);
-
-BOOL WINAPI SetVirtualResolution(HDC hdc, DWORD horz_res, DWORD vert_res, DWORD horz_size, DWORD vert_size);
-
-static inline BOOL is_rect_empty( const RECT *rect )
-{
-    return (rect->left >= rect->right || rect->top >= rect->bottom);
-}
-
 static inline BOOL intersect_rect( RECT *dst, const RECT *src1, const RECT *src2 )
 {
     dst->left   = max( src1->left, src2->left );
     dst->top    = max( src1->top, src2->top );
     dst->right  = min( src1->right, src2->right );
     dst->bottom = min( src1->bottom, src2->bottom );
-    return !is_rect_empty( dst );
-}
-
-static inline void offset_rect( RECT *rect, int offset_x, int offset_y )
-{
-    rect->left   += offset_x;
-    rect->top    += offset_y;
-    rect->right  += offset_x;
-    rect->bottom += offset_y;
-}
-
-static inline void set_rect( RECT *rect, int left, int top, int right, int bottom )
-{
-    rect->left = left;
-    rect->top = top;
-    rect->right = right;
-    rect->bottom = bottom;
+    return !IsRectEmpty( dst );
 }
 
 static inline void order_rect( RECT *rect )
@@ -609,9 +584,9 @@ static inline void reset_bounds( RECT *bounds )
 
 static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
 {
-    if (is_rect_empty( src1 ))
+    if (IsRectEmpty( src1 ))
     {
-        if (is_rect_empty( src2 ))
+        if (IsRectEmpty( src2 ))
         {
             reset_bounds( dest );
             return;
@@ -620,7 +595,7 @@ static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
     }
     else
     {
-        if (is_rect_empty( src2 )) *dest = *src1;
+        if (IsRectEmpty( src2 )) *dest = *src1;
         else
         {
             dest->left   = min( src1->left, src2->left );
@@ -633,7 +608,7 @@ static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
 
 static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
 {
-    if (is_rect_empty( rect )) return;
+    if (IsRectEmpty( rect )) return;
     bounds->left   = min( bounds->left, rect->left );
     bounds->top    = min( bounds->top, rect->top );
     bounds->right  = max( bounds->right, rect->right );

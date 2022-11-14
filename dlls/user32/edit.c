@@ -27,18 +27,10 @@
  *
  */
 
-#include <stdarg.h>
-#include <string.h>
 #include <stdlib.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "winnt.h"
-#include "win.h"
-#include "imm.h"
-#include "usp10.h"
-#include "controls.h"
 #include "user_private.h"
+#include "controls.h"
+#include "usp10.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(edit);
@@ -1421,7 +1413,7 @@ static void EDIT_UpdateTextRegion(EDITSTATE *es, HRGN hrgn, BOOL bErase)
         es->flags &= ~EF_UPDATE;
         EDIT_NOTIFY_PARENT(es, EN_UPDATE);
     }
-    InvalidateRgn(es->hwndSelf, hrgn, bErase);
+    NtUserInvalidateRgn(es->hwndSelf, hrgn, bErase);
 }
 
 
@@ -1436,7 +1428,7 @@ static void EDIT_UpdateText(EDITSTATE *es, const RECT *rc, BOOL bErase)
         es->flags &= ~EF_UPDATE;
         EDIT_NOTIFY_PARENT(es, EN_UPDATE);
     }
-    InvalidateRect(es->hwndSelf, rc, bErase);
+    NtUserInvalidateRect(es->hwndSelf, rc, bErase);
 }
 
 /*********************************************************************
@@ -1639,7 +1631,7 @@ static void EDIT_UpdateScrollInfo(EDITSTATE *es)
 	si.nPos		= es->y_offset;
 	TRACE("SB_VERT, nMin=%d, nMax=%d, nPage=%d, nPos=%d\n",
 		si.nMin, si.nMax, si.nPage, si.nPos);
-	SetScrollInfo(es->hwndSelf, SB_VERT, &si, TRUE);
+	NtUserSetScrollInfo(es->hwndSelf, SB_VERT, &si, TRUE);
     }
 
     if ((es->style & WS_HSCROLL) && !(es->flags & EF_HSCROLL_TRACK))
@@ -1653,7 +1645,7 @@ static void EDIT_UpdateScrollInfo(EDITSTATE *es)
 	si.nPos		= es->x_offset;
 	TRACE("SB_HORZ, nMin=%d, nMax=%d, nPage=%d, nPos=%d\n",
 		si.nMin, si.nMax, si.nPage, si.nPos);
-	SetScrollInfo(es->hwndSelf, SB_HORZ, &si, TRUE);
+	NtUserSetScrollInfo(es->hwndSelf, SB_HORZ, &si, TRUE);
     }
 }
 
@@ -1708,8 +1700,8 @@ static BOOL EDIT_EM_LineScroll_internal(EDITSTATE *es, INT dx, INT dy)
 
 		GetClientRect(es->hwndSelf, &rc1);
 		IntersectRect(&rc, &rc1, &es->format_rect);
-		ScrollWindowEx(es->hwndSelf, -dx, dy,
-				NULL, &rc, NULL, NULL, SW_INVALIDATE);
+                NtUserScrollWindowEx(es->hwndSelf, -dx, dy,
+                                     NULL, &rc, NULL, NULL, SW_INVALIDATE);
 		/* force scroll info update */
 		EDIT_UpdateScrollInfo(es);
 	}
@@ -3107,7 +3099,7 @@ static void EDIT_WM_Paste(EDITSTATE *es)
             /* clear selected text in password edit box even with empty clipboard */
             EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
         }
-	CloseClipboard();
+	NtUserCloseClipboard();
 }
 
 
@@ -3134,9 +3126,9 @@ static void EDIT_WM_Copy(EDITSTATE *es)
 	TRACE("%s\n", debugstr_w(dst));
 	GlobalUnlock(hdst);
 	OpenClipboard(es->hwndSelf);
-	EmptyClipboard();
+	NtUserEmptyClipboard();
 	SetClipboardData(CF_UNICODETEXT, hdst);
-	CloseClipboard();
+	NtUserCloseClipboard();
 }
 
 
@@ -3302,30 +3294,42 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 	HMENU popup = GetSubMenu(menu, 0);
 	UINT start = es->selection_start;
 	UINT end = es->selection_end;
+        BOOL enabled;
 	UINT cmd;
 
 	ORDER_UINT(start, end);
 
-	/* undo */
-	EnableMenuItem(popup, 0, MF_BYPOSITION | (EDIT_EM_CanUndo(es) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* cut */
-	EnableMenuItem(popup, 2, MF_BYPOSITION | ((end - start) && !(es->style & ES_PASSWORD) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* copy */
-	EnableMenuItem(popup, 3, MF_BYPOSITION | ((end - start) && !(es->style & ES_PASSWORD) ? MF_ENABLED : MF_GRAYED));
-	/* paste */
-	EnableMenuItem(popup, 4, MF_BYPOSITION | (NtUserIsClipboardFormatAvailable(CF_UNICODETEXT) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* delete */
-	EnableMenuItem(popup, 5, MF_BYPOSITION | ((end - start) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* select all */
-	EnableMenuItem(popup, 7, MF_BYPOSITION | (start || (end != get_text_length(es)) ? MF_ENABLED : MF_GRAYED));
+        /* undo */
+        enabled = EDIT_EM_CanUndo(es) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 0, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* cut */
+        enabled = (end - start) && !(es->style & ES_PASSWORD) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 2, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* copy */
+        enabled = (end - start) && !(es->style & ES_PASSWORD);
+        NtUserEnableMenuItem( popup, 3, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* paste */
+        enabled = NtUserIsClipboardFormatAvailable(CF_UNICODETEXT) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 4, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* delete */
+        enabled = (end - start) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 5, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* select all */
+        enabled = start || end != get_text_length(es);
+        NtUserEnableMenuItem( popup, 7, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
 
         if (x == -1 && y == -1) /* passed via VK_APPS press/release */
         {
+            POINT pt;
             RECT rc;
+
             /* Windows places the menu at the edit's center in this case */
-            WIN_GetRectangles( es->hwndSelf, COORDS_SCREEN, NULL, &rc );
-            x = rc.left + (rc.right - rc.left) / 2;
-            y = rc.top + (rc.bottom - rc.top) / 2;
+            GetClientRect( es->hwndSelf, &rc );
+            pt.x = rc.right / 2;
+            pt.y = rc.bottom / 2;
+            ClientToScreen( es->hwndSelf, &pt );
+            x = pt.x;
+            y = pt.y;
         }
 
 	if (!(es->flags & EF_FOCUSED))
@@ -3337,7 +3341,7 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 	if (cmd)
 	    EDIT_ContextMenuCommand(es, cmd);
 
-	DestroyMenu(menu);
+        NtUserDestroyMenu(menu);
 }
 
 
@@ -3800,10 +3804,10 @@ static void EDIT_WM_SetFocus(EDITSTATE *es)
             NtUserReleaseDC( es->hwndSelf, hdc );
         }
 
-	CreateCaret(es->hwndSelf, 0, 1, es->line_height);
+        NtUserCreateCaret( es->hwndSelf, 0, 1, es->line_height );
 	EDIT_SetCaretPos(es, es->selection_end,
 			 es->flags & EF_AFTER_WRAP);
-	ShowCaret(es->hwndSelf);
+        NtUserShowCaret( es->hwndSelf );
 	EDIT_NOTIFY_PARENT(es, EN_SETFOCUS);
 }
 
@@ -3883,10 +3887,10 @@ static void EDIT_WM_SetFont(EDITSTATE *es, HFONT font, BOOL redraw)
 		EDIT_UpdateText(es, NULL, TRUE);
 	if (es->flags & EF_FOCUSED) {
 		DestroyCaret();
-		CreateCaret(es->hwndSelf, 0, 1, es->line_height);
+		NtUserCreateCaret( es->hwndSelf, 0, 1, es->line_height );
 		EDIT_SetCaretPos(es, es->selection_end,
 				 es->flags & EF_AFTER_WRAP);
-		ShowCaret(es->hwndSelf);
+		NtUserShowCaret( es->hwndSelf );
 	}
 }
 
@@ -4866,7 +4870,7 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 		}
 
 		if (old_style ^ es->style)
-		    InvalidateRect(es->hwndSelf, NULL, TRUE);
+		    NtUserInvalidateRect(es->hwndSelf, NULL, TRUE);
 
 		result = 1;
 		break;
@@ -5246,21 +5250,3 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 
 	return result;
 }
-
-
-/*********************************************************************
- * edit class descriptor
- */
-const struct builtin_class_descr EDIT_builtin_class =
-{
-    L"Edit",              /* name */
-    CS_DBLCLKS | CS_PARENTDC,   /* style */
-    WINPROC_EDIT,         /* proc */
-#ifdef __i386__
-    sizeof(EDITSTATE *) + sizeof(WORD), /* extra */
-#else
-    sizeof(EDITSTATE *),  /* extra */
-#endif
-    IDC_IBEAM,            /* cursor */
-    0                     /* brush */
-};

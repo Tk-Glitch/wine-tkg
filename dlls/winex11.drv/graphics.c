@@ -24,6 +24,10 @@
  * graphics mode
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdarg.h>
@@ -44,7 +48,6 @@
 
 #include "x11drv.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
 
@@ -75,20 +78,23 @@ static const int X11DRV_XROPfunction[16] =
 /* get the rectangle in device coordinates, with optional mirroring */
 static RECT get_device_rect( HDC hdc, int left, int top, int right, int bottom )
 {
+    DWORD layout;
     RECT rect;
+
+    NtGdiGetDCDword( hdc, NtGdiGetLayout, &layout );
 
     rect.left   = left;
     rect.top    = top;
     rect.right  = right;
     rect.bottom = bottom;
-    if (GetLayout( hdc ) & LAYOUT_RTL)
+    if (layout & LAYOUT_RTL)
     {
         /* shift the rectangle so that the right border is included after mirroring */
         /* it would be more correct to do this after LPtoDP but that's not what Windows does */
         rect.left--;
         rect.right--;
     }
-    LPtoDP( hdc, (POINT *)&rect, 2 );
+    lp_to_dp( hdc, (POINT *)&rect, 2 );
     if (rect.left > rect.right)
     {
         int tmp = rect.left;
@@ -145,8 +151,7 @@ static void add_pen_device_bounds( X11DRV_PDEVICE *dev, const POINT *points, int
  *           X11DRV_GetRegionData
  *
  * Calls GetRegionData on the given region and converts the rectangle
- * array to XRectangle format. The returned buffer must be freed by
- * caller using HeapFree(GetProcessHeap(),...).
+ * array to XRectangle format. The returned buffer must be freed by caller.
  * If hdc_lptodp is not 0, the rectangles are converted through LPtoDP.
  */
 RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp )
@@ -157,17 +162,17 @@ RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp )
     RECT *rect, tmp;
     XRectangle *xrect;
 
-    if (!(size = GetRegionData( hrgn, 0, NULL ))) return NULL;
+    if (!(size = NtGdiGetRegionData( hrgn, 0, NULL ))) return NULL;
     if (sizeof(XRectangle) > sizeof(RECT))
     {
         /* add extra size for XRectangle array */
         int count = (size - sizeof(RGNDATAHEADER)) / sizeof(RECT);
         size += count * (sizeof(XRectangle) - sizeof(RECT));
     }
-    if (!(data = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
-    if (!GetRegionData( hrgn, size, data ))
+    if (!(data = malloc( size ))) return NULL;
+    if (!NtGdiGetRegionData( hrgn, size, data ))
     {
-        HeapFree( GetProcessHeap(), 0, data );
+        free( data );
         return NULL;
     }
 
@@ -175,7 +180,7 @@ RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp )
     xrect = (XRectangle *)data->Buffer;
     if (hdc_lptodp)  /* map to device coordinates */
     {
-        LPtoDP( hdc_lptodp, (POINT *)rect, data->rdh.nCount * 2 );
+        lp_to_dp( hdc_lptodp, (POINT *)rect, data->rdh.nCount * 2 );
         for (i = 0; i < data->rdh.nCount; i++)
         {
             if (rect[i].right < rect[i].left)
@@ -251,10 +256,9 @@ static void update_x11_clipping( X11DRV_PDEVICE *physDev, HRGN rgn )
     }
     else if ((data = X11DRV_GetRegionData( rgn, 0 )))
     {
-        fs_hack_rgndata_user_to_real(data);
         XSetClipRectangles( gdi_display, physDev->gc, physDev->dc_rect.left, physDev->dc_rect.top,
-                            (XRectangle *)data->Buffer, data->rdh.nCount, Unsorted );
-        HeapFree( GetProcessHeap(), 0, data );
+                            (XRectangle *)data->Buffer, data->rdh.nCount, YXBanded );
+        free( data );
     }
 }
 
@@ -272,10 +276,10 @@ BOOL add_extra_clipping_region( X11DRV_PDEVICE *dev, HRGN rgn )
     if (!rgn) return FALSE;
     if (dev->region)
     {
-        if (!(clip = CreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
-        CombineRgn( clip, dev->region, rgn, RGN_AND );
+        if (!(clip = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
+        NtGdiCombineRgn( clip, dev->region, rgn, RGN_AND );
         update_x11_clipping( dev, clip );
-        DeleteObject( clip );
+        NtGdiDeleteObjectApp( clip );
     }
     else update_x11_clipping( dev, rgn );
     return TRUE;
@@ -312,25 +316,31 @@ void CDECL X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
  */
 BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors )
 {
+    DWORD bk_color, text_color, rop_mode, bk_mode, poly_fill_mode;
     XGCValues val;
     unsigned long mask;
     Pixmap pixmap = 0;
     POINT pt;
 
     if (physDev->brush.style == BS_NULL) return FALSE;
+
+    NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetBkColor, &bk_color );
+    NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetROP2, &rop_mode );
+
     if (physDev->brush.pixel == -1)
     {
 	/* Special case used for monochrome pattern brushes.
 	 * We need to swap foreground and background because
 	 * Windows does it the wrong way...
 	 */
-	val.foreground = X11DRV_PALETTE_ToPhysical( physDev, GetBkColor(physDev->dev.hdc) );
-	val.background = X11DRV_PALETTE_ToPhysical( physDev, GetTextColor(physDev->dev.hdc) );
+        NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetTextColor, &text_color );
+        val.foreground = X11DRV_PALETTE_ToPhysical( physDev, bk_color );
+        val.background = X11DRV_PALETTE_ToPhysical( physDev, text_color );
     }
     else
     {
 	val.foreground = physDev->brush.pixel;
-	val.background = X11DRV_PALETTE_ToPhysical( physDev, GetBkColor(physDev->dev.hdc) );
+	val.background = X11DRV_PALETTE_ToPhysical( physDev, bk_color );
     }
     if (fMapColors && X11DRV_PALETTE_XPixelToPalette)
     {
@@ -338,7 +348,7 @@ BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors )
         val.background = X11DRV_PALETTE_XPixelToPalette[val.background];
     }
 
-    val.function = X11DRV_XROPfunction[GetROP2(physDev->dev.hdc)-1];
+    val.function = X11DRV_XROPfunction[rop_mode - 1];
     /*
     ** Let's replace GXinvert by GXxor with (black xor white)
     ** This solves the selection color and leak problems in excel
@@ -355,7 +365,8 @@ BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors )
     {
     case FillStippled:
     case FillOpaqueStippled:
-	if (GetBkMode(physDev->dev.hdc)==OPAQUE) val.fill_style = FillOpaqueStippled;
+        NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetBkMode, &bk_mode );
+        if (bk_mode == OPAQUE) val.fill_style = FillOpaqueStippled;
 	val.stipple = physDev->brush.pixmap;
 	mask = GCStipple;
         break;
@@ -384,10 +395,13 @@ BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors )
         mask = 0;
         break;
     }
-    GetBrushOrgEx( physDev->dev.hdc, &pt );
+
+    NtGdiGetDCPoint( physDev->dev.hdc, NtGdiGetBrushOrgEx, &pt );
+    NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetPolyFillMode, &poly_fill_mode );
+
     val.ts_x_origin = physDev->dc_rect.left + pt.x;
     val.ts_y_origin = physDev->dc_rect.top + pt.y;
-    val.fill_rule = (GetPolyFillMode(physDev->dev.hdc) == WINDING) ? WindingRule : EvenOddRule;
+    val.fill_rule = poly_fill_mode == WINDING ? WindingRule : EvenOddRule;
     XChangeGC( gdi_display, gc,
 	       GCFunction | GCForeground | GCBackground | GCFillStyle |
 	       GCFillRule | GCTileStipXOrigin | GCTileStipYOrigin | mask,
@@ -417,8 +431,10 @@ BOOL X11DRV_SetupGCForBrush( X11DRV_PDEVICE *physDev )
  */
 static BOOL X11DRV_SetupGCForPen( X11DRV_PDEVICE *physDev )
 {
+    DWORD rop2, bk_color, bk_mode;
     XGCValues val;
-    UINT rop2 = GetROP2(physDev->dev.hdc);
+
+    NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetROP2, &rop2 );
 
     if (physDev->pen.style == PS_NULL) return FALSE;
 
@@ -445,7 +461,8 @@ static BOOL X11DRV_SetupGCForPen( X11DRV_PDEVICE *physDev )
 	val.foreground = physDev->pen.pixel;
 	val.function   = X11DRV_XROPfunction[rop2-1];
     }
-    val.background = X11DRV_PALETTE_ToPhysical( physDev, GetBkColor(physDev->dev.hdc) );
+    NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetBkColor, &bk_color );
+    val.background = X11DRV_PALETTE_ToPhysical( physDev, bk_color );
     val.fill_style = FillSolid;
     val.line_width = physDev->pen.width;
     if (val.line_width <= 1) {
@@ -478,7 +495,8 @@ static BOOL X11DRV_SetupGCForPen( X11DRV_PDEVICE *physDev )
     }
 
     if (physDev->pen.dash_len)
-        val.line_style = ((GetBkMode(physDev->dev.hdc) == OPAQUE) && (!physDev->pen.ext))
+        val.line_style = (NtGdiGetDCDword( physDev->dev.hdc, NtGdiGetBkMode, &bk_mode) &&
+                          bk_mode == OPAQUE && !physDev->pen.ext)
                          ? LineDoubleDash : LineOnOffDash;
     else
         val.line_style = LineSolid;
@@ -505,7 +523,7 @@ INT X11DRV_XWStoDS( HDC hdc, INT width )
     pt[0].y = 0;
     pt[1].x = width;
     pt[1].y = 0;
-    LPtoDP( hdc, pt, 2 );
+    lp_to_dp( hdc, pt, 2 );
     return pt[1].x - pt[0].x;
 }
 
@@ -522,7 +540,7 @@ INT X11DRV_YWStoDS( HDC hdc, INT height )
     pt[0].y = 0;
     pt[1].x = 0;
     pt[1].y = height;
-    LPtoDP( hdc, pt, 2 );
+    lp_to_dp( hdc, pt, 2 );
     return pt[1].y - pt[0].y;
 }
 
@@ -534,10 +552,10 @@ BOOL CDECL X11DRV_LineTo( PHYSDEV dev, INT x, INT y )
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     POINT pt[2];
 
-    GetCurrentPositionEx( dev->hdc, &pt[0] );
+    NtGdiGetDCPoint( dev->hdc, NtGdiGetCurrentPosition, &pt[0] );
     pt[1].x = x;
     pt[1].y = y;
-    LPtoDP( dev->hdc, pt, 2 );
+    lp_to_dp( dev->hdc, pt, 2 );
     add_pen_device_bounds( physDev, pt, 2 );
 
     if (X11DRV_SetupGCForPen( physDev ))
@@ -562,6 +580,7 @@ static BOOL X11DRV_DrawArc( PHYSDEV dev, INT left, INT top, INT right, INT botto
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     INT xcenter, ycenter, istart_angle, idiff_angle;
     INT width, oldwidth;
+    DWORD arc_dir;
     double start_angle, end_angle;
     XPoint points[4];
     POINT start, end;
@@ -571,13 +590,13 @@ static BOOL X11DRV_DrawArc( PHYSDEV dev, INT left, INT top, INT right, INT botto
     start.y = ystart;
     end.x = xend;
     end.y = yend;
-    LPtoDP(dev->hdc, &start, 1);
-    LPtoDP(dev->hdc, &end, 1);
+    lp_to_dp(dev->hdc, &start, 1);
+    lp_to_dp(dev->hdc, &end, 1);
 
     if ((rc.left == rc.right) || (rc.top == rc.bottom)
             ||(lines && ((rc.right-rc.left==1)||(rc.bottom-rc.top==1)))) return TRUE;
 
-    if (GetArcDirection( dev->hdc ) == AD_CLOCKWISE)
+    if (NtGdiGetDCDword( dev->hdc, NtGdiGetArcDirection, &arc_dir ) && arc_dir == AD_CLOCKWISE)
       { POINT tmp = start; start = end; end = tmp; }
 
     oldwidth = width = physDev->pen.width;
@@ -844,7 +863,7 @@ BOOL CDECL X11DRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     pts[0].x = pts[0].y = 0;
     pts[1].x = ell_width;
     pts[1].y = ell_height;
-    LPtoDP(dev->hdc, pts, 2);
+    lp_to_dp(dev->hdc, pts, 2);
     ell_width  = max(abs( pts[1].x - pts[0].x ), 1);
     ell_height = max(abs( pts[1].y - pts[0].y ), 1);
 
@@ -1025,7 +1044,7 @@ COLORREF CDECL X11DRV_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color )
 
     pt.x = x;
     pt.y = y;
-    LPtoDP( dev->hdc, &pt, 1 );
+    lp_to_dp( dev->hdc, &pt, 1 );
     pixel = X11DRV_PALETTE_ToPhysical( physDev, color );
 
     XSetForeground( gdi_display, physDev->gc, pixel );
@@ -1062,11 +1081,11 @@ BOOL CDECL X11DRV_PaintRgn( PHYSDEV dev, HRGN hrgn )
         }
 
         XFillRectangles( gdi_display, physDev->drawable, physDev->gc, rect, data->rdh.nCount );
-        HeapFree( GetProcessHeap(), 0, data );
+        free( data );
     }
-    if (GetRgnBox( hrgn, &rc ))
+    if (NtGdiGetRgnBox( hrgn, &rc ))
     {
-        LPtoDP( dev->hdc, (POINT *)&rc, 2 );
+        lp_to_dp( dev->hdc, (POINT *)&rc, 2 );
         add_device_bounds( physDev, &rc );
     }
     return TRUE;
@@ -1082,15 +1101,15 @@ static BOOL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count )
     POINT *points;
     XPoint *xpoints;
 
-    points = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*pt) );
+    points = malloc( count * sizeof(*pt) );
     if (!points) return FALSE;
     memcpy( points, pt, count * sizeof(*pt) );
-    LPtoDP( dev->hdc, points, count );
+    lp_to_dp( dev->hdc, points, count );
     add_pen_device_bounds( physDev, points, count );
 
-    if (!(xpoints = HeapAlloc( GetProcessHeap(), 0, sizeof(XPoint) * (count+1) )))
+    if (!(xpoints = malloc( sizeof(XPoint) * (count+1) )))
     {
-        HeapFree( GetProcessHeap(), 0, points );
+        free( points );
         return FALSE;
     }
     for (i = 0; i < count; i++)
@@ -1108,8 +1127,8 @@ static BOOL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count )
         XDrawLines( gdi_display, physDev->drawable, physDev->gc,
                     xpoints, count+1, CoordModeOrigin );
 
-    HeapFree( GetProcessHeap(), 0, xpoints );
-    HeapFree( GetProcessHeap(), 0, points );
+    free( xpoints );
+    free( points );
     return TRUE;
 }
 
@@ -1133,19 +1152,25 @@ BOOL CDECL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, 
         total += counts[i];
     }
 
-    points = HeapAlloc( GetProcessHeap(), 0, total * sizeof(*pt) );
+    points = malloc( total * sizeof(*pt) );
     if (!points) return FALSE;
     memcpy( points, pt, total * sizeof(*pt) );
-    LPtoDP( dev->hdc, points, total );
+    lp_to_dp( dev->hdc, points, total );
     add_pen_device_bounds( physDev, points, total );
 
     if (X11DRV_SetupGCForBrush( physDev ))
     {
+        DWORD poly_fill_mode;
         XRectangle *rect;
-        HRGN hrgn = CreatePolyPolygonRgn( points, counts, polygons, GetPolyFillMode( dev->hdc ) );
-        RGNDATA *data = X11DRV_GetRegionData( hrgn, 0 );
+        HRGN hrgn;
+        RGNDATA *data;
 
-        DeleteObject( hrgn );
+        NtGdiGetDCDword( dev->hdc, NtGdiGetPolyFillMode, &poly_fill_mode );
+        hrgn = UlongToHandle( NtGdiPolyPolyDraw( UlongToHandle(poly_fill_mode), points,
+                                                 (const ULONG *)counts, polygons,
+                                                 NtGdiPolyPolygonRgn ));
+        data = X11DRV_GetRegionData( hrgn, 0 );
+        NtGdiDeleteObjectApp( hrgn );
         if (!data) goto done;
         rect = (XRectangle *)data->Buffer;
         for (i = 0; i < data->rdh.nCount; i++)
@@ -1155,7 +1180,7 @@ BOOL CDECL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, 
         }
 
         XFillRectangles( gdi_display, physDev->drawable, physDev->gc, rect, data->rdh.nCount );
-        HeapFree( GetProcessHeap(), 0, data );
+        free( data );
     }
 
     if (X11DRV_SetupGCForPen ( physDev ))
@@ -1163,7 +1188,7 @@ BOOL CDECL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, 
         XPoint *xpoints;
         int j;
 
-        if (!(xpoints = HeapAlloc( GetProcessHeap(), 0, sizeof(XPoint) * (max + 1) ))) goto done;
+        if (!(xpoints = malloc( sizeof(XPoint) * (max + 1) ))) goto done;
         for (i = pos = 0; i < polygons; pos += counts[i++])
         {
             for (j = 0; j < counts[i]; j++)
@@ -1174,12 +1199,12 @@ BOOL CDECL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, 
 	    xpoints[j] = xpoints[0];
             XDrawLines( gdi_display, physDev->drawable, physDev->gc, xpoints, j + 1, CoordModeOrigin );
         }
-        HeapFree( GetProcessHeap(), 0, xpoints );
+        free( xpoints );
     }
     ret = TRUE;
 
 done:
-    HeapFree( GetProcessHeap(), 0, points );
+    free( points );
     return ret;
 }
 
@@ -1200,19 +1225,19 @@ BOOL CDECL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* count
         total += counts[i];
     }
 
-    points = HeapAlloc( GetProcessHeap(), 0, total * sizeof(*pt) );
+    points = malloc( total * sizeof(*pt) );
     if (!points) return FALSE;
     memcpy( points, pt, total * sizeof(*pt) );
-    LPtoDP( dev->hdc, points, total );
+    lp_to_dp( dev->hdc, points, total );
     add_pen_device_bounds( physDev, points, total );
 
     if (X11DRV_SetupGCForPen ( physDev ))
     {
         XPoint *xpoints;
 
-        if (!(xpoints = HeapAlloc( GetProcessHeap(), 0, sizeof(XPoint) * max )))
+        if (!(xpoints = malloc( sizeof(XPoint) * max )))
         {
-            HeapFree( GetProcessHeap(), 0, points );
+            free( points );
             return FALSE;
         }
         for (i = pos = 0; i < polylines; pos += counts[i++])
@@ -1224,9 +1249,9 @@ BOOL CDECL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* count
             }
             XDrawLines( gdi_display, physDev->drawable, physDev->gc, xpoints, j, CoordModeOrigin );
         }
-        HeapFree( GetProcessHeap(), 0, xpoints );
+        free( xpoints );
     }
-    HeapFree( GetProcessHeap(), 0, points );
+    free( points );
     return TRUE;
 }
 
@@ -1240,27 +1265,27 @@ static BOOL x11drv_stroke_and_fill_path( PHYSDEV dev, BOOL stroke, BOOL fill )
     XPoint *xpoints;
     int i, j, size;
 
-    FlattenPath( dev->hdc );
-    if ((size = GetPath( dev->hdc, NULL, NULL, 0 )) == -1) return FALSE;
+    NtGdiFlattenPath( dev->hdc );
+    if ((size = NtGdiGetPath( dev->hdc, NULL, NULL, 0 )) == -1) return FALSE;
     if (!size)
     {
-        AbortPath( dev->hdc );
+        NtGdiAbortPath( dev->hdc );
         return TRUE;
     }
-    xpoints = HeapAlloc( GetProcessHeap(), 0, (size + 1) * sizeof(*xpoints) );
-    points = HeapAlloc( GetProcessHeap(), 0, size * sizeof(*points) );
-    flags = HeapAlloc( GetProcessHeap(), 0, size * sizeof(*flags) );
+    xpoints = malloc( (size + 1) * sizeof(*xpoints) );
+    points = malloc( size * sizeof(*points) );
+    flags = malloc( size * sizeof(*flags) );
     if (!points || !flags || !xpoints) goto done;
-    if (GetPath( dev->hdc, points, flags, size ) == -1) goto done;
-    LPtoDP( dev->hdc, points, size );
+    if (NtGdiGetPath( dev->hdc, points, flags, size ) == -1) goto done;
+    lp_to_dp( dev->hdc, points, size );
 
     if (fill && X11DRV_SetupGCForBrush( physDev ))
     {
         XRectangle *rect;
-        HRGN hrgn = PathToRegion( dev->hdc );
+        HRGN hrgn = NtGdiPathToRegion( dev->hdc );
         RGNDATA *data = X11DRV_GetRegionData( hrgn, 0 );
 
-        DeleteObject( hrgn );
+        NtGdiDeleteObjectApp( hrgn );
         if (!data) goto done;
         rect = (XRectangle *)data->Buffer;
         for (i = 0; i < data->rdh.nCount; i++)
@@ -1270,7 +1295,7 @@ static BOOL x11drv_stroke_and_fill_path( PHYSDEV dev, BOOL stroke, BOOL fill )
         }
 
         XFillRectangles( gdi_display, physDev->drawable, physDev->gc, rect, data->rdh.nCount );
-        HeapFree( GetProcessHeap(), 0, data );
+        free( data );
     }
 
     if (stroke && X11DRV_SetupGCForPen ( physDev ))
@@ -1297,13 +1322,13 @@ static BOOL x11drv_stroke_and_fill_path( PHYSDEV dev, BOOL stroke, BOOL fill )
     }
 
     add_pen_device_bounds( physDev, points, size );
-    AbortPath( dev->hdc );
+    NtGdiAbortPath( dev->hdc );
     ret = TRUE;
 
 done:
-    HeapFree( GetProcessHeap(), 0, xpoints );
-    HeapFree( GetProcessHeap(), 0, points );
-    HeapFree( GetProcessHeap(), 0, flags );
+    free( xpoints );
+    free( points );
+    free( flags );
     return ret;
 }
 
@@ -1424,7 +1449,7 @@ BOOL CDECL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT 
 
     pt.x = x;
     pt.y = y;
-    LPtoDP( dev->hdc, &pt, 1 );
+    lp_to_dp( dev->hdc, &pt, 1 );
 
     if (!physDev->region)
     {
@@ -1435,8 +1460,8 @@ BOOL CDECL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT 
     }
     else
     {
-        if (!PtInRegion( physDev->region, pt.x, pt.y )) return FALSE;
-        GetRgnBox( physDev->region, &rect );
+        if (!NtGdiPtInRegion( physDev->region, pt.x, pt.y )) return FALSE;
+        NtGdiGetRgnBox( physDev->region, &rect );
         rect.left   = max( rect.left, 0 );
         rect.top    = max( rect.top, 0 );
         rect.right  = min( rect.right, physDev->dc_rect.right - physDev->dc_rect.left );
@@ -1512,7 +1537,7 @@ BOOL CDECL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             pt[0].y = v[0].y;
             pt[1].x = v[1].x;
             pt[1].y = v[1].y;
-            LPtoDP( dev->hdc, pt, 2 );
+            lp_to_dp( dev->hdc, pt, 2 );
             dx = pt[1].x - pt[0].x;
             if (!dx) continue;
             if (dx < 0)  /* swap the colors */
@@ -1562,7 +1587,7 @@ BOOL CDECL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             pt[0].y = v[0].y;
             pt[1].x = v[1].x;
             pt[1].y = v[1].y;
-            LPtoDP( dev->hdc, pt, 2 );
+            lp_to_dp( dev->hdc, pt, 2 );
             dy = pt[1].y - pt[0].y;
             if (!dy) continue;
             if (dy < 0)  /* swap the colors */
@@ -1598,12 +1623,13 @@ fallback:
     return dev->funcs->pGradientFill( dev, vert_array, nvert, grad_array, ngrad, mode );
 }
 
-static unsigned char *get_icm_profile( unsigned long *size )
+static char *get_icm_profile( unsigned long *size )
 {
     Atom type;
     int format;
     unsigned long count, remaining;
-    unsigned char *profile, *ret = NULL;
+    unsigned char *profile;
+    char *ret = NULL;
 
     XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display),
                         x11drv_atom(_ICC_PROFILE), 0, ~0UL, False, AnyPropertyType,
@@ -1611,7 +1637,7 @@ static unsigned char *get_icm_profile( unsigned long *size )
     *size = get_property_size( format, count );
     if (format && count)
     {
-        if ((ret = HeapAlloc( GetProcessHeap(), 0, *size ))) memcpy( ret, profile, *size );
+        if ((ret = malloc( *size ))) memcpy( ret, profile, *size );
         XFree( profile );
     }
     return ret;
@@ -1630,12 +1656,14 @@ extern void WINAPI A_SHAUpdate( sha_ctx *, const unsigned char *, unsigned int )
 extern void WINAPI A_SHAFinal( sha_ctx *, unsigned char * );
 
 static const WCHAR mntr_key[] =
-    {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
+    {'\\','R','e','g','i','s','t','r','y','\\','M','a','c','h','i','n','e','\\',
+     'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
      'W','i','n','d','o','w','s',' ','N','T','\\','C','u','r','r','e','n','t',
-     'V','e','r','s','i','o','n','\\','I','C','M','\\','m','n','t','r',0};
+     'V','e','r','s','i','o','n','\\','I','C','M','\\','m','n','t','r'};
 
 static const WCHAR color_path[] =
-    {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s','\\','c','o','l','o','r','\\',0};
+    {'\\','?','?','\\','c',':','\\','w','i','n','d','o','w','s','\\','s','y','s','t','e','m','3','2',
+     '\\','s','p','o','o','l','\\','d','r','i','v','e','r','s','\\','c','o','l','o','r','\\'};
 
 /***********************************************************************
  *              GetICMProfile (X11DRV.@)
@@ -1646,67 +1674,79 @@ BOOL CDECL X11DRV_GetICMProfile( PHYSDEV dev, BOOL allow_default, LPDWORD size, 
         {'s','R','G','B',' ','C','o','l','o','r',' ','S','p','a','c','e',' ',
          'P','r','o','f','i','l','e','.','i','c','m',0};
     HKEY hkey;
-    DWORD required, len;
-    WCHAR profile[MAX_PATH], fullname[2*MAX_PATH + ARRAY_SIZE( color_path )];
-    unsigned char *buffer;
-    unsigned long buflen;
+    DWORD required;
+    char buf[4096];
+    KEY_VALUE_FULL_INFORMATION *info = (void *)buf;
+    char *buffer;
+    unsigned long buflen, i;
+    ULONG full_size;
+    WCHAR fullname[MAX_PATH + ARRAY_SIZE( color_path )], *p;
+    UNICODE_STRING name;
+    OBJECT_ATTRIBUTES attr;
 
     if (!size) return FALSE;
 
-    GetSystemDirectoryW( fullname, MAX_PATH );
-    strcatW( fullname, color_path );
+    memcpy( fullname, color_path, sizeof(color_path) );
+    p = fullname + ARRAYSIZE(color_path);
 
-    len = ARRAY_SIZE( profile );
-    if (!RegCreateKeyExW( HKEY_LOCAL_MACHINE, mntr_key, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL ) &&
-        !RegEnumValueW( hkey, 0, profile, &len, NULL, NULL, NULL, NULL )) /* FIXME handle multiple values */
+    hkey = reg_open_key( NULL, mntr_key, sizeof(mntr_key) );
+
+    if (hkey && !NtEnumerateValueKey( hkey, 0, KeyValueFullInformation,
+                                      info, sizeof(buf), &full_size ))
     {
-        strcatW( fullname, profile );
-        RegCloseKey( hkey );
+        /* FIXME handle multiple values */
+        memcpy( p, info->Name, info->NameLength );
+        p[info->NameLength / sizeof(WCHAR)] = 0;
     }
     else if ((buffer = get_icm_profile( &buflen )))
     {
-        static const WCHAR fmt[] = {'%','0','2','x',0};
         static const WCHAR icm[] = {'.','i','c','m',0};
-
-        unsigned char sha1sum[20];
-        unsigned int i;
-        sha_ctx ctx;
+        IO_STATUS_BLOCK io;
+        UINT64 hash = 0;
         HANDLE file;
+        NTSTATUS status;
 
-        A_SHAInit( &ctx );
-        A_SHAUpdate( &ctx, buffer, buflen );
-        A_SHAFinal( &ctx, sha1sum );
-
-        for (i = 0; i < sizeof(sha1sum); i++) sprintfW( &profile[i * 2], fmt, sha1sum[i] );
-        memcpy( &profile[i * 2], icm, sizeof(icm) );
-
-        strcatW( fullname, profile );
-        file = CreateFileW( fullname, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, 0 );
-        if (file != INVALID_HANDLE_VALUE)
+        for (i = 0; i < buflen; i++) hash = (hash << 16) - hash + buffer[i];
+        for (i = 0; i < sizeof(hash) * 2; i++)
         {
-            DWORD written;
-
-            if (!WriteFile( file, buffer, buflen, &written, NULL ) || written != buflen)
-                ERR( "Unable to write color profile\n" );
-            CloseHandle( file );
+            int digit = hash & 0xf;
+            p[i] = digit < 10 ? '0' + digit : 'a' - 10 + digit;
+            hash >>= 4;
         }
-        HeapFree( GetProcessHeap(), 0, buffer );
+
+        memcpy( p + i, icm, sizeof(icm) );
+
+        RtlInitUnicodeString( &name, fullname );
+        InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+        status = NtCreateFile( &file, GENERIC_WRITE, &attr, &io, NULL, 0, 0, FILE_CREATE,
+                               FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0 );
+        if (!status)
+        {
+            status = NtWriteFile( file, NULL, NULL, NULL, &io, buffer, buflen, NULL, NULL );
+            if (status) ERR( "Unable to write color profile: %x\n", status );
+            NtClose( file );
+        }
+        free( buffer );
     }
     else if (!allow_default) return FALSE;
-    else strcatW( fullname, srgb );
+    else lstrcpyW( p, srgb );
 
-    required = strlenW( fullname ) + 1;
+    NtClose( hkey );
+    required = wcslen( fullname ) + 1 - 4 /* skip NT prefix */;
     if (*size < required)
     {
         *size = required;
-        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
         return FALSE;
     }
     if (filename)
     {
-        strcpyW( filename, fullname );
-        if (GetFileAttributesW( filename ) == INVALID_FILE_ATTRIBUTES)
-            WARN( "color profile not found\n" );
+        FILE_BASIC_INFORMATION info;
+        wcscpy( filename, fullname + 4 );
+        RtlInitUnicodeString( &name, fullname );
+        InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL );
+        if (NtQueryAttributesFile( &attr, &info ))
+            WARN( "color profile not found in %s\n", debugstr_w(fullname) );
     }
     *size = required;
     return TRUE;

@@ -24,23 +24,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
-#include <stdarg.h>
-#include <string.h>
-#include <stdlib.h>
 #include <png.h>
+#include <stdlib.h>
 
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winerror.h"
-#include "winnls.h"
-#include "wine/exception.h"
-#include "wine/server.h"
-#include "controls.h"
-#include "win.h"
 #include "user_private.h"
-#include "wine/list.h"
+#include "controls.h"
+#include "wine/exception.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cursor);
@@ -964,7 +953,7 @@ static HICON create_cursoricon_object( struct cursoricon_desc *desc, BOOL is_ico
     UNICODE_STRING res_str = { 0 };
     HICON handle;
 
-    if (!(handle = UlongToHandle( NtUserCallOneParam( is_icon, NtUserCreateCursorIcon )))) return 0;
+    if (!(handle = NtUserCreateCursorIcon( is_icon ))) return 0;
 
     if (module) LdrGetDllFullName( module, &module_name );
 
@@ -1615,7 +1604,7 @@ BOOL WINAPI DrawIcon( HDC hdc, INT x, INT y, HICON hIcon )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetClipCursor( RECT *rect )
 {
-    return NtUserCallOneParam( (UINT_PTR)rect, NtUserGetClipCursor );
+    return NtUserGetClipCursor( rect );
 }
 
 

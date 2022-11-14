@@ -366,6 +366,7 @@ static void test_mbcp(void)
     expect_eq(_mbclen(mbstring), 2, int, "%d");
     expect_eq(_mbclen(&mbstring[2]), 2, int, "%d");
     expect_eq(_mbclen(&mbstring[3]), 1, int, "%d");
+    expect_eq(_mbclen(mbsonlylead), 1, int, "%d");
     expect_eq(_mbslen(mbstring2), 4, int, "%d");
     expect_eq(_mbslen(mbsonlylead), 0, int, "%d");          /* lead + NUL not counted as character */
     expect_eq(_mbslen(mbstring), 4, int, "%d");             /* lead + invalid trail counted */
@@ -2839,6 +2840,7 @@ static void test__mbsupr_s(void)
 {
     errno_t ret;
     unsigned char buffer[20];
+    int cp = _getmbcp();
 
     if (!p_mbsupr_s)
     {
@@ -2878,7 +2880,7 @@ static void test__mbsupr_s(void)
 
     memcpy(buffer, "abcdefgh", sizeof("abcdefgh"));
     errno = EBADF;
-    ret = p_mbsupr_s(buffer, 4);
+    ret = p_mbsupr_s(buffer, sizeof("abcdefgh") - 1);
     ok(ret == EINVAL, "Expected _mbsupr_s to return EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
 
@@ -2890,12 +2892,20 @@ static void test__mbsupr_s(void)
        "Expected the output buffer to be \"ABCDEFGH\\0ijklmnop\", got \"%s\"\n",
        buffer);
 
+    _setmbcp(936);
+    memcpy(buffer, "\xa2\xa1\xa2\xa2q", sizeof("\xa2\xa1\xa2\xa2q"));
+    ret = p_mbsupr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "\xa2\xf1\xa2\xf2Q", sizeof("\xa2\xf1\xa2\xf2Q")),
+            "got %s\n", debugstr_a((char*)buffer));
+    _setmbcp(cp);
 }
 
 static void test__mbslwr_s(void)
 {
     errno_t ret;
     unsigned char buffer[20];
+    int cp = _getmbcp();
 
     if (!p_mbslwr_s)
     {
@@ -2935,7 +2945,7 @@ static void test__mbslwr_s(void)
 
     memcpy(buffer, "ABCDEFGH", sizeof("ABCDEFGH"));
     errno = EBADF;
-    ret = p_mbslwr_s(buffer, 4);
+    ret = p_mbslwr_s(buffer, sizeof("ABCDEFGH") - 1);
     ok(ret == EINVAL, "Expected _mbslwr_s to return EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
 
@@ -2946,6 +2956,14 @@ static void test__mbslwr_s(void)
     ok(!memcmp(buffer, "abcdefgh\0IJKLMNOP", sizeof("abcdefgh\0IJKLMNOP")),
        "Expected the output buffer to be \"abcdefgh\\0IJKLMNOP\", got \"%s\"\n",
        buffer);
+
+    _setmbcp(936);
+    memcpy(buffer, "\xa2\xf1\xa2\xf2Q", sizeof("\xa2\xf1\xa2\xf2Q"));
+    ret = p_mbslwr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "\xa2\xa1\xa2\xa2q", sizeof("\xa2\xa1\xa2\xa2q")),
+            "got %s\n", debugstr_a((char*)buffer));
+    _setmbcp(cp);
 }
 
 static void test__mbstok(void)

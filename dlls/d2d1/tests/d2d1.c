@@ -5825,15 +5825,18 @@ static void test_dc_target(BOOL d3d11)
     ID2D1Factory *factory;
     FLOAT dpi_x, dpi_y;
     D2D1_COLOR_F color;
+    HENHMETAFILE hemf;
     D2D1_SIZE_U sizeu;
     D2D1_SIZE_F size;
     D2D1_TAG t1, t2;
     unsigned int i;
     HDC hdc, hdc2;
+    HMETAFILE hmf;
     D2D_RECT_F r;
     COLORREF clr;
     HRESULT hr;
     RECT rect;
+    HWND hwnd;
 
     if (!init_test_context(&ctx, d3d11))
         return;
@@ -5997,7 +6000,7 @@ static void test_dc_target(BOOL d3d11)
 
     /* Invalid DC. */
     hr = ID2D1DCRenderTarget_BindDC(rt, (HDC)0xdeadbeef, &rect);
-    todo_wine ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DCRenderTarget_BeginDraw(rt);
 
@@ -6008,7 +6011,7 @@ static void test_dc_target(BOOL d3d11)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     clr = GetPixel(hdc2, 0, 0);
-    todo_wine ok(clr == RGB(255, 0, 0), "Got unexpected colour 0x%08lx.\n", clr);
+    ok(clr == RGB(255, 0, 0), "Got unexpected colour 0x%08lx.\n", clr);
 
     hr = ID2D1DCRenderTarget_BindDC(rt, NULL, &rect);
     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
@@ -6022,10 +6025,46 @@ static void test_dc_target(BOOL d3d11)
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     clr = GetPixel(hdc2, 0, 0);
-    todo_wine ok(clr == RGB(0, 0, 255), "Got unexpected colour 0x%08lx.\n", clr);
+    ok(clr == RGB(0, 0, 255), "Got unexpected colour 0x%08lx.\n", clr);
 
     DeleteDC(hdc);
     DeleteDC(hdc2);
+
+    /* Metafile context. */
+    hdc = CreateMetaFileA(NULL);
+    ok(!!hdc, "Failed to create a device context.\n");
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    hmf = CloseMetaFile(hdc);
+    ok(!!hmf, "Failed to close a metafile, error %ld.\n", GetLastError());
+    DeleteMetaFile(hmf);
+
+    /* Enhanced metafile context. */
+    hdc = CreateEnhMetaFileA(NULL, NULL, NULL, NULL);
+    ok(!!hdc, "Failed to create a device context.\n");
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hemf = CloseEnhMetaFile(hdc);
+    ok(!!hemf, "Failed to close a metafile, error %ld.\n", GetLastError());
+    DeleteEnhMetaFile(hemf);
+
+    /* Window context. */
+    hwnd = CreateWindowExA(0, "static", NULL, WS_POPUP|WS_VISIBLE, 0, 0, 100, 100, 0, 0, 0, NULL);
+    ok(!!hwnd, "Failed to create a test window.\n");
+
+    hdc = GetDC(hwnd);
+    ok(!!hdc, "Failed to get a context.\n");
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ReleaseDC(hwnd, hdc);
+    DestroyWindow(hwnd);
+
     ID2D1DCRenderTarget_Release(rt);
     ID2D1Factory_Release(factory);
 }
@@ -9150,6 +9189,21 @@ static void test_device_context(BOOL d3d11)
     ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Unexpected unit mode %d.\n", unit_mode);
 
     ID2D1DeviceContext_Release(device_context);
+
+    if (ctx.factory2)
+    {
+        ID2D1Device1 *device1;
+        ID2D1DeviceContext1 *device_context1;
+
+        hr = ID2D1Factory2_CreateDevice(ctx.factory2, ctx.device, &device1);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Device1_CreateDeviceContext(device1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &device_context1);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        ID2D1DeviceContext1_Release(device_context1);
+        ID2D1Device1_Release(device1);
+    }
 
     /* DXGI target */
     rt = ctx.rt;

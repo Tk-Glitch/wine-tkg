@@ -19,41 +19,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
-#include <string.h>
-#include <unistd.h>
-#include <stdarg.h>
-#include <stdio.h>
-
+#define COBJMACROS
 #define NONAMELESSUNION
 
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-
-#define COBJMACROS
-#include "x11drv.h"
+#include "x11drv_dll.h"
 #include "shellapi.h"
-#include "shlobj.h"  /* DROPFILES */
-#include "oleidl.h"
-#include "objidl.h"
+#include "shlobj.h"
 
 #include "wine/debug.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xdnd);
 
-typedef struct tagXDNDDATA
-{
-    int cf_win;
-    Atom cf_xdnd;
-    HANDLE contents;
-    struct list entry;
-} XDNDDATA, *LPXDNDDATA;
-
-static struct list xdndData = LIST_INIT(xdndData);
+static struct format_entry *xdnd_formats, *xdnd_formats_end;
 static POINT XDNDxy = { 0, 0 };
 static IDataObject XDNDDataObject;
 static BOOL XDNDAccepted = FALSE;
@@ -63,9 +41,6 @@ static HWND XDNDLastTargetWnd;
 /* might be an ancestor of XDNDLastTargetWnd */
 static HWND XDNDLastDropTargetWnd;
 
-static void X11DRV_XDND_InsertXDNDData( Atom property, UINT format, HANDLE contents );
-static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
-    Atom *types, unsigned long count);
 static BOOL X11DRV_XDND_HasHDROP(void);
 static HRESULT X11DRV_XDND_SendDropFiles(HWND hwnd);
 static void X11DRV_XDND_FreeDragDropOp(void);
@@ -78,6 +53,12 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": xdnd_cs") }
 };
 static CRITICAL_SECTION xdnd_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
+
+
+static struct format_entry *next_format( struct format_entry *entry )
+{
+    return (struct format_entry *)&entry->data[(entry->size + 7) & ~7];
+}
 
 
 /* Based on functions in dlls/ole32/ole2.c */
@@ -147,109 +128,6 @@ static IDropTarget* get_droptarget_pointer(HWND hwnd)
     return droptarget;
 }
 
-/**************************************************************************
- * X11DRV_XDND_XdndActionToDROPEFFECT
- */
-static DWORD X11DRV_XDND_XdndActionToDROPEFFECT(long action)
-{
-    /* In Windows, nothing but the given effects is allowed.
-     * In X the given action is just a hint, and you can always
-     * XdndActionCopy and XdndActionPrivate, so be more permissive. */
-    if (action == x11drv_atom(XdndActionCopy))
-        return DROPEFFECT_COPY;
-    else if (action == x11drv_atom(XdndActionMove))
-        return DROPEFFECT_MOVE | DROPEFFECT_COPY;
-    else if (action == x11drv_atom(XdndActionLink))
-        return DROPEFFECT_LINK | DROPEFFECT_COPY;
-    else if (action == x11drv_atom(XdndActionAsk))
-        /* FIXME: should we somehow ask the user what to do here? */
-        return DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
-    FIXME("unknown action %ld, assuming DROPEFFECT_COPY\n", action);
-    return DROPEFFECT_COPY;
-}
-
-/**************************************************************************
- * X11DRV_XDND_DROPEFFECTToXdndAction
- */
-static long X11DRV_XDND_DROPEFFECTToXdndAction(DWORD effect)
-{
-    if (effect == DROPEFFECT_COPY)
-        return x11drv_atom(XdndActionCopy);
-    else if (effect == DROPEFFECT_MOVE)
-        return x11drv_atom(XdndActionMove);
-    else if (effect == DROPEFFECT_LINK)
-        return x11drv_atom(XdndActionLink);
-    FIXME("unknown drop effect %u, assuming XdndActionCopy\n", effect);
-    return x11drv_atom(XdndActionCopy);
-}
-
-/**************************************************************************
- * X11DRV_XDND_EnterEvent
- *
- * Handle an XdndEnter event.
- */
-void X11DRV_XDND_EnterEvent( HWND hWnd, XEvent *xev )
-{
-    XClientMessageEvent *event = &xev->xclient;
-    int version;
-    Atom *xdndtypes;
-    unsigned long count = 0;
-
-    version = (event->data.l[1] & 0xFF000000) >> 24;
-    TRACE("ver(%d) check-XdndTypeList(%ld) data=%ld,%ld,%ld,%ld,%ld\n",
-          version, (event->data.l[1] & 1),
-          event->data.l[0], event->data.l[1], event->data.l[2],
-          event->data.l[3], event->data.l[4]);
-
-    if (version > WINE_XDND_VERSION)
-    {
-        ERR("ignoring unsupported XDND version %d\n", version);
-        return;
-    }
-
-    XDNDAccepted = FALSE;
-
-    /* If the source supports more than 3 data types we retrieve
-     * the entire list. */
-    if (event->data.l[1] & 1)
-    {
-        Atom acttype;
-        int actfmt;
-        unsigned long bytesret;
-
-        /* Request supported formats from source window */
-        XGetWindowProperty(event->display, event->data.l[0], x11drv_atom(XdndTypeList),
-                           0, 65535, FALSE, AnyPropertyType, &acttype, &actfmt, &count,
-                           &bytesret, (unsigned char**)&xdndtypes);
-    }
-    else
-    {
-        count = 3;
-        xdndtypes = (Atom*) &event->data.l[2];
-    }
-
-    if (TRACE_ON(xdnd))
-    {
-        unsigned int i;
-
-        for (i = 0; i < count; i++)
-        {
-            if (xdndtypes[i] != 0)
-            {
-                char * pn = XGetAtomName(event->display, xdndtypes[i]);
-                TRACE("XDNDEnterAtom %ld: %s\n", xdndtypes[i], pn);
-                XFree(pn);
-            }
-        }
-    }
-
-    /* Do a one-time data read and cache results */
-    X11DRV_XDND_ResolveProperty(event->display, event->window,
-                                event->data.l[1], xdndtypes, count);
-
-    if (event->data.l[1] & 1)
-        XFree(xdndtypes);
-}
 
 /* Recursively searches for a window on given coordinates in a drag&drop specific manner.
  *
@@ -284,27 +162,22 @@ static HWND window_accepting_files(HWND hwnd)
 }
 
 /**************************************************************************
- * X11DRV_XDND_PositionEvent
+ *           x11drv_dnd_position_event
  *
  * Handle an XdndPosition event.
  */
-void X11DRV_XDND_PositionEvent( HWND hWnd, XEvent *xev )
+NTSTATUS WINAPI x11drv_dnd_position_event( void *arg, ULONG size )
 {
-    XClientMessageEvent *event = &xev->xclient;
-    XClientMessageEvent e;
+    struct dnd_position_event_params *params = arg;
     int accept = 0; /* Assume we're not accepting */
     IDropTarget *dropTarget = NULL;
-    DWORD effect;
-    POINTL pointl;
+    DWORD effect = params->effect;
+    POINTL pointl = { .x = params->point.x, .y = params->point.y };
     HWND targetWindow;
     HRESULT hr;
 
-    XDNDxy = root_to_virtual_screen( event->data.l[2] >> 16, event->data.l[2] & 0xFFFF );
-    targetWindow = window_from_point_dnd(hWnd, XDNDxy);
-
-    pointl.x = XDNDxy.x;
-    pointl.y = XDNDxy.y;
-    effect = X11DRV_XDND_XdndActionToDROPEFFECT(event->data.l[4]);
+    XDNDxy = params->point;
+    targetWindow = window_from_point_dnd( UlongToHandle( params->hwnd ), XDNDxy );
 
     if (!XDNDAccepted || XDNDLastTargetWnd != targetWindow)
     {
@@ -375,38 +248,11 @@ void X11DRV_XDND_PositionEvent( HWND hWnd, XEvent *xev )
         }
     }
 
-    TRACE("actionRequested(%ld) accept(%d) chosen(0x%x) at x(%d),y(%d)\n",
-          event->data.l[4], accept, effect, XDNDxy.x, XDNDxy.y);
-
-    /*
-     * Let source know if we're accepting the drop by
-     * sending a status message.
-     */
-    e.type = ClientMessage;
-    e.display = event->display;
-    e.window = event->data.l[0];
-    e.message_type = x11drv_atom(XdndStatus);
-    e.format = 32;
-    e.data.l[0] = event->window;
-    e.data.l[1] = accept;
-    e.data.l[2] = 0; /* Empty Rect */
-    e.data.l[3] = 0; /* Empty Rect */
-    if (accept)
-        e.data.l[4] = X11DRV_XDND_DROPEFFECTToXdndAction(effect);
-    else
-        e.data.l[4] = None;
-    XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
+    return accept ? effect : 0;
 }
 
-/**************************************************************************
- * X11DRV_XDND_DropEvent
- *
- * Handle an XdndDrop event.
- */
-void X11DRV_XDND_DropEvent( HWND hWnd, XEvent *xev )
+NTSTATUS x11drv_dnd_drop_event( UINT arg )
 {
-    XClientMessageEvent *event = &xev->xclient;
-    XClientMessageEvent e;
     IDropTarget *dropTarget;
     DWORD effect = XDNDDropEffect;
     int accept = 0; /* Assume we're not accepting */
@@ -459,7 +305,7 @@ void X11DRV_XDND_DropEvent( HWND hWnd, XEvent *xev )
         /* Only send WM_DROPFILES if Drop didn't succeed or DROPEFFECT_NONE was set.
          * Doing both causes winamp to duplicate the dropped files (#29081) */
 
-        HWND hwnd_drop = window_accepting_files(window_from_point_dnd(hWnd, XDNDxy));
+        HWND hwnd_drop = window_accepting_files(window_from_point_dnd( UlongToHandle(arg), XDNDxy ));
 
         if (hwnd_drop && X11DRV_XDND_HasHDROP())
         {
@@ -475,28 +321,15 @@ void X11DRV_XDND_DropEvent( HWND hWnd, XEvent *xev )
     TRACE("effectRequested(0x%x) accept(%d) performed(0x%x) at x(%d),y(%d)\n",
           XDNDDropEffect, accept, effect, XDNDxy.x, XDNDxy.y);
 
-    /* Tell the target we are finished. */
-    memset(&e, 0, sizeof(e));
-    e.type = ClientMessage;
-    e.display = event->display;
-    e.window = event->data.l[0];
-    e.message_type = x11drv_atom(XdndFinished);
-    e.format = 32;
-    e.data.l[0] = event->window;
-    e.data.l[1] = accept;
-    if (accept)
-        e.data.l[2] = X11DRV_XDND_DROPEFFECTToXdndAction(effect);
-    else
-        e.data.l[2] = None;
-    XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
+    return accept ? effect : 0;
 }
 
 /**************************************************************************
- * X11DRV_XDND_LeaveEvent
+ *           x11drv_dnd_leave_event
  *
  * Handle an XdndLeave event.
  */
-void X11DRV_XDND_LeaveEvent( HWND hWnd, XEvent *xev )
+NTSTATUS x11drv_dnd_leave_event( UINT arg )
 {
     IDropTarget *dropTarget;
 
@@ -516,71 +349,25 @@ void X11DRV_XDND_LeaveEvent( HWND hWnd, XEvent *xev )
     }
 
     X11DRV_XDND_FreeDragDropOp();
+    return 0;
 }
 
 
 /**************************************************************************
- * X11DRV_XDND_ResolveProperty
- *
- * Resolve all MIME types to windows clipboard formats. All data is cached.
+ *           x11drv_dnd_enter_event
  */
-static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
-                                        Atom *types, unsigned long count)
+NTSTATUS WINAPI x11drv_dnd_enter_event( void *params, ULONG size )
 {
-    XDNDDATA *current, *next;
-    BOOL haveHDROP = FALSE;
-
-    TRACE("count(%ld)\n", count);
-
+    struct format_entry *formats = params;
+    XDNDAccepted = FALSE;
     X11DRV_XDND_FreeDragDropOp(); /* Clear previously cached data */
 
-    X11DRV_CLIPBOARD_ImportSelection( display, xwin, x11drv_atom(XdndSelection),
-                                      types, count, X11DRV_XDND_InsertXDNDData );
-
-    /* On Windows when there is a CF_HDROP, there are no other CF_ formats.
-     * foobar2000 relies on this (spaces -> %20's without it).
-     */
-    LIST_FOR_EACH_ENTRY(current, &xdndData, XDNDDATA, entry)
+    if ((xdnd_formats = HeapAlloc( GetProcessHeap(), 0, size )))
     {
-        if (current->cf_win == CF_HDROP)
-        {
-            haveHDROP = TRUE;
-            break;
-        }
+        memcpy( xdnd_formats, formats, size );
+        xdnd_formats_end = (struct format_entry *)((char *)xdnd_formats + size);
     }
-    if (haveHDROP)
-    {
-        LIST_FOR_EACH_ENTRY_SAFE(current, next, &xdndData, XDNDDATA, entry)
-        {
-            if (current->cf_win != CF_HDROP && current->cf_win < CF_MAX)
-            {
-                list_remove(&current->entry);
-                GlobalFree(current->contents);
-                HeapFree(GetProcessHeap(), 0, current);
-            }
-        }
-    }
-}
-
-
-/**************************************************************************
- * X11DRV_XDND_InsertXDNDData
- *
- * Cache available XDND property
- */
-static void X11DRV_XDND_InsertXDNDData( Atom property, UINT format, HANDLE contents )
-{
-    LPXDNDDATA current = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(XDNDDATA));
-
-    if (current)
-    {
-        EnterCriticalSection(&xdnd_cs);
-        current->cf_xdnd = property;
-        current->cf_win = format;
-        current->contents = contents;
-        list_add_tail(&xdndData, &current->entry);
-        LeaveCriticalSection(&xdnd_cs);
-    }
+    return 0;
 }
 
 
@@ -589,15 +376,15 @@ static void X11DRV_XDND_InsertXDNDData( Atom property, UINT format, HANDLE conte
  */
 static BOOL X11DRV_XDND_HasHDROP(void)
 {
-    LPXDNDDATA current = NULL;
+    struct format_entry *iter;
     BOOL found = FALSE;
 
     EnterCriticalSection(&xdnd_cs);
 
     /* Find CF_HDROP type if any */
-    LIST_FOR_EACH_ENTRY(current, &xdndData, XDNDDATA, entry)
+    for (iter = xdnd_formats; iter < xdnd_formats_end; iter = next_format( iter ))
     {
-        if (current->cf_win == CF_HDROP)
+        if (iter->format == CF_HDROP)
         {
             found = TRUE;
             break;
@@ -614,15 +401,15 @@ static BOOL X11DRV_XDND_HasHDROP(void)
  */
 static HRESULT X11DRV_XDND_SendDropFiles(HWND hwnd)
 {
+    struct format_entry *iter;
     HRESULT hr;
-    LPXDNDDATA current = NULL;
     BOOL found = FALSE;
 
     EnterCriticalSection(&xdnd_cs);
 
-    LIST_FOR_EACH_ENTRY(current, &xdndData, XDNDDATA, entry)
+    for (iter = xdnd_formats; iter < xdnd_formats_end; iter = next_format( iter ))
     {
-         if (current->cf_win == CF_HDROP)
+         if (iter->format == CF_HDROP)
          {
              found = TRUE;
              break;
@@ -630,13 +417,12 @@ static HRESULT X11DRV_XDND_SendDropFiles(HWND hwnd)
     }
     if (found)
     {
-        HGLOBAL dropHandle = GlobalAlloc(GMEM_FIXED, GlobalSize(current->contents));
+        HGLOBAL dropHandle = GlobalAlloc(GMEM_FIXED, iter->size);
         if (dropHandle)
         {
             RECT rect;
             DROPFILES *lpDrop = GlobalLock(dropHandle);
-            memcpy(lpDrop, GlobalLock(current->contents), GlobalSize(current->contents));
-            GlobalUnlock(current->contents);
+            memcpy(lpDrop, iter->data, iter->size);
             lpDrop->pt.x = XDNDxy.x;
             lpDrop->pt.y = XDNDxy.y;
             lpDrop->fNC  = !(ScreenToClient(hwnd, &lpDrop->pt) &&
@@ -671,20 +457,12 @@ static HRESULT X11DRV_XDND_SendDropFiles(HWND hwnd)
  */
 static void X11DRV_XDND_FreeDragDropOp(void)
 {
-    LPXDNDDATA next;
-    LPXDNDDATA current;
-
     TRACE("\n");
 
     EnterCriticalSection(&xdnd_cs);
 
-    /** Free data cache */
-    LIST_FOR_EACH_ENTRY_SAFE(current, next, &xdndData, XDNDDATA, entry)
-    {
-        list_remove(&current->entry);
-        GlobalFree(current->contents);
-        HeapFree(GetProcessHeap(), 0, current);
-    }
+    HeapFree( GetProcessHeap(), 0, xdnd_formats );
+    xdnd_formats = xdnd_formats_end = NULL;
 
     XDNDxy.x = XDNDxy.y = 0;
     XDNDLastTargetWnd = NULL;
@@ -781,18 +559,18 @@ static HRESULT WINAPI XDNDDATAOBJECT_GetData(IDataObject *dataObject,
     hr = IDataObject_QueryGetData(dataObject, formatEtc);
     if (SUCCEEDED(hr))
     {
-        XDNDDATA *current;
-        LIST_FOR_EACH_ENTRY(current, &xdndData, XDNDDATA, entry)
+        struct format_entry *iter;
+
+        for (iter = xdnd_formats; iter < xdnd_formats_end; iter = next_format( iter ))
         {
-            if (current->cf_win == formatEtc->cfFormat)
+            if (iter->format == formatEtc->cfFormat)
             {
                 pMedium->tymed = TYMED_HGLOBAL;
-                pMedium->u.hGlobal = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, GlobalSize(current->contents));
+                pMedium->u.hGlobal = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, iter->size);
                 if (pMedium->u.hGlobal == NULL)
                     return E_OUTOFMEMORY;
-                memcpy(GlobalLock(pMedium->u.hGlobal), GlobalLock(current->contents), GlobalSize(current->contents));
+                memcpy(GlobalLock(pMedium->u.hGlobal), iter->data, iter->size);
                 GlobalUnlock(pMedium->u.hGlobal);
-                GlobalUnlock(current->contents);
                 pMedium->pUnkForRelease = 0;
                 return S_OK;
             }
@@ -812,8 +590,8 @@ static HRESULT WINAPI XDNDDATAOBJECT_GetDataHere(IDataObject *dataObject,
 static HRESULT WINAPI XDNDDATAOBJECT_QueryGetData(IDataObject *dataObject,
                                                   FORMATETC *formatEtc)
 {
+    struct format_entry *iter;
     char formatDesc[1024];
-    XDNDDATA *current;
 
     TRACE("(%p, %p={.tymed=0x%x, .dwAspect=%d, .cfFormat=%d}\n",
         dataObject, formatEtc, formatEtc->tymed, formatEtc->dwAspect, formatEtc->cfFormat);
@@ -828,9 +606,9 @@ static HRESULT WINAPI XDNDDATAOBJECT_QueryGetData(IDataObject *dataObject,
      * and we have no way to implement them on XDnD anyway, so ignore them too.
      */
 
-    LIST_FOR_EACH_ENTRY(current, &xdndData, XDNDDATA, entry)
+    for (iter = xdnd_formats; iter < xdnd_formats_end; iter = next_format( iter ))
     {
-        if (current->cf_win == formatEtc->cfFormat)
+        if (iter->format == formatEtc->cfFormat)
         {
             TRACE("application found %s\n", formatDesc);
             return S_OK;
@@ -862,7 +640,8 @@ static HRESULT WINAPI XDNDDATAOBJECT_EnumFormatEtc(IDataObject *dataObject,
                                                    DWORD dwDirection,
                                                    IEnumFORMATETC **ppEnumFormatEtc)
 {
-    DWORD count;
+    struct format_entry *iter;
+    DWORD count = 0;
     FORMATETC *formats;
 
     TRACE("(%p, %u, %p)\n", dataObject, dwDirection, ppEnumFormatEtc);
@@ -873,16 +652,16 @@ static HRESULT WINAPI XDNDDATAOBJECT_EnumFormatEtc(IDataObject *dataObject,
         return E_NOTIMPL;
     }
 
-    count = list_count(&xdndData);
+    for (iter = xdnd_formats; iter < xdnd_formats_end; iter = next_format( iter )) count++;
+
     formats = HeapAlloc(GetProcessHeap(), 0, count * sizeof(FORMATETC));
     if (formats)
     {
-        XDNDDATA *current;
         DWORD i = 0;
         HRESULT hr;
-        LIST_FOR_EACH_ENTRY(current, &xdndData, XDNDDATA, entry)
+        for (iter = xdnd_formats; iter < xdnd_formats_end; iter = next_format( iter ))
         {
-            formats[i].cfFormat = current->cf_win;
+            formats[i].cfFormat = iter->format;
             formats[i].ptd = NULL;
             formats[i].dwAspect = DVASPECT_CONTENT;
             formats[i].lindex = -1;
@@ -938,3 +717,21 @@ static IDataObjectVtbl xdndDataObjectVtbl =
 };
 
 static IDataObject XDNDDataObject = { &xdndDataObjectVtbl };
+
+NTSTATUS WINAPI x11drv_dnd_post_drop( void *data, ULONG size )
+{
+    HDROP handle;
+
+    if ((handle = GlobalAlloc( GMEM_SHARE, size )))
+    {
+        DROPFILES *ptr = GlobalLock( handle );
+        HWND hwnd;
+        memcpy( ptr, data, size );
+        hwnd = UlongToHandle( ptr->fWide );
+        ptr->fWide = TRUE;
+        GlobalUnlock( handle );
+        PostMessageW( hwnd, WM_DROPFILES, (WPARAM)handle, 0 );
+    }
+
+    return 0;
+}

@@ -34,14 +34,10 @@
  *    here the IMM level deals with if the application is IME aware or not.
  */
 
-#include "config.h"
-
-#include <stdarg.h>
-
-#include "macdrv.h"
-#include "winuser.h"
+#include "macdrv_dll.h"
 #include "imm.h"
 #include "ddk/imm.h"
+#include "wine/debug.h"
 #include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(imm);
@@ -578,7 +574,7 @@ BOOL WINAPI ImeProcessKey(HIMC hIMC, UINT vKey, LPARAM lKeyData, const LPBYTE lp
         return FALSE;
     }
 
-    inIME = macdrv_using_input_method();
+    inIME = MACDRV_CALL(ime_using_input_method, NULL);
     lpIMC = LockRealIMC(hIMC);
     if (lpIMC)
     {
@@ -659,6 +655,7 @@ BOOL WINAPI ImeSetActiveContext(HIMC hIMC, BOOL fFlag)
 UINT WINAPI ImeToAsciiEx(UINT uVKey, UINT uScanCode, const LPBYTE lpbKeyState,
                          LPDWORD lpdwTransKey, UINT fuState, HIMC hIMC)
 {
+    struct process_text_input_params params;
     UINT vkey;
     LPINPUTCONTEXT lpIMC;
     LPIMEPRIVATE myPrivate;
@@ -691,7 +688,13 @@ UINT WINAPI ImeToAsciiEx(UINT uVKey, UINT uScanCode, const LPBYTE lpbKeyState,
     UnlockRealIMC(hIMC);
 
     TRACE("Processing Mac 0x%04x\n", vkey);
-    macdrv_process_text_input(uVKey, uScanCode, repeat, lpbKeyState, hIMC, &done);
+    params.vkey = uVKey;
+    params.scan = uScanCode;
+    params.repeat = repeat;
+    params.key_state = lpbKeyState;
+    params.himc = hIMC;
+    params.done = &done;
+    MACDRV_CALL(ime_process_text_input, &params);
 
     while (!done)
         MsgWaitForMultipleObjectsEx(0, NULL, INFINITE, QS_POSTMESSAGE | QS_SENDMESSAGE, 0);
@@ -847,7 +850,7 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
 
                     TRACE("NI_COMPOSITIONSTR: CPS_CANCEL\n");
 
-                    macdrv_clear_ime_text();
+                    MACDRV_CALL(ime_clear, NULL);
                     if (lpIMC->hCompStr)
                         ImmDestroyIMCC(lpIMC->hCompStr);
 
@@ -1389,39 +1392,27 @@ BOOL WINAPI ImeInquire(LPIMEINFO lpIMEInfo, LPWSTR lpszUIClass, LPCWSTR lpszOpti
 /* Interfaces to other parts of the Mac driver */
 
 /***********************************************************************
- *              macdrv_im_set_text
+ *              macdrv_ime_set_text
  */
-void macdrv_im_set_text(const macdrv_event *event)
+NTSTATUS WINAPI macdrv_ime_set_text(void *arg, ULONG size)
 {
-    HWND hwnd = macdrv_get_window_hwnd(event->window);
-    void *himc = event->im_set_text.data;
-
-    TRACE("win %p/%p himc %p text %s complete %u\n", hwnd, event->window, himc,
-          debugstr_cf(event->im_set_text.text), event->im_set_text.complete);
+    struct ime_set_text_params *params = arg;
+    ULONG length = (size - offsetof(struct ime_set_text_params, text)) / sizeof(WCHAR);
+    void *himc = param_ptr(params->data);
+    HWND hwnd = UlongToHandle(params->hwnd);
 
     if (!himc) himc = RealIMC(FROM_MACDRV);
 
-    if (event->im_set_text.text)
+    if (length)
     {
-        CFIndex length = CFStringGetLength(event->im_set_text.text);
-        const UniChar *chars = CFStringGetCharactersPtr(event->im_set_text.text);
-        UniChar *buffer = NULL;
-
-        if (!chars)
-        {
-            buffer = HeapAlloc(GetProcessHeap(), 0, length * sizeof(*buffer));
-            CFStringGetCharacters(event->im_set_text.text, CFRangeMake(0, length), buffer);
-            chars = buffer;
-        }
-
         if (himc)
-            IME_SetCompositionString(himc, SCS_SETSTR, chars, length * sizeof(*chars),
-                event->im_set_text.cursor_pos, !event->im_set_text.complete);
+            IME_SetCompositionString(himc, SCS_SETSTR, params->text, length * sizeof(WCHAR),
+                                     params->cursor_pos, !params->complete);
         else
         {
             RAWINPUT rawinput;
             INPUT input;
-            CFIndex i;
+            unsigned int i;
 
             input.type              = INPUT_KEYBOARD;
             input.ki.wVk            = 0;
@@ -1430,7 +1421,7 @@ void macdrv_im_set_text(const macdrv_event *event)
 
             for (i = 0; i < length; i++)
             {
-                input.ki.wScan      = chars[i];
+                input.ki.wScan      = params->text[i];
                 input.ki.dwFlags    = KEYEVENTF_UNICODE;
                 __wine_send_input(hwnd, &input, &rawinput);
 
@@ -1438,62 +1429,50 @@ void macdrv_im_set_text(const macdrv_event *event)
                 __wine_send_input(hwnd, &input, &rawinput);
             }
         }
-
-        HeapFree(GetProcessHeap(), 0, buffer);
     }
 
-    if (event->im_set_text.complete)
+    if (params->complete)
         IME_NotifyComplete(himc);
+    return 0;
 }
-
-/***********************************************************************
- *              macdrv_sent_text_input
- */
-void macdrv_sent_text_input(const macdrv_event *event)
-{
-    TRACE("handled: %s\n", event->sent_text_input.handled ? "TRUE" : "FALSE");
-    *event->sent_text_input.done = event->sent_text_input.handled ? 1 : -1;
-}
-
 
 /**************************************************************************
- *              query_ime_char_rect
+ *              macdrv_ime_query_char_rect
  */
-BOOL query_ime_char_rect(macdrv_query* query)
+NTSTATUS WINAPI macdrv_ime_query_char_rect(void *arg, ULONG size)
 {
-    HWND hwnd = macdrv_get_window_hwnd(query->window);
-    void *himc = query->ime_char_rect.data;
-    CFRange* range = &query->ime_char_rect.range;
-    CGRect* rect = &query->ime_char_rect.rect;
+    struct ime_query_char_rect_params *params = arg;
+    struct ime_query_char_rect_result *result = param_ptr(params->result);
+    void *himc = param_ptr(params->data);
     IMECHARPOSITION charpos;
     BOOL ret = FALSE;
 
-    TRACE("win %p/%p himc %p range %ld-%ld\n", hwnd, query->window, himc, range->location,
-          range->length);
+    result->location = params->location;
+    result->length = params->length;
 
     if (!himc) himc = RealIMC(FROM_MACDRV);
 
     charpos.dwSize = sizeof(charpos);
-    charpos.dwCharPos = range->location;
+    charpos.dwCharPos = params->location;
     if (ImmRequestMessageW(himc, IMR_QUERYCHARPOSITION, (ULONG_PTR)&charpos))
     {
         int i;
 
-        *rect = CGRectMake(charpos.pt.x, charpos.pt.y, 0, charpos.cLineHeight);
+        SetRect(&result->rect, charpos.pt.x, charpos.pt.y, 0, charpos.pt.y + charpos.cLineHeight);
 
         /* iterate over rest of length to extend rect */
-        for (i = 1; i < range->length; i++)
+        for (i = 1; i < params->length; i++)
         {
             charpos.dwSize = sizeof(charpos);
-            charpos.dwCharPos = range->location + i;
+            charpos.dwCharPos = params->location + i;
             if (!ImmRequestMessageW(himc, IMR_QUERYCHARPOSITION, (ULONG_PTR)&charpos) ||
-                charpos.pt.y != rect->origin.y)
+                charpos.pt.y != result->rect.top)
             {
-                range->length = i;
+                result->length = i;
                 break;
             }
 
-            rect->size.width = charpos.pt.x - rect->origin.x;
+            result->rect.right = charpos.pt.x;
         }
 
         ret = TRUE;
@@ -1520,15 +1499,15 @@ BOOL query_ime_char_rect(macdrv_query* query)
                 if (private->textfont)
                     oldfont = SelectObject(dc, private->textfont);
 
-                if (range->location > compstr->dwCompStrLen)
-                    range->location = compstr->dwCompStrLen;
-                if (range->location + range->length > compstr->dwCompStrLen)
-                    range->length = compstr->dwCompStrLen - range->location;
+                if (result->location > compstr->dwCompStrLen)
+                    result->location = compstr->dwCompStrLen;
+                if (result->location + result->length > compstr->dwCompStrLen)
+                    result->length = compstr->dwCompStrLen - result->location;
 
-                GetTextExtentPoint32W(dc, str, range->location, &size);
+                GetTextExtentPoint32W(dc, str, result->location, &size);
                 charpos.rcDocument.left = size.cx;
                 charpos.rcDocument.top = 0;
-                GetTextExtentPoint32W(dc, str, range->location + range->length, &size);
+                GetTextExtentPoint32W(dc, str, result->location + result->length, &size);
                 charpos.rcDocument.right = size.cx;
                 charpos.rcDocument.bottom = size.cy;
 
@@ -1537,7 +1516,7 @@ BOOL query_ime_char_rect(macdrv_query* query)
 
                 LPtoDP(dc, (POINT*)&charpos.rcDocument, 2);
                 MapWindowPoints(private->hwndDefault, 0, (POINT*)&charpos.rcDocument, 2);
-                *rect = cgrect_from_rect(charpos.rcDocument);
+                result->rect = charpos.rcDocument;
                 ret = TRUE;
 
                 if (oldfont)
@@ -1559,16 +1538,13 @@ BOOL query_ime_char_rect(macdrv_query* query)
         if (GetGUIThreadInfo(0, &gti))
         {
             MapWindowPoints(gti.hwndCaret, 0, (POINT*)&gti.rcCaret, 2);
-            *rect = cgrect_from_rect(gti.rcCaret);
+            result->rect = gti.rcCaret;
             ret = TRUE;
         }
     }
 
-    if (ret && range->length && !rect->size.width)
-        rect->size.width = 1;
-
-    TRACE(" -> %s range %ld-%ld rect %s\n", ret ? "TRUE" : "FALSE", range->location,
-          range->length, wine_dbgstr_cgrect(*rect));
+    if (ret && result->length && result->rect.left == result->rect.right)
+        result->rect.right++;
 
     return ret;
 }

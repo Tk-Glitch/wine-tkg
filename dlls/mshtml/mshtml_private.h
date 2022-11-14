@@ -406,7 +406,7 @@ HRESULT change_type(VARIANT*,VARIANT*,VARTYPE,IServiceProvider*) DECLSPEC_HIDDEN
 HRESULT dispex_get_dprop_ref(DispatchEx*,const WCHAR*,BOOL,VARIANT**) DECLSPEC_HIDDEN;
 HRESULT get_dispids(tid_t,DWORD*,DISPID**) DECLSPEC_HIDDEN;
 HRESULT remove_attribute(DispatchEx*,DISPID,VARIANT_BOOL*) DECLSPEC_HIDDEN;
-HRESULT dispex_get_dynid(DispatchEx*,const WCHAR*,DISPID*) DECLSPEC_HIDDEN;
+HRESULT dispex_get_dynid(DispatchEx*,const WCHAR*,BOOL,DISPID*) DECLSPEC_HIDDEN;
 void dispex_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*) DECLSPEC_HIDDEN;
 void dispex_unlink(DispatchEx*) DECLSPEC_HIDDEN;
 void release_typelib(void) DECLSPEC_HIDDEN;
@@ -639,79 +639,53 @@ struct  ConnectionPoint {
     cp_static_data_t *data;
 };
 
-struct HTMLDocument {
-    IHTMLDocument2              IHTMLDocument2_iface;
-    IHTMLDocument3              IHTMLDocument3_iface;
-    IHTMLDocument4              IHTMLDocument4_iface;
-    IHTMLDocument5              IHTMLDocument5_iface;
-    IHTMLDocument6              IHTMLDocument6_iface;
-    IHTMLDocument7              IHTMLDocument7_iface;
-    IDocumentSelector           IDocumentSelector_iface;
-    IDocumentEvent              IDocumentEvent_iface;
-    IPersistMoniker             IPersistMoniker_iface;
-    IPersistFile                IPersistFile_iface;
-    IPersistHistory             IPersistHistory_iface;
-    IMonikerProp                IMonikerProp_iface;
-    IOleObject                  IOleObject_iface;
-    IOleDocument                IOleDocument_iface;
-    IOleInPlaceActiveObject     IOleInPlaceActiveObject_iface;
-    IOleInPlaceObjectWindowless IOleInPlaceObjectWindowless_iface;
-    IServiceProvider            IServiceProvider_iface;
-    IOleCommandTarget           IOleCommandTarget_iface;
-    IOleControl                 IOleControl_iface;
-    IHlinkTarget                IHlinkTarget_iface;
-    IPersistStreamInit          IPersistStreamInit_iface;
-    IDispatchEx                 IDispatchEx_iface;
-    ISupportErrorInfo           ISupportErrorInfo_iface;
-    IObjectWithSite             IObjectWithSite_iface;
-    IOleContainer               IOleContainer_iface;
-    IObjectSafety               IObjectSafety_iface;
-    IProvideMultipleClassInfo   IProvideMultipleClassInfo_iface;
-    IMarkupServices             IMarkupServices_iface;
-    IMarkupContainer            IMarkupContainer_iface;
-    IDisplayServices            IDisplayServices_iface;
-    IDocumentRange              IDocumentRange_iface;
-
-    IUnknown *outer_unk;
-    IDispatchEx *dispex;
-
-    HTMLDocumentObj *doc_obj;
-    HTMLDocumentNode *doc_node;
-
-    HTMLOuterWindow *window;
-
-    ConnectionPointContainer cp_container;
-};
-
-static inline HRESULT htmldoc_query_interface(HTMLDocument *This, REFIID riid, void **ppv)
-{
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppv);
-}
-
-static inline ULONG htmldoc_addref(HTMLDocument *This)
-{
-    return IUnknown_AddRef(This->outer_unk);
-}
-
-static inline ULONG htmldoc_release(HTMLDocument *This)
-{
-    return IUnknown_Release(This->outer_unk);
-}
-
 struct HTMLDocumentObj {
-    HTMLDocument basedoc;
     DispatchEx dispex;
     IUnknown IUnknown_inner;
+    IDispatchEx IDispatchEx_iface;
     ICustomDoc ICustomDoc_iface;
+    IHTMLDocument2 IHTMLDocument2_iface;
+    IHTMLDocument3 IHTMLDocument3_iface;
+    IHTMLDocument4 IHTMLDocument4_iface;
+    IHTMLDocument5 IHTMLDocument5_iface;
+    IHTMLDocument6 IHTMLDocument6_iface;
+    IHTMLDocument7 IHTMLDocument7_iface;
+    IDocumentSelector IDocumentSelector_iface;
+    IDocumentEvent IDocumentEvent_iface;
+    ISupportErrorInfo ISupportErrorInfo_iface;
+    IProvideMultipleClassInfo IProvideMultipleClassInfo_iface;
+    IMarkupServices IMarkupServices_iface;
+    IMarkupContainer IMarkupContainer_iface;
+    IDisplayServices IDisplayServices_iface;
+    IDocumentRange IDocumentRange_iface;
     IOleDocumentView IOleDocumentView_iface;
     IViewObjectEx IViewObjectEx_iface;
+    IPersistMoniker IPersistMoniker_iface;
+    IPersistFile IPersistFile_iface;
+    IMonikerProp IMonikerProp_iface;
+    IPersistStreamInit IPersistStreamInit_iface;
+    IPersistHistory IPersistHistory_iface;
+    IHlinkTarget IHlinkTarget_iface;
+    IOleCommandTarget IOleCommandTarget_iface;
+    IOleObject IOleObject_iface;
+    IOleDocument IOleDocument_iface;
+    IOleControl IOleControl_iface;
+    IOleInPlaceActiveObject IOleInPlaceActiveObject_iface;
+    IOleInPlaceObjectWindowless IOleInPlaceObjectWindowless_iface;
+    IObjectWithSite IObjectWithSite_iface;
+    IOleContainer IOleContainer_iface;
+    IObjectSafety IObjectSafety_iface;
+    IServiceProvider IServiceProvider_iface;
     ITargetContainer ITargetContainer_iface;
 
     IWindowForBindingUI IWindowForBindingUI_iface;
 
     LONG ref;
 
+    IUnknown *outer_unk;
+    HTMLOuterWindow *window;
     GeckoBrowser *nscontainer;
+    HTMLDocumentNode *doc_node;
 
     IOleClientSite *client;
     IDocHostUIHandler *hostui;
@@ -727,6 +701,7 @@ struct HTMLDocumentObj {
     IUnknown *browser_service;
     IOleAdviseHolder *advise_holder;
 
+    ConnectionPointContainer cp_container;
     DOCHOSTUIINFO hostinfo;
 
     IOleUndoManager *undomgr;
@@ -895,15 +870,48 @@ typedef struct nsDocumentEventListener nsDocumentEventListener;
 
 struct HTMLDocumentNode {
     HTMLDOMNode node;
-    HTMLDocument basedoc;
 
+    IDispatchEx                  IDispatchEx_iface;
+    IHTMLDocument2               IHTMLDocument2_iface;
+    IHTMLDocument3               IHTMLDocument3_iface;
+    IHTMLDocument4               IHTMLDocument4_iface;
+    IHTMLDocument5               IHTMLDocument5_iface;
+    IHTMLDocument6               IHTMLDocument6_iface;
+    IHTMLDocument7               IHTMLDocument7_iface;
+    IDocumentSelector            IDocumentSelector_iface;
+    IDocumentEvent               IDocumentEvent_iface;
+    ISupportErrorInfo            ISupportErrorInfo_iface;
+    IProvideMultipleClassInfo    IProvideMultipleClassInfo_iface;
+    IMarkupServices              IMarkupServices_iface;
+    IMarkupContainer             IMarkupContainer_iface;
+    IDisplayServices             IDisplayServices_iface;
+    IDocumentRange               IDocumentRange_iface;
+    IPersistMoniker              IPersistMoniker_iface;
+    IPersistFile                 IPersistFile_iface;
+    IMonikerProp                 IMonikerProp_iface;
+    IPersistStreamInit           IPersistStreamInit_iface;
+    IPersistHistory              IPersistHistory_iface;
+    IHlinkTarget                 IHlinkTarget_iface;
+    IOleCommandTarget            IOleCommandTarget_iface;
+    IOleObject                   IOleObject_iface;
+    IOleDocument                 IOleDocument_iface;
+    IOleControl                  IOleControl_iface;
+    IOleInPlaceActiveObject      IOleInPlaceActiveObject_iface;
+    IOleInPlaceObjectWindowless  IOleInPlaceObjectWindowless_iface;
+    IObjectWithSite              IObjectWithSite_iface;
+    IOleContainer                IOleContainer_iface;
+    IObjectSafety                IObjectSafety_iface;
+    IServiceProvider             IServiceProvider_iface;
     IInternetHostSecurityManager IInternetHostSecurityManager_iface;
 
     nsIDocumentObserver          nsIDocumentObserver_iface;
 
     LONG ref;
 
+    ConnectionPointContainer cp_container;
+    HTMLOuterWindow *outer_window;
     HTMLInnerWindow *window;
+    HTMLDocumentObj *doc_obj;
 
     GeckoBrowser *browser;
     struct list browser_entry;
@@ -962,14 +970,16 @@ void detach_dom_implementation(IHTMLDOMImplementation*) DECLSPEC_HIDDEN;
 HRESULT create_html_storage(HTMLInnerWindow*,BOOL,IHTMLStorage**) DECLSPEC_HIDDEN;
 void detach_html_storage(IHTMLStorage*) DECLSPEC_HIDDEN;
 
-void HTMLDocument_Persist_Init(HTMLDocument*) DECLSPEC_HIDDEN;
-void HTMLDocument_OleCmd_Init(HTMLDocument*) DECLSPEC_HIDDEN;
-void HTMLDocument_OleObj_Init(HTMLDocument*) DECLSPEC_HIDDEN;
-void HTMLDocument_Service_Init(HTMLDocument*) DECLSPEC_HIDDEN;
-
 void HTMLDocument_View_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+void HTMLDocumentObj_Persist_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+void HTMLDocumentObj_Service_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+void HTMLDocumentObj_OleCmd_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
 void TargetContainer_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
 
+void HTMLDocumentNode_Persist_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
+void HTMLDocumentNode_Service_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
+void HTMLDocumentNode_OleCmd_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
+void HTMLDocumentNode_OleObj_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 
 HRESULT HTMLCurrentStyle_Create(HTMLElement*,IHTMLCurrentStyle**) DECLSPEC_HIDDEN;
@@ -1445,6 +1455,7 @@ extern void *call_thiscall_func;
 compat_mode_t get_max_compat_mode(IUri*) DECLSPEC_HIDDEN;
 UINT cp_from_charset_string(BSTR) DECLSPEC_HIDDEN;
 BSTR charset_string_from_cp(UINT) DECLSPEC_HIDDEN;
+HRESULT get_mime_type_display_name(const WCHAR*,BSTR*) DECLSPEC_HIDDEN;
 HINSTANCE get_shdoclc(void) DECLSPEC_HIDDEN;
 void set_statustext(HTMLDocumentObj*,INT,LPCWSTR) DECLSPEC_HIDDEN;
 IInternetSecurityManager *get_security_manager(void) DECLSPEC_HIDDEN;

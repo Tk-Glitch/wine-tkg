@@ -8,6 +8,7 @@ UNIX_LIBS    = -lwin32u -framework AppKit -framework Carbon -framework Security 
 C_SRCS = \
 	clipboard.c \
 	display.c \
+	dllmain.c \
 	dragdrop.c \
 	event.c \
 	gdi.c \

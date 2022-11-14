@@ -674,7 +674,7 @@ static HRESULT WINAPI ASServiceProvider_QueryService(IServiceProvider *iface, RE
         if(!This->window || !This->window->doc)
             return E_NOINTERFACE;
 
-        return IHTMLDocument2_QueryInterface(&This->window->doc->basedoc.IHTMLDocument2_iface, riid, ppv);
+        return IHTMLDocument2_QueryInterface(&This->window->doc->IHTMLDocument2_iface, riid, ppv);
     }
 
     FIXME("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
@@ -1473,7 +1473,7 @@ static EventTarget *find_event_target(HTMLDocumentNode *doc, HTMLScriptElement *
         FIXME("Empty for attribute\n");
     }else if(!wcscmp(target_id, L"document")) {
         event_target = &doc->node.event_target;
-        htmldoc_addref(&doc->basedoc);
+        IHTMLDOMNode_AddRef(&doc->node.IHTMLDOMNode_iface);
     }else if(!wcscmp(target_id, L"window")) {
         if(doc->window) {
             event_target = &doc->window->event_target;

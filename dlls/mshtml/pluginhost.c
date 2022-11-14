@@ -1602,7 +1602,7 @@ static HRESULT WINAPI PHClientSite_GetContainer(IOleClientSite *iface, IOleConta
         return E_UNEXPECTED;
     }
 
-    *ppContainer = &This->doc->basedoc.IOleContainer_iface;
+    *ppContainer = &This->doc->IOleContainer_iface;
     IOleContainer_AddRef(*ppContainer);
     return S_OK;
 }
@@ -1918,12 +1918,12 @@ static HRESULT WINAPI PHInPlaceSite_GetWindowContext(IOleInPlaceSiteEx *iface,
 
     TRACE("(%p)->(%p %p %p %p %p)\n", This, ppFrame, ppDoc, lprcPosRect, lprcClipRect, frame_info);
 
-    if(!This->doc || !This->doc->basedoc.doc_obj || !This->doc->basedoc.doc_obj->ipsite) {
+    if(!This->doc || !This->doc->doc_obj || !This->doc->doc_obj->ipsite) {
         FIXME("No ipsite\n");
         return E_UNEXPECTED;
     }
 
-    hres = IOleInPlaceSite_GetWindowContext(This->doc->basedoc.doc_obj->ipsite, &ip_frame, &ip_window, &pr, &cr, frame_info);
+    hres = IOleInPlaceSite_GetWindowContext(This->doc->doc_obj->ipsite, &ip_frame, &ip_window, &pr, &cr, frame_info);
     if(FAILED(hres)) {
         WARN("GetWindowContext failed: %08lx\n", hres);
         return hres;
@@ -2238,12 +2238,12 @@ static HRESULT WINAPI PHServiceProvider_QueryService(IServiceProvider *iface, RE
 
     TRACE("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
 
-    if(!This->doc || !This->doc->basedoc.window) {
+    if(!This->doc || !This->doc->outer_window) {
         *ppv = NULL;
         return E_NOINTERFACE;
     }
 
-    return IServiceProvider_QueryService(&This->doc->basedoc.window->base.IServiceProvider_iface,
+    return IServiceProvider_QueryService(&This->doc->outer_window->base.IServiceProvider_iface,
             guidService, riid, ppv);
 }
 

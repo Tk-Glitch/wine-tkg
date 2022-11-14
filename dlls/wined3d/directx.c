@@ -23,6 +23,7 @@
 
 #include "wined3d_private.h"
 #include "winternl.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
@@ -37,6 +38,19 @@ enum wined3d_driver_model
     DRIVER_MODEL_NT5X,
     DRIVER_MODEL_NT6X
 };
+
+struct wined3d_adapter_budget_change_notification
+{
+    const struct wined3d_adapter *adapter;
+    HANDLE event;
+    DWORD cookie;
+    UINT64 last_local_budget;
+    UINT64 last_non_local_budget;
+    struct list entry;
+};
+
+static struct list adapter_budget_change_notifications = LIST_INIT( adapter_budget_change_notifications );
+static HANDLE notification_thread, notification_thread_stop_event;
 
 /* The d3d device ID */
 static const GUID IID_D3DDEVICE_D3DUID = { 0xaeb2cdd4, 0x6e41, 0x43ea, { 0x94,0x1c,0x83,0x61,0xcc,0x76,0x07,0x81 } };
@@ -103,14 +117,11 @@ HRESULT CDECL wined3d_output_take_ownership(const struct wined3d_output *output,
 static void wined3d_output_cleanup(const struct wined3d_output *output)
 {
     D3DKMT_DESTROYDEVICE destroy_device_desc;
-    D3DKMT_CLOSEADAPTER close_adapter_desc;
 
     TRACE("output %p.\n", output);
 
     destroy_device_desc.hDevice = output->kmt_device;
     D3DKMTDestroyDevice(&destroy_device_desc);
-    close_adapter_desc.hAdapter = output->kmt_adapter;
-    D3DKMTCloseAdapter(&close_adapter_desc);
 }
 
 static HRESULT wined3d_output_init(struct wined3d_output *output, unsigned int ordinal,
@@ -125,20 +136,17 @@ static HRESULT wined3d_output_init(struct wined3d_output *output, unsigned int o
     lstrcpyW(open_adapter_desc.DeviceName, device_name);
     if (D3DKMTOpenAdapterFromGdiDisplayName(&open_adapter_desc))
         return E_INVALIDARG;
+    close_adapter_desc.hAdapter = open_adapter_desc.hAdapter;
+    D3DKMTCloseAdapter(&close_adapter_desc);
 
-    create_device_desc.u.hAdapter = open_adapter_desc.hAdapter;
+    create_device_desc.u.hAdapter = adapter->kmt_adapter;
     if (D3DKMTCreateDevice(&create_device_desc))
-    {
-        close_adapter_desc.hAdapter = open_adapter_desc.hAdapter;
-        D3DKMTCloseAdapter(&close_adapter_desc);
         return E_FAIL;
-    }
 
     output->ordinal = ordinal;
     lstrcpyW(output->device_name, device_name);
     output->adapter = adapter;
     output->screen_format = WINED3DFMT_UNKNOWN;
-    output->kmt_adapter = open_adapter_desc.hAdapter;
     output->kmt_device = create_device_desc.hDevice;
     output->vidpn_source_id = open_adapter_desc.VidPnSourceId;
 
@@ -166,12 +174,15 @@ ssize_t adapter_adjust_mapped_memory(struct wined3d_adapter *adapter, ssize_t si
 
 void wined3d_adapter_cleanup(struct wined3d_adapter *adapter)
 {
+    D3DKMT_CLOSEADAPTER close_adapter_desc;
     unsigned int output_idx;
 
     for (output_idx = 0; output_idx < adapter->output_count; ++output_idx)
         wined3d_output_cleanup(&adapter->outputs[output_idx]);
     heap_free(adapter->outputs);
     heap_free(adapter->formats);
+    close_adapter_desc.hAdapter = adapter->kmt_adapter;
+    D3DKMTCloseAdapter(&close_adapter_desc);
 }
 
 ULONG CDECL wined3d_incref(struct wined3d *wined3d)
@@ -988,9 +999,195 @@ struct wined3d_output * CDECL wined3d_adapter_get_output(const struct wined3d_ad
 
 unsigned int CDECL wined3d_adapter_get_output_count(const struct wined3d_adapter *adapter)
 {
-    TRACE("adapter %p, reporting %u outputs.\n", adapter, adapter->output_count);
+    TRACE("adapter %p, reporting %Iu outputs.\n", adapter, adapter->output_count);
 
     return adapter->output_count;
+}
+
+HRESULT CDECL wined3d_adapter_get_video_memory_info(const struct wined3d_adapter *adapter,
+        unsigned int node_idx, enum wined3d_memory_segment_group group,
+        struct wined3d_video_memory_info *info)
+{
+    static unsigned int once;
+    D3DKMT_QUERYVIDEOMEMORYINFO query_memory_info;
+    struct wined3d_adapter_identifier adapter_id;
+    NTSTATUS status;
+    HRESULT hr;
+
+    TRACE("adapter %p, node_idx %u, group %d, info %p.\n", adapter, node_idx, group, info);
+
+    if (group > WINED3D_MEMORY_SEGMENT_GROUP_NON_LOCAL)
+    {
+        WARN("Invalid memory segment group %#x.\n", group);
+        return E_INVALIDARG;
+    }
+
+    query_memory_info.hProcess = NULL;
+    query_memory_info.hAdapter = adapter->kmt_adapter;
+    query_memory_info.PhysicalAdapterIndex = node_idx;
+    query_memory_info.MemorySegmentGroup = (D3DKMT_MEMORY_SEGMENT_GROUP)group;
+    status = D3DKMTQueryVideoMemoryInfo(&query_memory_info);
+    if (status == STATUS_SUCCESS)
+    {
+        info->budget = query_memory_info.Budget;
+        info->current_usage = query_memory_info.CurrentUsage;
+        info->current_reservation = query_memory_info.CurrentReservation;
+        info->available_reservation = query_memory_info.AvailableForReservation;
+        return WINED3D_OK;
+    }
+
+    /* D3DKMTQueryVideoMemoryInfo() failed, fallback to fake memory info */
+    if (!once++)
+        FIXME("Returning fake video memory info.\n");
+
+    if (node_idx)
+        FIXME("Ignoring node index %u.\n", node_idx);
+
+    adapter_id.driver_size = 0;
+    adapter_id.description_size = 0;
+    if (FAILED(hr = wined3d_adapter_get_identifier(adapter, 0, &adapter_id)))
+        return hr;
+
+    switch (group)
+    {
+        case WINED3D_MEMORY_SEGMENT_GROUP_LOCAL:
+            info->budget = adapter_id.video_memory;
+            info->current_usage = adapter->vram_bytes_used;
+            info->available_reservation = adapter_id.video_memory / 2;
+            info->current_reservation = 0;
+            break;
+        case WINED3D_MEMORY_SEGMENT_GROUP_NON_LOCAL:
+            memset(info, 0, sizeof(*info));
+            break;
+    }
+    return WINED3D_OK;
+}
+
+static DWORD CALLBACK notification_thread_func(void *stop_event)
+{
+    struct wined3d_adapter_budget_change_notification *notification;
+    struct wined3d_video_memory_info info;
+    HRESULT hr;
+
+    SetThreadDescription(GetCurrentThread(), L"wined3d_budget_change_notification");
+
+    while (TRUE)
+    {
+        wined3d_mutex_lock();
+        LIST_FOR_EACH_ENTRY(notification, &adapter_budget_change_notifications,
+                struct wined3d_adapter_budget_change_notification, entry)
+        {
+            hr = wined3d_adapter_get_video_memory_info(notification->adapter, 0,
+                    WINED3D_MEMORY_SEGMENT_GROUP_LOCAL, &info);
+            if (SUCCEEDED(hr) && info.budget != notification->last_local_budget)
+            {
+                notification->last_local_budget = info.budget;
+                SetEvent(notification->event);
+                continue;
+            }
+
+            hr = wined3d_adapter_get_video_memory_info(notification->adapter, 0,
+                    WINED3D_MEMORY_SEGMENT_GROUP_NON_LOCAL, &info);
+            if (SUCCEEDED(hr) && info.budget != notification->last_non_local_budget)
+            {
+                notification->last_non_local_budget = info.budget;
+                SetEvent(notification->event);
+            }
+        }
+        wined3d_mutex_unlock();
+
+        if (WaitForSingleObject(stop_event, 1000) == WAIT_OBJECT_0)
+            break;
+    }
+
+    return TRUE;
+}
+
+HRESULT CDECL wined3d_adapter_register_budget_change_notification(const struct wined3d_adapter *adapter,
+        HANDLE event, DWORD *cookie)
+{
+    static DWORD cookie_counter;
+    static BOOL wrapped;
+    struct wined3d_adapter_budget_change_notification *notification, *new_notification;
+    BOOL found = FALSE;
+
+    new_notification = heap_alloc_zero(sizeof(*new_notification));
+    if (!new_notification)
+        return E_OUTOFMEMORY;
+
+    wined3d_mutex_lock();
+    new_notification->adapter = adapter;
+    new_notification->event = event;
+    new_notification->cookie = cookie_counter++;
+    if (cookie_counter < new_notification->cookie)
+        wrapped = TRUE;
+    if (wrapped)
+    {
+        while (TRUE)
+        {
+            LIST_FOR_EACH_ENTRY(notification, &adapter_budget_change_notifications,
+                    struct wined3d_adapter_budget_change_notification, entry)
+            {
+                if (notification->cookie == new_notification->cookie)
+                {
+                    found = TRUE;
+                    break;
+                }
+            }
+
+            if (!found)
+                break;
+
+            new_notification->cookie = cookie_counter++;
+        }
+    }
+
+    *cookie = new_notification->cookie;
+    list_add_head(&adapter_budget_change_notifications, &new_notification->entry);
+
+    if (!notification_thread)
+    {
+        notification_thread_stop_event = CreateEventW(0, FALSE, FALSE, NULL);
+        notification_thread = CreateThread(NULL, 0, notification_thread_func,
+                notification_thread_stop_event, 0, NULL);
+    }
+    wined3d_mutex_unlock();
+    return WINED3D_OK;
+}
+
+HRESULT CDECL wined3d_adapter_unregister_budget_change_notification(DWORD cookie)
+{
+    struct wined3d_adapter_budget_change_notification *notification;
+    HANDLE thread, thread_stop_event;
+
+    wined3d_mutex_lock();
+    LIST_FOR_EACH_ENTRY(notification, &adapter_budget_change_notifications,
+            struct wined3d_adapter_budget_change_notification, entry)
+    {
+        if (notification->cookie == cookie)
+        {
+            list_remove(&notification->entry);
+            heap_free(notification);
+            break;
+        }
+    }
+
+    if (!list_empty(&adapter_budget_change_notifications))
+    {
+        wined3d_mutex_unlock();
+        return WINED3D_OK;
+    }
+
+    thread = notification_thread;
+    thread_stop_event = notification_thread_stop_event;
+    notification_thread = NULL;
+    notification_thread_stop_event = NULL;
+    wined3d_mutex_unlock();
+    SetEvent(thread_stop_event);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    CloseHandle(thread_stop_event);
+    return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_register_software_device(struct wined3d *wined3d, void *init_function)
@@ -3215,21 +3412,11 @@ static struct wined3d_adapter *wined3d_adapter_no3d_create(unsigned int ordinal,
 
 static BOOL wined3d_adapter_create_output(struct wined3d_adapter *adapter, const WCHAR *output_name)
 {
-    struct wined3d_output *outputs;
     HRESULT hr;
 
-    if (!adapter->outputs && !(adapter->outputs = heap_calloc(1, sizeof(*adapter->outputs))))
-    {
+    if (!wined3d_array_reserve((void **)&adapter->outputs, &adapter->outputs_size,
+            adapter->output_count + 1, sizeof(*adapter->outputs)))
         return FALSE;
-    }
-    else
-    {
-        if (!(outputs = heap_realloc(adapter->outputs,
-                sizeof(*adapter->outputs) * (adapter->output_count + 1))))
-            return FALSE;
-
-        adapter->outputs = outputs;
-    }
 
     if (FAILED(hr = wined3d_output_init(&adapter->outputs[adapter->output_count],
             adapter->output_count, adapter, output_name)))
@@ -3246,7 +3433,9 @@ static BOOL wined3d_adapter_create_output(struct wined3d_adapter *adapter, const
 BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal, const LUID *luid,
         const struct wined3d_adapter_ops *adapter_ops)
 {
+    D3DKMT_OPENADAPTERFROMLUID open_adapter_desc;
     unsigned int output_idx = 0, primary_idx = 0;
+    D3DKMT_CLOSEADAPTER close_adapter_desc;
     DISPLAY_DEVICEW display_device;
     BOOL ret = FALSE;
 
@@ -3269,6 +3458,11 @@ BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
     }
     TRACE("adapter %p LUID %08x:%08x.\n", adapter, adapter->luid.HighPart, adapter->luid.LowPart);
 
+    open_adapter_desc.AdapterLuid = adapter->luid;
+    if (D3DKMTOpenAdapterFromLuid(&open_adapter_desc))
+        return FALSE;
+    adapter->kmt_adapter = open_adapter_desc.hAdapter;
+
     display_device.cb = sizeof(display_device);
     while (EnumDisplayDevicesW(NULL, output_idx++, &display_device, 0))
     {
@@ -3282,7 +3476,7 @@ BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
         if (!wined3d_adapter_create_output(adapter, display_device.DeviceName))
             goto done;
     }
-    TRACE("Initialised %d outputs for adapter %p.\n", adapter->output_count, adapter);
+    TRACE("Initialised %Iu outputs for adapter %p.\n", adapter->output_count, adapter);
 
     /* Make the primary output first */
     if (primary_idx)
@@ -3306,6 +3500,8 @@ done:
         for (output_idx = 0; output_idx < adapter->output_count; ++output_idx)
             wined3d_output_cleanup(&adapter->outputs[output_idx]);
         heap_free(adapter->outputs);
+        close_adapter_desc.hAdapter = adapter->kmt_adapter;
+        D3DKMTCloseAdapter(&close_adapter_desc);
     }
     return ret;
 }

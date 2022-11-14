@@ -1206,129 +1206,75 @@ static const char* dwarf2_get_cpp_name(dwarf2_debug_info_t* di, const char* name
     return last;
 }
 
-/******************************************************************
- *		dwarf2_read_range
- *
- * read a range for a given debug_info (either using AT_range attribute, in which
- * case we don't return all the details, or using AT_low_pc & AT_high_pc attributes)
- * in all cases, range is relative to beginning of compilation unit
- */
-static BOOL dwarf2_read_range(dwarf2_parse_context_t* ctx, const dwarf2_debug_info_t* di,
-                              ULONG_PTR* plow, ULONG_PTR* phigh)
+static unsigned dwarf2_get_num_ranges(const dwarf2_debug_info_t* di)
 {
     struct attribute            range;
 
     if (dwarf2_find_attribute(di, DW_AT_ranges, &range))
     {
         dwarf2_traverse_context_t   traverse;
-        ULONG_PTR                   low, high;
-        const ULONG_PTR             UMAX = ~(ULONG_PTR)0u;
-
-        traverse.data = ctx->module_ctx->sections[section_ranges].address + range.u.uvalue;
-        traverse.end_data = ctx->module_ctx->sections[section_ranges].address +
-            ctx->module_ctx->sections[section_ranges].size;
-
-        *plow  = UMAX;
-        *phigh = 0;
-        while (traverse.data + 2 * ctx->head.word_size < traverse.end_data)
-        {
-            low = dwarf2_parse_addr_head(&traverse, &ctx->head);
-            high = dwarf2_parse_addr_head(&traverse, &ctx->head);
-            if (low == 0 && high == 0) break;
-            if (low == (ctx->head.word_size == 8 ? (~(DWORD64)0u) : (DWORD64)(~0u)))
-                FIXME("unsupported yet (base address selection)\n");
-            /* range values are relative to start of compilation unit */
-            low += ctx->compiland->address - ctx->module_ctx->load_offset;
-            high += ctx->compiland->address - ctx->module_ctx->load_offset;
-            if (low  < *plow)  *plow = low;
-            if (high > *phigh) *phigh = high;
-        }
-        if (*plow == UMAX || *phigh == 0) {WARN("no entry found\n"); return FALSE;}
-        if (*plow == *phigh) {WARN("entry found, but low=high %Ix %Ix\n", low, high); return FALSE;}
-
-        return TRUE;
-    }
-    else
-    {
-        struct attribute            low_pc;
-        struct attribute            high_pc;
-
-        if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) ||
-            !dwarf2_find_attribute(di, DW_AT_high_pc, &high_pc))
-            return FALSE;
-        *plow = low_pc.u.uvalue;
-        *phigh = high_pc.u.uvalue;
-        if (ctx->head.version >= 4)
-            switch (high_pc.form)
-            {
-            case DW_FORM_addr:
-                break;
-            case DW_FORM_data1:
-            case DW_FORM_data2:
-            case DW_FORM_data4:
-            case DW_FORM_data8:
-            case DW_FORM_sdata:
-            case DW_FORM_udata:
-                /* From dwarf4 on, when FORM's class is constant, high_pc is an offset from low_pc */
-                *phigh += *plow;
-                break;
-            default:
-                FIXME("Unsupported class for high_pc\n");
-                break;
-            }
-        return TRUE;
-    }
-}
-
-static struct addr_range* dwarf2_get_ranges(const dwarf2_debug_info_t* di, unsigned* num_ranges)
-{
-    struct attribute            range;
-    struct addr_range*          ranges;
-    struct addr_range*          new_ranges;
-
-    if (dwarf2_find_attribute(di, DW_AT_ranges, &range))
-    {
-        dwarf2_traverse_context_t   traverse;
-        unsigned alloc = 16;
-        ranges = malloc(sizeof(struct addr_range) * alloc);
-        if (!ranges) return NULL;
-        *num_ranges = 0;
+        unsigned num_ranges = 0;
 
         traverse.data = di->unit_ctx->module_ctx->sections[section_ranges].address + range.u.uvalue;
         traverse.end_data = di->unit_ctx->module_ctx->sections[section_ranges].address +
             di->unit_ctx->module_ctx->sections[section_ranges].size;
 
-        while (traverse.data + 2 * di->unit_ctx->head.word_size < traverse.end_data)
+        for (num_ranges = 0; traverse.data + 2 * di->unit_ctx->head.word_size < traverse.end_data; num_ranges++)
         {
             ULONG_PTR low = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
             ULONG_PTR high = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
             if (low == 0 && high == 0) break;
             if (low == (di->unit_ctx->head.word_size == 8 ? (~(DWORD64)0u) : (DWORD64)(~0u)))
                 FIXME("unsupported yet (base address selection)\n");
-            if (*num_ranges >= alloc)
-            {
-                alloc *= 2;
-                new_ranges = realloc(ranges, sizeof(struct addr_range) * alloc);
-                if (!new_ranges)
-                {
-                    free(ranges);
-                    return NULL;
-                }
-                ranges = new_ranges;
-            }
-            ranges[*num_ranges].low = di->unit_ctx->compiland->address + low;
-            ranges[*num_ranges].high = di->unit_ctx->compiland->address + high;
-            (*num_ranges)++;
         }
+        return num_ranges;
     }
     else
     {
         struct attribute            low_pc;
         struct attribute            high_pc;
 
-        if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) ||
+        return dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) &&
+            dwarf2_find_attribute(di, DW_AT_high_pc, &high_pc) ? 1 : 0;
+    }
+}
+
+/* nun_ranges must have been gotten from dwarf2_get_num_ranges() */
+static BOOL dwarf2_fill_ranges(const dwarf2_debug_info_t* di, struct addr_range* ranges, unsigned num_ranges)
+{
+    struct attribute            range;
+
+    if (dwarf2_find_attribute(di, DW_AT_ranges, &range))
+    {
+        dwarf2_traverse_context_t   traverse;
+        unsigned                    index;
+
+        traverse.data = di->unit_ctx->module_ctx->sections[section_ranges].address + range.u.uvalue;
+        traverse.end_data = di->unit_ctx->module_ctx->sections[section_ranges].address +
+            di->unit_ctx->module_ctx->sections[section_ranges].size;
+
+        for (index = 0; traverse.data + 2 * di->unit_ctx->head.word_size < traverse.end_data; index++)
+        {
+            ULONG_PTR low = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
+            ULONG_PTR high = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
+            if (low == 0 && high == 0) break;
+            if (low == (di->unit_ctx->head.word_size == 8 ? (~(DWORD64)0u) : (DWORD64)(~0u)))
+                FIXME("unsupported yet (base address selection)\n");
+            if (index >= num_ranges) return FALSE; /* sanity check */
+            ranges[index].low = di->unit_ctx->compiland->address + low;
+            ranges[index].high = di->unit_ctx->compiland->address + high;
+        }
+        return index == num_ranges; /* sanity check */
+    }
+    else
+    {
+        struct attribute            low_pc;
+        struct attribute            high_pc;
+
+        if (num_ranges != 1 || /* sanity check */
+            !dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) ||
             !dwarf2_find_attribute(di, DW_AT_high_pc, &high_pc))
-            return NULL;
+            return FALSE;
         if (di->unit_ctx->head.version >= 4)
             switch (high_pc.form)
             {
@@ -1347,12 +1293,21 @@ static struct addr_range* dwarf2_get_ranges(const dwarf2_debug_info_t* di, unsig
                 FIXME("Unsupported class for high_pc\n");
                 break;
             }
-        ranges = malloc(sizeof(struct addr_range));
-        if (!ranges) return NULL;
         ranges[0].low = di->unit_ctx->module_ctx->load_offset + low_pc.u.uvalue;
         ranges[0].high = di->unit_ctx->module_ctx->load_offset + high_pc.u.uvalue;
-        *num_ranges = 1;
     }
+    return TRUE;
+}
+
+static struct addr_range* dwarf2_get_ranges(const dwarf2_debug_info_t* di, unsigned* num_ranges)
+{
+    unsigned nr = dwarf2_get_num_ranges(di);
+    struct addr_range* ranges;
+
+    if (nr == 0) return NULL;
+    ranges = malloc(nr * sizeof(ranges[0]));
+    if (!ranges || !dwarf2_fill_ranges(di, ranges, nr)) return NULL;
+    *num_ranges = nr;
     return ranges;
 }
 
@@ -1998,7 +1953,7 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
             loc.offset += subpgm->ctx->module_ctx->load_offset;
             if (subpgm->top_func)
             {
-                if (ext.u.uvalue) WARN("unexpected global inside a functionn");
+                if (ext.u.uvalue) WARN("unexpected global inside a function\n");
                 symt_add_func_local(subpgm->ctx->module_ctx->module, subpgm->current_func,
                                     DataIsStaticLocal, &loc, subpgm->current_block,
                                     param_type, dwarf2_get_cpp_name(di, name.u.string));
@@ -2156,7 +2111,6 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                             dwarf2_debug_info_t* di)
 {
     struct attribute    name;
-    ULONG_PTR           low_pc, high_pc;
     struct symt*        ret_type;
     struct symt_function_signature* sig_type;
     struct symt_inlinesite* inlined;
@@ -2168,9 +2122,9 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
+    if ((adranges = dwarf2_get_ranges(di, &num_adranges)) == NULL)
     {
-        WARN("cannot read range\n");
+        WARN("cannot read ranges\n");
         return;
     }
     if (!dwarf2_find_attribute(di, DW_AT_name, &name))
@@ -2187,20 +2141,14 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                   subpgm->top_func,
                                   subpgm->current_block ? &subpgm->current_block->symt : &subpgm->current_func->symt,
                                   dwarf2_get_cpp_name(di, name.u.string),
-                                  subpgm->ctx->module_ctx->load_offset + low_pc,
-                                  &sig_type->symt);
+                                  adranges[0].low, &sig_type->symt);
     subpgm->current_func = (struct symt_function*)inlined;
     subpgm->current_block = NULL;
 
-    if ((adranges = dwarf2_get_ranges(di, &num_adranges)) != NULL)
-    {
-        for (i = 0; i < num_adranges; ++i)
-            symt_add_inlinesite_range(subpgm->ctx->module_ctx->module, inlined,
-                                      adranges[i].low, adranges[i].high);
-        free(adranges);
-    }
-    else
-        WARN("cannot read ranges\n");
+    for (i = 0; i < num_adranges; ++i)
+        symt_add_inlinesite_range(subpgm->ctx->module_ctx->module, inlined,
+                                  adranges[i].low, adranges[i].high);
+    free(adranges);
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -2238,22 +2186,51 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
 static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
 					  dwarf2_debug_info_t* di)
 {
-    ULONG_PTR           low_pc, high_pc;
+    unsigned int        num_ranges;
     struct vector*      children;
     dwarf2_debug_info_t*child;
     unsigned int        i;
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
+    num_ranges = dwarf2_get_num_ranges(di);
+    if (!num_ranges)
     {
-        WARN("no range\n");
+        WARN("no ranges\n");
         return;
     }
 
-    subpgm->current_block = symt_open_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func, subpgm->current_block,
-                                                 subpgm->ctx->module_ctx->load_offset + low_pc - subpgm->current_func->address,
-                                                 high_pc - low_pc);
+    /* Dwarf tends to keep the structure of the C/C++ program, and emits DW_TAG_lexical_block
+     * for every block the in source program.
+     * With inlining and other optimizations, code for a block no longer lies in a contiguous
+     * chunk of memory. It's hence described with (potentially) multiple chunks of memory.
+     * Then each variable of each block is attached to its block. (A)
+     *
+     * PDB on the other hand no longer emits block information, and merge variable information
+     * at function level (actually function and each inline site).
+     * For example, if several variables of same name exist in different blocks of a function,
+     * only one entry for that name will exist. The information stored in (A) will point
+     * to the correct instance as defined by C/C++ scoping rules.
+     *
+     * (A) in all cases, there is information telling for each address of the function if a
+     *     variable is accessible, and if so, how to get its value.
+     *
+     * DbgHelp only exposes a contiguous chunk of memory for a block.
+     *
+     * => Store internally all the ranges of addresses in a block, but only expose the size
+     *    of the first chunk of memory.
+     *    Otherwise, it would break the rule: blocks' chunks don't overlap.
+     * Note: This could mislead some programs using the blocks' address and size information.
+     *       That's very unlikely to happen (most will use the APIs from DbgHelp, which will
+     *       hide this information to the caller).
+     */
+    subpgm->current_block = symt_open_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func,
+                                                 subpgm->current_block, num_ranges);
+    if (!dwarf2_fill_ranges(di, subpgm->current_block->ranges, num_ranges))
+    {
+        FIXME("Unexpected situation\n");
+        subpgm->current_block->num_ranges = 0;
+    }
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -3051,7 +3028,7 @@ static const dwarf2_cuhead_t* get_cuhead_from_func(const struct symt_function* f
     return NULL;
 }
 
-static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame);
+static enum location_error compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame);
 
 static enum location_error loc_compute_frame(struct process* pcs,
                                              const struct module_format* modfmt,
@@ -3094,7 +3071,8 @@ static enum location_error loc_compute_frame(struct process* pcs,
                 }
                 break;
             case loc_dwarf2_frame_cfa:
-                if (!compute_call_frame_cfa(modfmt->module, ip + ((struct symt_compiland*)func->container)->address, frame)) return loc_err_internal;
+                err = compute_call_frame_cfa(modfmt->module, ip + ((struct symt_compiland*)func->container)->address, frame);
+                if (err < 0) return err;
                 break;
             default:
                 WARN("Unsupported frame kind %d\n", pframe->kind);
@@ -3889,11 +3867,11 @@ BOOL dwarf2_virtual_unwind(struct cpu_stack_walk *csw, ULONG_PTR ip,
     return TRUE;
 }
 
-static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame)
+static enum location_error compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame)
 {
     struct frame_info info;
 
-    if (!dwarf2_fetch_frame_info(module, module->cpu, ip, &info)) return FALSE;
+    if (!dwarf2_fetch_frame_info(module, module->cpu, ip, &info)) return loc_err_internal;
 
     /* beginning of function, or no available dwarf information ? */
     if (ip == info.ip || info.state.rules[info.retaddr_reg] == RULE_UNSET)
@@ -3911,11 +3889,15 @@ static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct l
         switch (info.state.cfa_rule)
         {
         case RULE_EXPRESSION:
-            FIXME("Too complex expression for frame_CFA resolution (RULE_EXPRESSION)\n");
-            return FALSE;
+            WARN("Too complex expression for frame_CFA resolution (RULE_EXPRESSION)\n");
+            return loc_err_too_complex;
         case RULE_VAL_EXPRESSION:
-            FIXME("Too complex expression for frame_CFA resolution (RULE_VAL_EXPRESSION)\n");
-            return FALSE;
+            /* unfortunately, we've seen at least construct like:
+             *     cfa := 'breg_x + offset; deref'
+             * which is an indirection too much for the DbgHelp API.
+             */
+            WARN("Too complex expression for frame_CFA resolution (RULE_VAL_EXPRESSION)\n");
+            return loc_err_too_complex;
         default:
             frame->kind = loc_regrel;
             frame->reg = module->cpu->map_dwarf_register(info.state.cfa_reg, module, TRUE);
@@ -3923,7 +3905,7 @@ static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct l
             break;
         }
     }
-    return TRUE;
+    return 0;
 }
 
 static void dwarf2_location_compute(struct process* pcs,

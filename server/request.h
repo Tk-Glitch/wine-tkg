@@ -242,6 +242,7 @@ DECL_HANDLER(kill_win_timer);
 DECL_HANDLER(is_window_hung);
 DECL_HANDLER(get_serial_info);
 DECL_HANDLER(set_serial_info);
+DECL_HANDLER(cancel_sync);
 DECL_HANDLER(register_async);
 DECL_HANDLER(cancel_async);
 DECL_HANDLER(get_async_result);
@@ -386,7 +387,6 @@ DECL_HANDLER(set_cursor);
 DECL_HANDLER(get_cursor_history);
 DECL_HANDLER(get_rawinput_buffer);
 DECL_HANDLER(update_rawinput_devices);
-DECL_HANDLER(get_rawinput_devices);
 DECL_HANDLER(create_job);
 DECL_HANDLER(open_job);
 DECL_HANDLER(assign_job);
@@ -537,6 +537,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_is_window_hung,
     (req_handler)req_get_serial_info,
     (req_handler)req_set_serial_info,
+    (req_handler)req_cancel_sync,
     (req_handler)req_register_async,
     (req_handler)req_cancel_async,
     (req_handler)req_get_async_result,
@@ -681,7 +682,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_cursor_history,
     (req_handler)req_get_rawinput_buffer,
     (req_handler)req_update_rawinput_devices,
-    (req_handler)req_get_rawinput_devices,
     (req_handler)req_create_job,
     (req_handler)req_open_job,
     (req_handler)req_assign_job,
@@ -1426,6 +1426,9 @@ C_ASSERT( sizeof(struct get_serial_info_reply) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_serial_info_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_serial_info_request, flags) == 16 );
 C_ASSERT( sizeof(struct set_serial_info_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct cancel_sync_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct cancel_sync_request, iosb) == 16 );
+C_ASSERT( sizeof(struct cancel_sync_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct register_async_request, type) == 12 );
 C_ASSERT( FIELD_OFFSET(struct register_async_request, async) == 16 );
 C_ASSERT( FIELD_OFFSET(struct register_async_request, count) == 56 );
@@ -2250,9 +2253,6 @@ C_ASSERT( FIELD_OFFSET(struct get_rawinput_buffer_reply, next_size) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_rawinput_buffer_reply, count) == 12 );
 C_ASSERT( sizeof(struct get_rawinput_buffer_reply) == 16 );
 C_ASSERT( sizeof(struct update_rawinput_devices_request) == 16 );
-C_ASSERT( sizeof(struct get_rawinput_devices_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_rawinput_devices_reply, device_count) == 8 );
-C_ASSERT( sizeof(struct get_rawinput_devices_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_job_request, access) == 12 );
 C_ASSERT( sizeof(struct create_job_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_job_reply, handle) == 8 );

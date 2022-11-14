@@ -34,6 +34,17 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
+struct dce
+{
+    struct list entry;         /* entry in global DCE list */
+    HDC         hdc;
+    HWND        hwnd;
+    HRGN        clip_rgn;
+    DWORD       flags;
+    LONG        count;         /* usage count; 0 or 1 for cache DCEs, always 1 for window DCEs,
+                                  always >= 1 for class DCEs */
+};
+
 static struct list dce_list = LIST_INIT(dce_list);
 
 #define DCE_CACHE_SIZE 64
@@ -45,17 +56,17 @@ static pthread_mutex_t surfaces_lock = PTHREAD_MUTEX_INITIALIZER;
  * Dummy window surface for windows that shouldn't get painted.
  */
 
-static void CDECL dummy_surface_lock( struct window_surface *window_surface )
+static void dummy_surface_lock( struct window_surface *window_surface )
 {
     /* nothing to do */
 }
 
-static void CDECL dummy_surface_unlock( struct window_surface *window_surface )
+static void dummy_surface_unlock( struct window_surface *window_surface )
 {
     /* nothing to do */
 }
 
-static void *CDECL dummy_surface_get_bitmap_info( struct window_surface *window_surface, BITMAPINFO *info )
+static void *dummy_surface_get_bitmap_info( struct window_surface *window_surface, BITMAPINFO *info )
 {
     static DWORD dummy_data;
 
@@ -73,23 +84,23 @@ static void *CDECL dummy_surface_get_bitmap_info( struct window_surface *window_
     return &dummy_data;
 }
 
-static RECT *CDECL dummy_surface_get_bounds( struct window_surface *window_surface )
+static RECT *dummy_surface_get_bounds( struct window_surface *window_surface )
 {
     static RECT dummy_bounds;
     return &dummy_bounds;
 }
 
-static void CDECL dummy_surface_set_region( struct window_surface *window_surface, HRGN region )
+static void dummy_surface_set_region( struct window_surface *window_surface, HRGN region )
 {
     /* nothing to do */
 }
 
-static void CDECL dummy_surface_flush( struct window_surface *window_surface )
+static void dummy_surface_flush( struct window_surface *window_surface )
 {
     /* nothing to do */
 }
 
-static void CDECL dummy_surface_destroy( struct window_surface *window_surface )
+static void dummy_surface_destroy( struct window_surface *window_surface )
 {
     /* nothing to do */
 }
@@ -106,6 +117,261 @@ static const struct window_surface_funcs dummy_surface_funcs =
 };
 
 struct window_surface dummy_surface = { &dummy_surface_funcs, { NULL, NULL }, 1, { 0, 0, 1, 1 } };
+
+/*******************************************************************
+ * Off-screen window surface.
+ */
+
+struct offscreen_window_surface
+{
+    struct window_surface header;
+    pthread_mutex_t mutex;
+    RECT bounds;
+    char *bits;
+    BITMAPINFO info;
+};
+
+static const struct window_surface_funcs offscreen_window_surface_funcs;
+
+static struct offscreen_window_surface *impl_from_window_surface( struct window_surface *base )
+{
+    if (!base || base->funcs != &offscreen_window_surface_funcs) return NULL;
+    return CONTAINING_RECORD( base, struct offscreen_window_surface, header );
+}
+
+static void offscreen_window_surface_lock( struct window_surface *base )
+{
+    struct offscreen_window_surface *impl = impl_from_window_surface( base );
+    pthread_mutex_lock( &impl->mutex );
+}
+
+static void offscreen_window_surface_unlock( struct window_surface *base )
+{
+    struct offscreen_window_surface *impl = impl_from_window_surface( base );
+    pthread_mutex_unlock( &impl->mutex );
+}
+
+static RECT *offscreen_window_surface_get_bounds( struct window_surface *base )
+{
+    struct offscreen_window_surface *impl = impl_from_window_surface( base );
+    return &impl->bounds;
+}
+
+static void *offscreen_window_surface_get_bitmap_info( struct window_surface *base, BITMAPINFO *info )
+{
+    struct offscreen_window_surface *impl = impl_from_window_surface( base );
+    info->bmiHeader = impl->info.bmiHeader;
+    return impl->bits;
+}
+
+static void offscreen_window_surface_set_region( struct window_surface *base, HRGN region )
+{
+}
+
+static void offscreen_window_surface_flush( struct window_surface *base )
+{
+    struct offscreen_window_surface *impl = impl_from_window_surface( base );
+    base->funcs->lock( base );
+    reset_bounds( &impl->bounds );
+    base->funcs->unlock( base );
+}
+
+static void offscreen_window_surface_destroy( struct window_surface *base )
+{
+    struct offscreen_window_surface *impl = impl_from_window_surface( base );
+    free( impl );
+}
+
+static const struct window_surface_funcs offscreen_window_surface_funcs =
+{
+    offscreen_window_surface_lock,
+    offscreen_window_surface_unlock,
+    offscreen_window_surface_get_bitmap_info,
+    offscreen_window_surface_get_bounds,
+    offscreen_window_surface_set_region,
+    offscreen_window_surface_flush,
+    offscreen_window_surface_destroy
+};
+
+void create_offscreen_window_surface( const RECT *visible_rect, struct window_surface **surface )
+{
+    struct offscreen_window_surface *impl;
+    SIZE_T size;
+    RECT surface_rect = *visible_rect;
+    pthread_mutexattr_t attr;
+
+    TRACE( "visible_rect %s, surface %p.\n", wine_dbgstr_rect( visible_rect ), surface );
+
+    OffsetRect( &surface_rect, -surface_rect.left, -surface_rect.top );
+    surface_rect.right  = (surface_rect.right + 0x1f) & ~0x1f;
+    surface_rect.bottom = (surface_rect.bottom + 0x1f) & ~0x1f;
+
+    /* check that old surface is an offscreen_window_surface, or release it */
+    if ((impl = impl_from_window_surface( *surface )))
+    {
+        /* if the rect didn't change, keep the same surface */
+        if (EqualRect( &surface_rect, &impl->header.rect )) return;
+        window_surface_release( &impl->header );
+    }
+    else if (*surface) window_surface_release( *surface );
+
+    /* create a new window surface */
+    *surface = NULL;
+    size = surface_rect.right * surface_rect.bottom * 4;
+    if (!(impl = calloc(1, offsetof( struct offscreen_window_surface, info.bmiColors[0] ) + size))) return;
+
+    impl->header.funcs = &offscreen_window_surface_funcs;
+    impl->header.ref = 1;
+    impl->header.rect = surface_rect;
+
+    pthread_mutexattr_init( &attr );
+    pthread_mutexattr_settype( &attr, PTHREAD_MUTEX_RECURSIVE );
+    pthread_mutex_init( &impl->mutex, &attr );
+    pthread_mutexattr_destroy( &attr );
+
+    reset_bounds( &impl->bounds );
+
+    impl->bits = (char *)&impl->info.bmiColors[0];
+    impl->info.bmiHeader.biSize        = sizeof( impl->info );
+    impl->info.bmiHeader.biWidth       = surface_rect.right;
+    impl->info.bmiHeader.biHeight      = surface_rect.bottom;
+    impl->info.bmiHeader.biPlanes      = 1;
+    impl->info.bmiHeader.biBitCount    = 32;
+    impl->info.bmiHeader.biCompression = BI_RGB;
+    impl->info.bmiHeader.biSizeImage   = size;
+
+    TRACE( "created window surface %p\n", &impl->header );
+
+    *surface = &impl->header;
+}
+
+/* window surface used to implement the DIB.DRV driver */
+
+struct dib_window_surface
+{
+    struct window_surface header;
+    RECT                  bounds;
+    void                 *bits;
+    UINT                  info_size;
+    BITMAPINFO            info;   /* variable size, must be last */
+};
+
+static struct dib_window_surface *get_dib_surface( struct window_surface *surface )
+{
+    return (struct dib_window_surface *)surface;
+}
+
+/***********************************************************************
+ *           dib_surface_lock
+ */
+static void dib_surface_lock( struct window_surface *window_surface )
+{
+    /* nothing to do */
+}
+
+/***********************************************************************
+ *           dib_surface_unlock
+ */
+static void dib_surface_unlock( struct window_surface *window_surface )
+{
+    /* nothing to do */
+}
+
+/***********************************************************************
+ *           dib_surface_get_bitmap_info
+ */
+static void *dib_surface_get_bitmap_info( struct window_surface *window_surface, BITMAPINFO *info )
+{
+    struct dib_window_surface *surface = get_dib_surface( window_surface );
+
+    memcpy( info, &surface->info, surface->info_size );
+    return surface->bits;
+}
+
+/***********************************************************************
+ *           dib_surface_get_bounds
+ */
+static RECT *dib_surface_get_bounds( struct window_surface *window_surface )
+{
+    struct dib_window_surface *surface = get_dib_surface( window_surface );
+
+    return &surface->bounds;
+}
+
+/***********************************************************************
+ *           dib_surface_set_region
+ */
+static void dib_surface_set_region( struct window_surface *window_surface, HRGN region )
+{
+    /* nothing to do */
+}
+
+/***********************************************************************
+ *           dib_surface_flush
+ */
+static void dib_surface_flush( struct window_surface *window_surface )
+{
+    /* nothing to do */
+}
+
+/***********************************************************************
+ *           dib_surface_destroy
+ */
+static void dib_surface_destroy( struct window_surface *window_surface )
+{
+    struct dib_window_surface *surface = get_dib_surface( window_surface );
+
+    TRACE( "freeing %p\n", surface );
+    free( surface );
+}
+
+static const struct window_surface_funcs dib_surface_funcs =
+{
+    dib_surface_lock,
+    dib_surface_unlock,
+    dib_surface_get_bitmap_info,
+    dib_surface_get_bounds,
+    dib_surface_set_region,
+    dib_surface_flush,
+    dib_surface_destroy
+};
+
+BOOL create_dib_surface( HDC hdc, const BITMAPINFO *info )
+{
+    struct dib_window_surface *surface;
+    int color = 0;
+    HRGN region;
+    RECT rect;
+
+    if (info->bmiHeader.biBitCount <= 8)
+        color = info->bmiHeader.biClrUsed ? info->bmiHeader.biClrUsed : (1 << info->bmiHeader.biBitCount);
+    else if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        color = 3;
+
+    surface = calloc( 1, offsetof( struct dib_window_surface, info.bmiColors[color] ));
+    if (!surface) return FALSE;
+
+    rect.left   = 0;
+    rect.top    = 0;
+    rect.right  = info->bmiHeader.biWidth;
+    rect.bottom = abs(info->bmiHeader.biHeight);
+
+    surface->header.funcs = &dib_surface_funcs;
+    surface->header.rect  = rect;
+    surface->header.ref   = 1;
+    surface->info_size    = offsetof( BITMAPINFO, bmiColors[color] );
+    surface->bits         = (char *)info + surface->info_size;
+    memcpy( &surface->info, info, surface->info_size );
+
+    TRACE( "created %p %ux%u for info %p bits %p\n",
+           surface, rect.right, rect.bottom, info, surface->bits );
+
+    region = NtGdiCreateRectRgn( rect.left, rect.top, rect.right, rect.bottom );
+    set_visible_region( hdc, region, &rect, &rect, &surface->header );
+    TRACE( "using hdc %p surface %p\n", hdc, surface );
+    window_surface_release( &surface->header );
+    return TRUE;
+}
 
 /*******************************************************************
  *           register_window_surface
@@ -262,7 +528,7 @@ static void update_visible_region( struct dce *dce )
     }
 
     if (!surface) SetRectEmpty( &top_rect );
-    __wine_set_visible_region( dce->hdc, vis_rgn, &win_rect, &top_rect, surface );
+    set_visible_region( dce->hdc, vis_rgn, &win_rect, &top_rect, surface );
     if (surface) window_surface_release( surface );
 }
 
@@ -273,7 +539,7 @@ static void release_dce( struct dce *dce )
 {
     if (!dce->hwnd) return;  /* already released */
 
-    __wine_set_visible_region( dce->hdc, 0, &dummy_surface.rect, &dummy_surface.rect, &dummy_surface );
+    set_visible_region( dce->hdc, 0, &dummy_surface.rect, &dummy_surface.rect, &dummy_surface );
     user_driver->pReleaseDC( dce->hwnd, dce->hdc );
 
     if (dce->clip_rgn) NtGdiDeleteObjectApp( dce->clip_rgn );
@@ -544,7 +810,7 @@ void invalidate_dce( WND *win, const RECT *extra_rect )
 
     if (!win->parent) return;
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( win->obj.handle ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( win->obj.handle ));
     get_window_rect( win->obj.handle, &window_rect, get_thread_dpi() );
 
     TRACE("%p parent %p %s (%s)\n",
@@ -579,7 +845,7 @@ void invalidate_dce( WND *win, const RECT *extra_rect )
                 make_dc_dirty( dce );
         }
     }
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
 }
 
 /***********************************************************************
@@ -794,7 +1060,7 @@ static HRGN get_update_region( HWND hwnd, UINT *flags, HWND *child )
     {
         if (!(data = malloc( sizeof(*data) + size - 1 )))
         {
-            SetLastError( ERROR_OUTOFMEMORY );
+            RtlSetLastWin32Error( ERROR_OUTOFMEMORY );
             return 0;
         }
 
@@ -821,7 +1087,7 @@ static HRGN get_update_region( HWND hwnd, UINT *flags, HWND *child )
         free( data );
     } while (status == STATUS_BUFFER_OVERFLOW);
 
-    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError(status) );
     return hrgn;
 }
 
@@ -894,7 +1160,7 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
         RECT client, window, update;
         INT type;
 
-        context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+        context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
         /* check if update rgn overlaps with nonclient area */
         type = NtGdiGetRgnBox( whole_rgn, &update );
@@ -922,20 +1188,20 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
 
         if (whole_rgn) /* NOTE: WM_NCPAINT allows wParam to be 1 */
         {
-            if ((*flags & UPDATE_NONCLIENT) && user_callbacks)
+            if (*flags & UPDATE_NONCLIENT)
             {
                 /* Mark standard scroll bars as not painted before sending WM_NCPAINT */
                 style = get_window_long( hwnd, GWL_STYLE );
                 if (style & WS_HSCROLL)
-                    user_callbacks->set_standard_scroll_painted( hwnd, SB_HORZ, FALSE );
+                    set_standard_scroll_painted( hwnd, SB_HORZ, FALSE );
                 if (style & WS_VSCROLL)
-                    user_callbacks->set_standard_scroll_painted( hwnd, SB_VERT, FALSE );
+                    set_standard_scroll_painted( hwnd, SB_VERT, FALSE );
 
                 send_message( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0 );
             }
             if (whole_rgn > (HRGN)1) NtGdiDeleteObjectApp( whole_rgn );
         }
-        set_thread_dpi_awareness_context( context );
+        SetThreadDpiAwarenessContext( context );
     }
     return client_rgn;
 }
@@ -980,6 +1246,90 @@ static BOOL send_erase( HWND hwnd, UINT flags, HRGN client_rgn,
 }
 
 /***********************************************************************
+ *           copy_bits_from_surface
+ *
+ * Copy bits from a window surface; helper for move_window_bits and move_window_bits_parent.
+ */
+static void copy_bits_from_surface( HWND hwnd, struct window_surface *surface,
+                                    const RECT *dst, const RECT *src )
+{
+    char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
+    BITMAPINFO *info = (BITMAPINFO *)buffer;
+    void *bits;
+    UINT flags = UPDATE_NOCHILDREN | UPDATE_CLIPCHILDREN;
+    HRGN rgn = get_update_region( hwnd, &flags, NULL );
+    HDC hdc = NtUserGetDCEx( hwnd, rgn, DCX_CACHE | DCX_WINDOW | DCX_EXCLUDERGN );
+
+    bits = surface->funcs->get_info( surface, info );
+    surface->funcs->lock( surface );
+    NtGdiSetDIBitsToDeviceInternal( hdc, dst->left, dst->top, dst->right - dst->left, dst->bottom - dst->top,
+                                    src->left - surface->rect.left, surface->rect.bottom - src->bottom,
+                                    0, surface->rect.bottom - surface->rect.top,
+                                    bits, info, DIB_RGB_COLORS, 0, 0, FALSE, NULL );
+    surface->funcs->unlock( surface );
+    NtUserReleaseDC( hwnd, hdc );
+}
+
+/***********************************************************************
+ *           move_window_bits
+ *
+ * Move the window bits when a window is resized or its surface recreated.
+ */
+void move_window_bits( HWND hwnd, struct window_surface *old_surface,
+                       struct window_surface *new_surface,
+                       const RECT *visible_rect, const RECT *old_visible_rect,
+                       const RECT *window_rect, const RECT *valid_rects )
+{
+    RECT dst = valid_rects[0];
+    RECT src = valid_rects[1];
+
+    if (new_surface != old_surface ||
+        src.left - old_visible_rect->left != dst.left - visible_rect->left ||
+        src.top - old_visible_rect->top != dst.top - visible_rect->top)
+    {
+        TRACE( "copying %s -> %s\n", wine_dbgstr_rect( &src ), wine_dbgstr_rect( &dst ));
+        OffsetRect( &src, -old_visible_rect->left, -old_visible_rect->top );
+        OffsetRect( &dst, -window_rect->left, -window_rect->top );
+        copy_bits_from_surface( hwnd, old_surface, &dst, &src );
+    }
+}
+
+
+/***********************************************************************
+ *           move_window_bits_parent
+ *
+ * Move the window bits in the parent surface when a child is moved.
+ */
+void move_window_bits_parent( HWND hwnd, HWND parent, const RECT *window_rect, const RECT *valid_rects )
+{
+    struct window_surface *surface;
+    RECT dst = valid_rects[0];
+    RECT src = valid_rects[1];
+    WND *win;
+
+    if (src.left == dst.left && src.top == dst.top) return;
+
+    if (!(win = get_win_ptr( parent ))) return;
+    if (win == WND_DESKTOP || win == WND_OTHER_PROCESS) return;
+    if (!(surface = win->surface))
+    {
+        release_win_ptr( win );
+        return;
+    }
+
+    TRACE( "copying %s -> %s\n", wine_dbgstr_rect( &src ), wine_dbgstr_rect( &dst ));
+    map_window_points( NtUserGetAncestor( hwnd, GA_PARENT ), parent, (POINT *)&src, 2, get_thread_dpi() );
+    OffsetRect( &src, win->client_rect.left - win->visible_rect.left,
+                win->client_rect.top - win->visible_rect.top );
+    OffsetRect( &dst, -window_rect->left, -window_rect->top );
+    window_surface_add_ref( surface );
+    release_win_ptr( win );
+
+    copy_bits_from_surface( hwnd, surface, &dst, &src );
+    window_surface_release( surface );
+}
+
+/***********************************************************************
  *           NtUserBeginPaint (win32u.@)
  */
 HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
@@ -990,7 +1340,7 @@ HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
     RECT rect;
     UINT flags = UPDATE_NONCLIENT | UPDATE_ERASE | UPDATE_PAINT | UPDATE_INTERNALPAINT | UPDATE_NOCHILDREN;
 
-    if (user_callbacks) user_callbacks->pHideCaret( hwnd );
+    NtUserHideCaret( hwnd );
 
     if (!(hrgn = send_ncpaint( hwnd, NULL, &flags ))) return 0;
 
@@ -1014,7 +1364,7 @@ HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
  */
 BOOL WINAPI NtUserEndPaint( HWND hwnd, const PAINTSTRUCT *ps )
 {
-    if (user_callbacks) user_callbacks->pShowCaret( hwnd );
+    NtUserShowCaret( hwnd );
     flush_window_surfaces( FALSE );
     if (!ps) return FALSE;
     release_dc( hwnd, ps->hdc, TRUE );
@@ -1082,6 +1432,7 @@ static void update_now( HWND hwnd, UINT rdw_flags )
  */
 BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags )
 {
+    LARGE_INTEGER zero = { .QuadPart = 0 };
     static const RECT empty;
     BOOL ret;
 
@@ -1102,7 +1453,7 @@ BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT fla
     }
 
     /* process pending expose events before painting */
-    if (flags & RDW_UPDATENOW) user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_PAINT, 0 );
+    if (flags & RDW_UPDATENOW) user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, &zero, QS_PAINT, 0 );
 
     if (rect && !hrgn)
     {
@@ -1149,7 +1500,7 @@ INT WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
     UINT flags = UPDATE_NOCHILDREN;
     HRGN update_rgn;
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
     if (erase) flags |= UPDATE_NONCLIENT | UPDATE_ERASE;
 
@@ -1164,7 +1515,7 @@ INT WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
         /* map region to client coordinates */
         map_window_region( 0, hwnd, hrgn );
     }
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return retval;
 }
 
@@ -1198,4 +1549,282 @@ BOOL WINAPI NtUserGetUpdateRect( HWND hwnd, RECT *rect, BOOL erase )
     flags = UPDATE_PAINT | UPDATE_NOCHILDREN;
     if (need_erase) flags |= UPDATE_DELAYED_ERASE;
     return get_update_flags( hwnd, NULL, &flags ) && (flags & UPDATE_PAINT);
+}
+
+/***********************************************************************
+ *           NtUserExcludeUpdateRgn (win32u.@)
+ */
+INT WINAPI NtUserExcludeUpdateRgn( HDC hdc, HWND hwnd )
+{
+    HRGN update_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+    INT ret = NtUserGetUpdateRgn( hwnd, update_rgn, FALSE );
+
+    if (ret != ERROR)
+    {
+        DPI_AWARENESS_CONTEXT context;
+        POINT pt;
+
+        context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
+        NtGdiGetDCPoint( hdc, NtGdiGetDCOrg, &pt );
+        map_window_points( 0, hwnd, &pt, 1, get_thread_dpi() );
+        NtGdiOffsetRgn( update_rgn, -pt.x, -pt.y );
+        ret = NtGdiExtSelectClipRgn( hdc, update_rgn, RGN_DIFF );
+        SetThreadDpiAwarenessContext( context );
+    }
+    NtGdiDeleteObjectApp( update_rgn );
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserInvalidateRgn (win32u.@)
+ */
+BOOL WINAPI NtUserInvalidateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
+{
+    if (!hwnd)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    return NtUserRedrawWindow( hwnd, NULL, hrgn, RDW_INVALIDATE | (erase ? RDW_ERASE : 0) );
+}
+
+/***********************************************************************
+ *           NtUserInvalidateRect (win32u.@)
+ */
+BOOL WINAPI NtUserInvalidateRect( HWND hwnd, const RECT *rect, BOOL erase )
+{
+    UINT flags = RDW_INVALIDATE | (erase ? RDW_ERASE : 0);
+
+    if (!hwnd)
+    {
+        flags = RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ERASENOW;
+        rect = NULL;
+    }
+
+    return NtUserRedrawWindow( hwnd, rect, 0, flags );
+}
+
+/***********************************************************************
+ *           NtUserLockWindowUpdate (win32u.@)
+ */
+BOOL WINAPI NtUserLockWindowUpdate( HWND hwnd )
+{
+    static HWND locked_hwnd;
+
+    FIXME( "(%p), partial stub!\n", hwnd );
+
+    if (!hwnd)
+    {
+        locked_hwnd = NULL;
+        return TRUE;
+    }
+    return !InterlockedCompareExchangePointer( (void **)&locked_hwnd, hwnd, 0 );
+}
+
+/*************************************************************************
+ *             fix_caret
+ *
+ * Helper for NtUserScrollWindowEx:
+ * If the return value is 0, no special caret handling is necessary.
+ * Otherwise the return value is the handle of the window that owns the
+ * caret. Its caret needs to be hidden during the scroll operation and
+ * moved to new_caret_pos if move_caret is TRUE.
+ */
+static HWND fix_caret( HWND hwnd, const RECT *scroll_rect, INT dx, INT dy,
+                       UINT flags, BOOL *move_caret, POINT *new_caret_pos )
+{
+    RECT rect, mapped_caret;
+    GUITHREADINFO info;
+
+    info.cbSize = sizeof(info);
+    if (!NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info )) return 0;
+    if (!info.hwndCaret) return 0;
+
+    mapped_caret = info.rcCaret;
+    if (info.hwndCaret == hwnd)
+    {
+        /* The caret needs to be moved along with scrolling even if it's
+         * outside the visible area. Otherwise, when the caret is scrolled
+         * out from the view, the position won't get updated anymore and
+         * the caret will never scroll back again. */
+        *move_caret = TRUE;
+        new_caret_pos->x = info.rcCaret.left + dx;
+        new_caret_pos->y = info.rcCaret.top + dy;
+    }
+    else
+    {
+        *move_caret = FALSE;
+        if (!(flags & SW_SCROLLCHILDREN) || !is_child( hwnd, info.hwndCaret ))
+            return 0;
+        map_window_points( info.hwndCaret, hwnd, (POINT *)&mapped_caret, 2, get_thread_dpi() );
+    }
+
+    /* If the caret is not in the src/dest rects, all is fine done. */
+    if (!intersect_rect( &rect, scroll_rect, &mapped_caret ))
+    {
+        rect = *scroll_rect;
+        OffsetRect( &rect, dx, dy );
+        if (!intersect_rect( &rect, &rect, &mapped_caret ))
+            return 0;
+    }
+
+    /* Indicate that the caret needs to be updated during the scrolling. */
+    return info.hwndCaret;
+}
+
+/*************************************************************************
+ *           NtUserScrollWindowEx (win32u.@)
+ *
+ * Note: contrary to what the doc says, pixels that are scrolled from the
+ *      outside of clipRect to the inside are NOT painted.
+ */
+INT WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RECT *rect,
+                                 const RECT *clip_rect, HRGN update_rgn,
+                                 RECT *update_rect, UINT flags )
+{
+    BOOL update = update_rect || update_rgn || flags & (SW_INVALIDATE | SW_ERASE);
+    BOOL own_rgn = TRUE, move_caret = FALSE;
+    HRGN temp_rgn, winupd_rgn = 0;
+    INT retval = NULLREGION;
+    HWND caret_hwnd = NULL;
+    POINT new_caret_pos;
+    RECT rc, cliprc;
+    int rdw_flags;
+    HDC hdc;
+
+    TRACE( "%p, %d,%d update_rgn=%p update_rect = %p %s %04x\n",
+           hwnd, dx, dy, update_rgn, update_rect, wine_dbgstr_rect(rect), flags );
+    TRACE( "clip_rect = %s\n", wine_dbgstr_rect(clip_rect) );
+    if (flags & ~(SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE))
+        FIXME( "some flags (%04x) are unhandled\n", flags );
+
+    rdw_flags = (flags & SW_ERASE) && (flags & SW_INVALIDATE) ?
+        RDW_INVALIDATE | RDW_ERASE  : RDW_INVALIDATE;
+
+    hwnd = get_full_window_handle( hwnd );
+
+    if (!is_window_drawable( hwnd, TRUE ))
+        SetRectEmpty( &rc );
+    else
+        get_client_rect( hwnd, &rc );
+
+    if (clip_rect) intersect_rect( &cliprc, &rc, clip_rect );
+    else cliprc = rc;
+
+    if (rect) intersect_rect( &rc, &rc, rect );
+    if (update_rgn) own_rgn = FALSE;
+    else if (update) update_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+
+    new_caret_pos.x = new_caret_pos.y = 0;
+
+    if (!IsRectEmpty( &cliprc ) && (dx || dy))
+    {
+        DWORD style = get_window_long( hwnd, GWL_STYLE );
+        DWORD dcxflags = 0;
+
+        caret_hwnd = fix_caret( hwnd, &rc, dx, dy, flags, &move_caret, &new_caret_pos );
+        if (caret_hwnd) NtUserHideCaret( caret_hwnd );
+
+        if (!(flags & SW_NODCCACHE)) dcxflags |= DCX_CACHE;
+        if (style & WS_CLIPSIBLINGS) dcxflags |= DCX_CLIPSIBLINGS;
+        if (get_class_long( hwnd, GCL_STYLE, FALSE ) & CS_PARENTDC) dcxflags |= DCX_PARENTCLIP;
+        if (!(flags & SW_SCROLLCHILDREN) && (style & WS_CLIPCHILDREN))
+            dcxflags |= DCX_CLIPCHILDREN;
+        hdc = NtUserGetDCEx( hwnd, 0, dcxflags);
+        if (hdc)
+        {
+            NtUserScrollDC( hdc, dx, dy, &rc, &cliprc, update_rgn, update_rect );
+            NtUserReleaseDC( hwnd, hdc );
+            if (!update) NtUserRedrawWindow( hwnd, NULL, update_rgn, rdw_flags );
+        }
+
+        /* If the windows has an update region, this must be scrolled as well.
+         * Keep a copy in winupd_rgn to be added to hrngUpdate at the end. */
+        temp_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        retval = NtUserGetUpdateRgn( hwnd, temp_rgn, FALSE );
+        if (retval != NULLREGION)
+        {
+            HRGN clip_rgn = NtGdiCreateRectRgn( cliprc.left, cliprc.top,
+                                                cliprc.right, cliprc.bottom );
+            if (!own_rgn)
+            {
+                winupd_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0);
+                NtGdiCombineRgn( winupd_rgn, temp_rgn, 0, RGN_COPY);
+            }
+            NtGdiOffsetRgn( temp_rgn, dx, dy );
+            NtGdiCombineRgn( temp_rgn, temp_rgn, clip_rgn, RGN_AND );
+            if (!own_rgn) NtGdiCombineRgn( winupd_rgn, winupd_rgn, temp_rgn, RGN_OR );
+            NtUserRedrawWindow( hwnd, NULL, temp_rgn, rdw_flags );
+
+           /*
+            * Catch the case where the scrolling amount exceeds the size of the
+            * original window. This generated a second update area that is the
+            * location where the original scrolled content would end up.
+            * This second region is not returned by the ScrollDC and sets
+            * ScrollWindowEx apart from just a ScrollDC.
+            *
+            * This has been verified with testing on windows.
+            */
+            if (abs( dx ) > abs( rc.right - rc.left ) || abs( dy ) > abs( rc.bottom - rc.top ))
+            {
+                NtGdiSetRectRgn( temp_rgn, rc.left + dx, rc.top + dy, rc.right+dx, rc.bottom + dy );
+                NtGdiCombineRgn( temp_rgn, temp_rgn, clip_rgn, RGN_AND );
+                NtGdiCombineRgn( update_rgn, update_rgn, temp_rgn, RGN_OR );
+
+                if (update_rect)
+                {
+                    RECT temp_rect;
+                    NtGdiGetRgnBox( temp_rgn, &temp_rect );
+                    union_rect( update_rect, update_rect, &temp_rect );
+                }
+
+                if (!own_rgn) NtGdiCombineRgn( winupd_rgn, winupd_rgn, temp_rgn, RGN_OR );
+            }
+            NtGdiDeleteObjectApp( clip_rgn );
+        }
+        NtGdiDeleteObjectApp( temp_rgn );
+    }
+    else
+    {
+        /* nothing was scrolled */
+        if (!own_rgn) NtGdiSetRectRgn( update_rgn, 0, 0, 0, 0 );
+        SetRectEmpty( update_rect );
+    }
+
+    if (flags & SW_SCROLLCHILDREN)
+    {
+        HWND *list = list_window_children( 0, hwnd, NULL, 0 );
+        if (list)
+        {
+            RECT r, dummy;
+            int i;
+
+            for (i = 0; list[i]; i++)
+            {
+                get_window_rects( list[i], COORDS_PARENT, &r, NULL, get_thread_dpi() );
+                if (!rect || intersect_rect( &dummy, &r, rect ))
+                    NtUserSetWindowPos( list[i], 0, r.left + dx, r.top  + dy, 0, 0,
+                                        SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE |
+                                        SWP_NOREDRAW | SWP_DEFERERASE );
+            }
+            free( list );
+        }
+    }
+
+    if (flags & (SW_INVALIDATE | SW_ERASE))
+        NtUserRedrawWindow( hwnd, NULL, update_rgn, rdw_flags |
+                            ((flags & SW_SCROLLCHILDREN) ? RDW_ALLCHILDREN : 0 ) );
+
+    if (winupd_rgn)
+    {
+        NtGdiCombineRgn( update_rgn, update_rgn, winupd_rgn, RGN_OR );
+        NtGdiDeleteObjectApp( winupd_rgn );
+    }
+
+    if (move_caret) set_caret_pos( new_caret_pos.x, new_caret_pos.y );
+    if (caret_hwnd) NtUserShowCaret( caret_hwnd );
+    if (own_rgn && update_rgn) NtGdiDeleteObjectApp( update_rgn );
+
+    return retval;
 }

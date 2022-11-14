@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - lun. 24 oct. 2022 17:32:35 CEST :
+# Last wine-tkg-staging-fsync-git configuration - lun. 14 nov. 2022 01:00:51 CET :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.19.r0.ge3f00bf7c94
-Using wine-staging patchset (version 7.19.r0.g41a3c56c)
+Wine (plain) version: 7.20.r0.ge43cb422502
+Using wine-staging patchset (version 7.20.r0.gacb05462)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -11,53 +11,11 @@ Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 Done applying backports hotfixes (if any) - list available in prepare.log
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
-Applied hotfix win32u_reverts38.earlystagingpatch
-Applied hotfix win32u_reverts37.earlystagingpatch
-Applied hotfix win32u_reverts36.earlystagingpatch
-Applied hotfix win32u_reverts35.earlystagingpatch
-Applied hotfix win32u_reverts34.earlystagingpatch
-Applied hotfix win32u_reverts33.earlystagingpatch
-Applied hotfix win32u_reverts32.earlystagingpatch
-Applied hotfix win32u_reverts31.earlystagingpatch
-Applied hotfix win32u_reverts30.earlystagingpatch
-Applied hotfix win32u_reverts29.earlystagingpatch
-Applied hotfix win32u_reverts28.earlystagingpatch
-Applied hotfix win32u_reverts27.earlystagingpatch
-Applied hotfix win32u_reverts26.earlystagingpatch
-Applied hotfix win32u_reverts25.earlystagingpatch
-Applied hotfix win32u_reverts24.earlystagingpatch
-Applied hotfix win32u_reverts23.earlystagingpatch
-Applied hotfix win32u_reverts22.earlystagingpatch
-Applied hotfix win32u_reverts21.earlystagingpatch
-Applied hotfix win32u_reverts20.earlystagingpatch
-Applied hotfix win32u_reverts19.earlystagingpatch
-Applied hotfix win32u_reverts18.earlystagingpatch
-Applied hotfix win32u_reverts17.earlystagingpatch
-Applied hotfix win32u_reverts16.earlystagingpatch
-Applied hotfix commit-596e7a7.earlystagingpatch
-Applied hotfix commit-ed0734c-2.earlystagingpatch
-Applied hotfix win32u_reverts15.earlystagingpatch
-Applied hotfix commit-35e4fa1.earlystagingpatch
-Applied hotfix commit-eea217b.earlystagingpatch
-Applied hotfix win32u_reverts14.earlystagingpatch
-Applied hotfix commit-25ac82d.earlystagingpatch
-Applied hotfix win32u_reverts13.earlystagingpatch
-Applied hotfix win32u_reverts12.earlystagingpatch
-Applied hotfix commit-6208102.earlystagingpatch
-Applied hotfix win32u_reverts11.earlystagingpatch
-Applied hotfix win32u_reverts10.earlystagingpatch
-Applied hotfix win32u_reverts9.earlystagingpatch
-Applied hotfix win32u_reverts8.earlystagingpatch
-Applied hotfix win32u_reverts7.earlystagingpatch
-Applied hotfix commit-de2f0fe.earlystagingpatch
-Applied hotfix win32u_reverts6.earlystagingpatch
-Applied reverting hotfix win32u_reverts5-2.mystagingrevert
 Applied hotfix protonify_stg_syscall_emu-009.mystagingpatch
-Applied hotfix fshack-84bed15-a3ebf88-monolith-reverts-2.myearlypatch
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W user32-alttab-focus -W user32-alttab-focus -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11-MWM_Decorations -W winex11-key_translation
+Staging overrides, if any: 
 
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32 and disabling libglesv2 dll) )
@@ -65,10 +23,12 @@ fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esy
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex_waitv.patch -- ( Replace all fsync interfaces with futex_waitv )
 
-valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
+childwindow-proton.patch -- ( Applied child window for vk patch )
+OPWR-proton.patch -- ( Applied other process window Vulkan rendering patchset )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
+proton-tkg-additions.patch -- ( Using additional Proton-tkg patches )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
 proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
@@ -77,17 +37,16 @@ proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (s
 proton_battleye.patch -- ( Add support for Proton's Battleye runtime )
 proton-eac_bridge.patch -- ( Add support for Proton's EAC bridge )
 
-Applied reverting hotfix proton-fshack-removeminimizestuff.myrevert
-Applied hotfix unicode.mypatch
-Applied hotfix remove_hooks_that_time_out-legacy.mypatch
-Applied hotfix user32.implement_rudimentary_EnableMouseInPointer_support.mypatch
-Applied hotfix winex11.drv_Add_a_GPU_for_each_Vulkan_device_that_was_not_tied_to_an_XRandR_provider-legacy.mypatch
+Applied hotfix remove_hooks_that_time_out.mypatch
+Applied hotfix winex11.drv_Add_a_GPU_for_each_Vulkan_device_that_was_not_tied_to_an_XRandR_provider.mypatch
 Applied hotfix winex11.drv_Ignore_ClipCursor_if_desktop_window_is_foreground.mypatch
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
 Applied hotfix ef6e33f.mypatch
 Applied hotfix 0001-proton-bcrypt_rdr2_fixes5.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix a608ef1.mypatch
+Applied hotfix 1148-staging.mypatch
+Applied hotfix 1152.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch

@@ -26,6 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "ole2.h"
+#include "shlwapi.h"
 #include "wininet.h"
 #include "docobj.h"
 #include "dispex.h"
@@ -135,7 +136,8 @@ DEFINE_EXPECT(external_success);
 DEFINE_EXPECT(QS_VariantConversion);
 DEFINE_EXPECT(QS_IActiveScriptSite);
 DEFINE_EXPECT(QS_GetCaller);
-DEFINE_EXPECT(ChangeType);
+DEFINE_EXPECT(ChangeType_bstr);
+DEFINE_EXPECT(ChangeType_dispatch);
 DEFINE_EXPECT(GetTypeInfo);
 
 #define TESTSCRIPT_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80746}"
@@ -156,6 +158,7 @@ DEFINE_EXPECT(GetTypeInfo);
 #define DISPID_EXTERNAL_IS_ENGLISH     0x300009
 #define DISPID_EXTERNAL_LIST_SEP       0x30000A
 #define DISPID_EXTERNAL_TEST_VARS      0x30000B
+#define DISPID_EXTERNAL_GETMIMETYPE    0x30000C
 
 static const GUID CLSID_TestScript =
     {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x07,0x46}};
@@ -197,6 +200,84 @@ static BOOL init_key(const char *key_name, const char *def_value, BOOL init)
     RegCloseKey(hkey);
 
     return res == ERROR_SUCCESS;
+}
+
+static BSTR get_mime_type_display_name(const WCHAR *content_type)
+{
+    WCHAR buffer[128], ext[128], *str, *progid;
+    HKEY key, type_key = NULL;
+    DWORD type, len;
+    LSTATUS status;
+    HRESULT hres;
+    CLSID clsid;
+    BSTR ret;
+
+    status = RegOpenKeyExW(HKEY_CLASSES_ROOT, L"MIME\\Database\\Content Type", 0, KEY_READ, &key);
+    if(status != ERROR_SUCCESS)
+        goto fail;
+
+    status = RegOpenKeyExW(key, content_type, 0, KEY_QUERY_VALUE, &type_key);
+    RegCloseKey(key);
+    if(status != ERROR_SUCCESS)
+        goto fail;
+
+    len = sizeof(ext);
+    status = RegQueryValueExW(type_key, L"Extension", NULL, &type, (BYTE*)ext, &len);
+    if(status != ERROR_SUCCESS || type != REG_SZ) {
+        len = sizeof(buffer);
+        status = RegQueryValueExW(type_key, L"CLSID", NULL, &type, (BYTE*)buffer, &len);
+
+        if(status != ERROR_SUCCESS || type != REG_SZ || CLSIDFromString(buffer, &clsid) != S_OK ||
+           ProgIDFromCLSID(&clsid, &progid) != S_OK)
+            goto fail;
+    }else {
+        /* For some reason w1064v1809 testbot VM uses .htm here, despite .html being set in the database */
+        if(!wcscmp(ext, L".html"))
+            wcscpy(ext, L".htm");
+        progid = ext;
+    }
+
+    len = ARRAY_SIZE(buffer);
+    str = buffer;
+    for(;;) {
+        hres = AssocQueryStringW(ASSOCF_NOTRUNCATE, ASSOCSTR_FRIENDLYDOCNAME, progid, NULL, str, &len);
+        if(hres == S_OK && len)
+            break;
+        if(str != buffer)
+            free(str);
+        if(hres != E_POINTER) {
+            if(progid != ext) {
+                CoTaskMemFree(progid);
+                goto fail;
+            }
+
+            /* Try from CLSID */
+            len = sizeof(buffer);
+            status = RegQueryValueExW(type_key, L"CLSID", NULL, &type, (BYTE*)buffer, &len);
+
+            if(status != ERROR_SUCCESS || type != REG_SZ || CLSIDFromString(buffer, &clsid) != S_OK ||
+               ProgIDFromCLSID(&clsid, &progid) != S_OK)
+                goto fail;
+
+            len = ARRAY_SIZE(buffer);
+            str = buffer;
+            continue;
+        }
+        str = malloc(len * sizeof(WCHAR));
+    }
+    if(progid != ext)
+        CoTaskMemFree(progid);
+    RegCloseKey(type_key);
+
+    ret = SysAllocString(str);
+    if(str != buffer)
+        free(str);
+    return ret;
+
+fail:
+    RegCloseKey(type_key);
+    trace("Did not find MIME in database for %s\n", debugstr_w(content_type));
+    return SysAllocString(L"File");
 }
 
 static void test_script_vars(unsigned argc, VARIANTARG *argv)
@@ -364,18 +445,29 @@ static ULONG WINAPI VariantChangeType_Release(IVariantChangeType *iface)
 
 static HRESULT WINAPI VariantChangeType_ChangeType(IVariantChangeType *iface, VARIANT *dst, VARIANT *src, LCID lcid, VARTYPE vt)
 {
-    CHECK_EXPECT(ChangeType);
-
     ok(dst != NULL, "dst = NULL\n");
     ok(V_VT(dst) == VT_EMPTY, "V_VT(dst) = %d\n", V_VT(dst));
     ok(src != NULL, "src = NULL\n");
-    ok(V_VT(src) == VT_I4, "V_VT(src) = %d\n", V_VT(src));
-    ok(V_I4(src) == 0xf0f0f0, "V_I4(src) = %lx\n", V_I4(src));
     ok(lcid == LOCALE_NEUTRAL, "lcid = %ld\n", lcid);
-    ok(vt == VT_BSTR, "vt = %d\n", vt);
 
-    V_VT(dst) = VT_BSTR;
-    V_BSTR(dst) = SysAllocString(L"red");
+    switch(vt) {
+    case VT_BSTR:
+        CHECK_EXPECT(ChangeType_bstr);
+        ok(V_VT(src) == VT_I4, "V_VT(src) = %d\n", V_VT(src));
+        ok(V_I4(src) == 0xf0f0f0, "V_I4(src) = %lx\n", V_I4(src));
+        V_VT(dst) = VT_BSTR;
+        V_BSTR(dst) = SysAllocString(L"red");
+        break;
+    case VT_DISPATCH:
+        CHECK_EXPECT(ChangeType_dispatch);
+        ok(V_VT(src) == VT_NULL, "V_VT(src) = %d\n", V_VT(src));
+        /* native jscript returns E_NOTIMPL, use a "valid" error to test that it doesn't matter */
+        return E_OUTOFMEMORY;
+    default:
+        ok(0, "unexpected vt %d\n", vt);
+        return E_NOTIMPL;
+    }
+
     return S_OK;
 }
 
@@ -703,6 +795,10 @@ static HRESULT WINAPI externalDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, 
         *pid = DISPID_EXTERNAL_TEST_VARS;
         return S_OK;
     }
+    if(!lstrcmpW(bstrName, L"getExpectedMimeType")) {
+        *pid = DISPID_EXTERNAL_GETMIMETYPE;
+        return S_OK;
+    }
 
     ok(0, "unexpected name %s\n", wine_dbgstr_w(bstrName));
     return DISP_E_UNKNOWNNAME;
@@ -934,6 +1030,20 @@ static HRESULT WINAPI externalDisp_InvokeEx(IDispatchEx *iface, DISPID id, LCID 
         ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
         ok(pei != NULL, "pei == NULL\n");
         test_script_vars(pdp->cArgs, pdp->rgvarg);
+        return S_OK;
+
+    case DISPID_EXTERNAL_GETMIMETYPE:
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(V_VT(pdp->rgvarg) == VT_BSTR, "VT(rgvarg) = %d\n", V_VT(pdp->rgvarg));
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+        V_BSTR(pvarRes) = get_mime_type_display_name(V_BSTR(pdp->rgvarg));
+        V_VT(pvarRes) = V_BSTR(pvarRes) ? VT_BSTR : VT_NULL;
         return S_OK;
 
     default:
@@ -2292,10 +2402,13 @@ static void test_global_id(void)
 
 static void test_arg_conv(IHTMLWindow2 *window)
 {
+    DISPPARAMS dp = { 0 };
     IHTMLDocument2 *doc;
     IDispatchEx *dispex;
     IHTMLElement *elem;
-    VARIANT v;
+    VARIANT v, args[2];
+    DISPID id;
+    BSTR bstr;
     HRESULT hres;
 
     hres = IHTMLWindow2_get_document(window, &doc);
@@ -2310,20 +2423,60 @@ static void test_arg_conv(IHTMLWindow2 *window)
     ok(hres == S_OK, "Could not get IDispatchEx iface: %08lx\n", hres);
 
     SET_EXPECT(QS_VariantConversion);
-    SET_EXPECT(ChangeType);
+    SET_EXPECT(ChangeType_bstr);
     V_VT(&v) = VT_I4;
     V_I4(&v) = 0xf0f0f0;
     hres = dispex_propput(dispex, DISPID_IHTMLBODYELEMENT_BACKGROUND, 0, &v, &caller_sp);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
     CHECK_CALLED(QS_VariantConversion);
-    CHECK_CALLED(ChangeType);
+    CHECK_CALLED(ChangeType_bstr);
 
     V_VT(&v) = VT_EMPTY;
     hres = dispex_propget(dispex, DISPID_IHTMLBODYELEMENT_BGCOLOR, &v, &caller_sp);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
     ok(V_VT(&v) == VT_BSTR, "V_VT(var)=%d\n", V_VT(&v));
     ok(!V_BSTR(&v), "V_BSTR(&var) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    IDispatchEx_Release(dispex);
 
+    hres = IHTMLWindow2_QueryInterface(window, &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08lx\n", hres);
+
+    SET_EXPECT(GetScriptDispatch);
+    bstr = SysAllocString(L"attachEvent");
+    hres = IDispatchEx_GetDispID(dispex, bstr, fdexNameCaseSensitive, &id);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+    CHECK_CALLED(GetScriptDispatch);
+    SysFreeString(bstr);
+
+    SET_EXPECT(QS_VariantConversion);
+    SET_EXPECT(ChangeType_dispatch);
+    dp.cArgs = 2;
+    dp.rgvarg = args;
+    V_VT(&args[1]) = VT_BSTR;
+    V_BSTR(&args[1]) = SysAllocString(L"onload");
+    V_VT(&args[0]) = VT_NULL;
+    hres = IDispatchEx_InvokeEx(dispex, id, LOCALE_NEUTRAL, DISPATCH_METHOD, &dp, &v, NULL, &caller_sp);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_BOOL, "V_VT(var) = %d\n", V_VT(&v));
+    ok(V_BOOL(&v) == VARIANT_FALSE, "V_BOOL(var) = %d\n", V_BOOL(&v));
+    CHECK_CALLED(QS_VariantConversion);
+    CHECK_CALLED(ChangeType_dispatch);
+
+    SET_EXPECT(GetScriptDispatch);
+    bstr = SysAllocString(L"detachEvent");
+    hres = IDispatchEx_GetDispID(dispex, bstr, fdexNameCaseSensitive, &id);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+    CHECK_CALLED(GetScriptDispatch);
+    SysFreeString(bstr);
+
+    SET_EXPECT(QS_VariantConversion);
+    SET_EXPECT(ChangeType_dispatch);
+    hres = IDispatchEx_InvokeEx(dispex, id, LOCALE_NEUTRAL, DISPATCH_METHOD, &dp, NULL, NULL, &caller_sp);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    CHECK_CALLED(QS_VariantConversion);
+    CHECK_CALLED(ChangeType_dispatch);
+
+    SysFreeString(V_BSTR(&args[1]));
     IDispatchEx_Release(dispex);
 }
 

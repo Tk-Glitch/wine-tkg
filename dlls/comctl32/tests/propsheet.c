@@ -122,7 +122,7 @@ static INT_PTR CALLBACK page_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam,
 
         if (psp->dwFlags & PSP_USETITLE)
         {
-            todo_wine ok(!strcmp(psp->pszTitle, "page title"), "psp->pszTitle = %s\n",
+            ok(!strcmp(psp->pszTitle, "page title"), "psp->pszTitle = %s\n",
                     wine_dbgstr_a(psp->pszTitle));
         }
         return TRUE;
@@ -1051,14 +1051,14 @@ static UINT CALLBACK proppage_callback_a(HWND hwnd, UINT msg, PROPSHEETPAGEA *ps
     ok(psp->lParam && psp->lParam != (LPARAM)psp, "Expected newly allocated page description, got %Ix, %p\n",
             psp->lParam, psp);
     if (psp->dwFlags & PSP_USETITLE)
-        todo_wine ok(psp_orig->pszTitle != psp->pszTitle, "Expected different page title pointer\n");
+        ok(psp_orig->pszTitle != psp->pszTitle, "Expected different page title pointer\n");
     else
         ok(psp_orig->pszTitle == psp->pszTitle, "Expected same page title pointer\n");
     ok(!lstrcmpA(psp_orig->pszTitle, psp->pszTitle), "Expected same page title string\n");
     if (psp->dwSize >= FIELD_OFFSET(struct custom_proppage, addref_called))
     {
         struct custom_proppage *extra_data = (struct custom_proppage *)psp;
-        todo_wine ok(extra_data->extra_data == 0x1234, "Expected extra_data to be preserved, got %lx\n",
+        ok(extra_data->extra_data == 0x1234, "Expected extra_data to be preserved, got %lx\n",
                 extra_data->extra_data);
     }
 
@@ -1092,7 +1092,7 @@ static UINT CALLBACK proppage_callback_w(HWND hwnd, UINT msg, PROPSHEETPAGEW *ps
     if (psp->dwSize >= FIELD_OFFSET(struct custom_proppage, addref_called))
     {
         struct custom_proppage *extra_data = (struct custom_proppage *)psp;
-        todo_wine ok(extra_data->extra_data == 0x4321, "Expected extra_data to be preserved, got %lx\n",
+        ok(extra_data->extra_data == 0x4321, "Expected extra_data to be preserved, got %lx\n",
                 extra_data->extra_data);
     }
 
@@ -1343,7 +1343,7 @@ static void test_invalid_hpropsheetpage(void)
 
     ret = SendMessageA(hdlg, PSM_INDEXTOPAGE, 0, 0);
     ok(ret, "page was not created\n");
-    todo_wine ok((HPROPSHEETPAGE)ret != hpsp[0], "invalid HPROPSHEETPAGE was preserved\n");
+    ok((HPROPSHEETPAGE)ret != hpsp[0], "invalid HPROPSHEETPAGE was preserved\n");
     DestroyWindow(hdlg);
 
     memset(pspW, 0, sizeof(*pspW));
@@ -1383,7 +1383,7 @@ static void test_invalid_hpropsheetpage(void)
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle value %p\n", hdlg);
 
     ret = SendMessageA(hdlg, PSM_INDEXTOPAGE, 0, 0);
-    todo_wine ok(ret, "page was not created\n");
+    ok(ret, "page was not created\n");
     ok((HPROPSHEETPAGE)ret != hpsp[0], "invalid HPROPSHEETPAGE was preserved\n");
     DestroyWindow(hdlg);
 }
