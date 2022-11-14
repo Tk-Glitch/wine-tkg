@@ -34,6 +34,7 @@ enum
     NtUserCallWinProc,
     NtUserCallWindowsHook,
     NtUserCopyImage,
+    NtUserDrawNonClientButton,
     NtUserDrawScrollBar,
     NtUserDrawText,
     NtUserFreeCachedClipboardData,
@@ -52,6 +53,8 @@ enum
     /* Vulkan support */
     NtUserCallVulkanDebugReportCallback,
     NtUserCallVulkanDebugUtilsCallback,
+    /* OpenGL support */
+    NtUserCallOpenGLDebugMessageCallback,
     /* Driver-specific callbacks */
     NtUserDriverCallbackFirst,
     NtUserDriverCallbackLast = NtUserDriverCallbackFirst + 9,
@@ -416,6 +419,17 @@ struct set_clipboard_params
     size_t size;
     BOOL   cache_only;
     UINT   seqno;
+};
+
+/* NtUserNonClientButton params */
+struct draw_non_client_button_params
+{
+    HWND hwnd;
+    HDC hdc;
+    enum NONCLIENT_BUTTON_TYPE type;
+    RECT rect;
+    BOOL down;
+    BOOL grayed;
 };
 
 /* NtUserDrawScrollBar params */

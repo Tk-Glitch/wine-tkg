@@ -92,7 +92,11 @@ C_ASSERT( sizeof(struct block) == 8 );
 #define BLOCK_FLAG_PREV_FREE   0x00000002
 #define BLOCK_FLAG_FREE_LINK   0x00000003
 #define BLOCK_FLAG_LARGE       0x00000004
+#define BLOCK_FLAG_USER_INFO   0x00000010 /* user flags up to 0xf0 */
+#define BLOCK_FLAG_USER_MASK   0x000000f0
 
+#define BLOCK_USER_FLAGS( heap_flags ) (((heap_flags) >> 4) & BLOCK_FLAG_USER_MASK)
+#define HEAP_USER_FLAGS( block_flags ) (((block_flags) & BLOCK_FLAG_USER_MASK) << 4)
 
 /* entry to link free blocks in free lists */
 
@@ -212,6 +216,7 @@ C_ASSERT( offsetof(struct heap, subheap) <= COMMIT_MASK );
 /* some undocumented flags (names are made up) */
 #define HEAP_PRIVATE          0x00001000
 #define HEAP_ADD_USER_INFO    0x00000100
+#define HEAP_USER_FLAGS_MASK  0x00000f00
 #define HEAP_PAGE_ALLOCS      0x01000000
 #define HEAP_VALIDATE         0x10000000
 #define HEAP_VALIDATE_ALL     0x20000000
@@ -256,12 +261,19 @@ static inline UINT block_get_size( const struct block *block )
     return block_size * ALIGNMENT;
 }
 
-static inline void block_set_size( struct block *block, UINT block_flags, UINT block_size )
+static inline void block_set_size( struct block *block, UINT block_size )
 {
     block_size /= ALIGNMENT;
-    if (block_flags & BLOCK_FLAG_FREE) block->tail_size = block_size >> 16;
+    if (block_get_flags( block ) & BLOCK_FLAG_FREE) block->tail_size = block_size >> 16;
     block->block_size = block_size;
-    block->block_flags = block_flags;
+}
+
+static inline void block_set_flags( struct block *block, BYTE clear, BYTE set )
+{
+    UINT block_size = block_get_size( block );
+    block->block_flags &= ~clear;
+    block->block_flags |= set;
+    block_set_size( block, block_size );
 }
 
 static inline void *subheap_base( const SUBHEAP *subheap )
@@ -462,7 +474,7 @@ static RTL_CRITICAL_SECTION_DEBUG process_heap_cs_debug =
 static inline ULONG heap_get_flags( const struct heap *heap, ULONG flags )
 {
     if (flags & (HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED)) flags |= HEAP_CHECKING_ENABLED;
-    flags &= HEAP_GENERATE_EXCEPTIONS | HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY | HEAP_REALLOC_IN_PLACE_ONLY | HEAP_CHECKING_ENABLED | HEAP_ADD_USER_INFO;
+    flags &= HEAP_GENERATE_EXCEPTIONS | HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY | HEAP_REALLOC_IN_PLACE_ONLY | HEAP_CHECKING_ENABLED | HEAP_USER_FLAGS_MASK;
     return heap->flags | flags;
 }
 
@@ -682,7 +694,8 @@ static void create_free_block( struct heap *heap, SUBHEAP *subheap, struct block
 
     valgrind_make_writable( block, sizeof(*entry) );
     block_set_type( block, ARENA_FREE_MAGIC );
-    block_set_size( block, BLOCK_FLAG_FREE, block_size );
+    block_set_flags( block, ~0, BLOCK_FLAG_FREE );
+    block_set_size( block, block_size );
 
     /* If debugging, erase the freed block content */
 
@@ -695,14 +708,14 @@ static void create_free_block( struct heap *heap, SUBHEAP *subheap, struct block
         struct entry *next_entry = (struct entry *)next;
         list_remove( &next_entry->entry );
         block_size += block_get_size( next );
-        block_set_size( block, BLOCK_FLAG_FREE, block_size );
+        block_set_size( block, block_size );
         mark_block_free( next_entry, sizeof(*next_entry), flags );
     }
 
     if ((next = next_block( subheap, block )))
     {
         /* set the next block PREV_FREE flag and back pointer */
-        block_set_size( next, BLOCK_FLAG_PREV_FREE, block_get_size( next ) );
+        block_set_flags( next, 0, BLOCK_FLAG_PREV_FREE );
         valgrind_make_writable( (struct block **)next - 1, sizeof(struct block *) );
         *((struct block **)next - 1) = block;
     }
@@ -760,21 +773,21 @@ static void free_used_block( struct heap *heap, SUBHEAP *subheap, struct block *
 }
 
 
-static inline void shrink_used_block( struct heap *heap, SUBHEAP *subheap, struct block *block, UINT flags,
+static inline void shrink_used_block( struct heap *heap, SUBHEAP *subheap, struct block *block,
                                       SIZE_T old_block_size, SIZE_T block_size, SIZE_T size )
 {
     if (old_block_size >= block_size + HEAP_MIN_BLOCK_SIZE)
     {
-        block_set_size( block, flags, block_size );
+        block_set_size( block, block_size );
         block->tail_size = block_size - sizeof(*block) - size;
         create_free_block( heap, subheap, next_block( subheap, block ), old_block_size - block_size );
     }
     else
     {
         struct block *next;
-        block_set_size( block, flags, old_block_size );
+        block_set_size( block, old_block_size );
         block->tail_size = old_block_size - sizeof(*block) - size;
-        if ((next = next_block( subheap, block ))) next->block_flags &= ~BLOCK_FLAG_PREV_FREE;
+        if ((next = next_block( subheap, block ))) block_set_flags( next, BLOCK_FLAG_PREV_FREE, 0 );
     }
 }
 
@@ -804,7 +817,8 @@ static struct block *allocate_large_block( struct heap *heap, DWORD flags, SIZE_
     arena->block_size = (char *)address + total_size - (char *)block;
 
     block_set_type( block, ARENA_LARGE_MAGIC );
-    block_set_size( block, BLOCK_FLAG_LARGE, 0 );
+    block_set_flags( block, ~0, BLOCK_FLAG_LARGE | BLOCK_USER_FLAGS( flags ) );
+    block_set_size( block, 0 );
     list_add_tail( &heap->large_list, &arena->entry );
     valgrind_make_noaccess( (char *)block + sizeof(*block) + arena->data_size,
                             arena->block_size - sizeof(*block) - arena->data_size );
@@ -887,7 +901,7 @@ static BOOL validate_large_block( const struct heap *heap, const struct block *b
         err = "invalid block alignment";
     else if (block_get_size( block ))
         err = "invalid block size";
-    else if (block_get_flags( block ) != BLOCK_FLAG_LARGE)
+    else if (!(block_get_flags( block ) & BLOCK_FLAG_LARGE))
         err = "invalid block flags";
     else if (block_get_type( block ) != ARENA_LARGE_MAGIC)
         err = "invalid block type";
@@ -968,7 +982,8 @@ static SUBHEAP *HEAP_CreateSubHeap( struct heap **heap_ptr, LPVOID address, DWOR
         list_init( &heap->free_lists[0].entry );
         for (i = 0, pEntry = heap->free_lists; i < HEAP_NB_FREE_LISTS; i++, pEntry++)
         {
-            block_set_size( &pEntry->block, BLOCK_FLAG_FREE_LINK, 0 );
+            block_set_flags( &pEntry->block, ~0, BLOCK_FLAG_FREE_LINK );
+            block_set_size( &pEntry->block, 0 );
             block_set_type( &pEntry->block, ARENA_FREE_MAGIC );
             if (i) list_add_after( &pEntry[-1].entry, &pEntry->entry );
         }
@@ -1510,7 +1525,8 @@ static NTSTATUS heap_allocate( struct heap *heap, ULONG flags, SIZE_T size, void
     old_block_size = block_get_size( block );
 
     block_set_type( block, ARENA_INUSE_MAGIC );
-    shrink_used_block( heap, subheap, block, 0, old_block_size, block_size, size );
+    block_set_flags( block, ~0, BLOCK_USER_FLAGS( flags ) );
+    shrink_used_block( heap, subheap, block, old_block_size, block_size, size );
     initialize_block( block + 1, size, flags );
     mark_block_tail( block, flags );
 
@@ -1632,7 +1648,8 @@ static NTSTATUS heap_reallocate( struct heap *heap, ULONG flags, void *ptr, SIZE
     }
 
     valgrind_notify_resize( block + 1, old_size, size );
-    shrink_used_block( heap, subheap, block, block_get_flags( block ), old_block_size, block_size, size );
+    block_set_flags( block, BLOCK_FLAG_USER_MASK, BLOCK_USER_FLAGS( flags ) );
+    shrink_used_block( heap, subheap, block, old_block_size, block_size, size );
 
     if (size > old_size) initialize_block( (char *)(block + 1) + old_size, size - old_size, flags );
     mark_block_tail( block, flags );
@@ -1992,6 +2009,7 @@ NTSTATUS WINAPI RtlSetHeapInformation( HANDLE handle, HEAP_INFORMATION_CLASS inf
  */
 BOOLEAN WINAPI RtlGetUserInfoHeap( HANDLE handle, ULONG flags, void *ptr, void **user_value, ULONG *user_flags )
 {
+    NTSTATUS status = STATUS_SUCCESS;
     struct block *block;
     struct heap *heap;
     SUBHEAP *subheap;
@@ -2000,26 +2018,36 @@ BOOLEAN WINAPI RtlGetUserInfoHeap( HANDLE handle, ULONG flags, void *ptr, void *
     TRACE( "handle %p, flags %#x, ptr %p, user_value %p, user_flags %p semi-stub!\n",
            handle, flags, ptr, user_value, user_flags );
 
-    *user_value = 0;
     *user_flags = 0;
 
     if (!(heap = unsafe_heap_from_handle( handle ))) return TRUE;
 
     heap_lock( heap, flags );
-    if ((block = unsafe_block_from_ptr( heap, ptr, &subheap )) && !subheap)
+    if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap )))
+    {
+        WARN( "Failed to find block %p in heap %p\n", ptr, handle );
+        status = STATUS_INVALID_PARAMETER;
+        *user_value = 0;
+    }
+    else if (!(*user_flags = HEAP_USER_FLAGS(block_get_flags( block ))))
+        WARN( "Block %p wasn't allocated with user info\n", ptr );
+    else if (!subheap)
     {
         const ARENA_LARGE *large = CONTAINING_RECORD( block, ARENA_LARGE, block );
+        *user_flags = *user_flags & ~HEAP_ADD_USER_INFO;
         *user_value = large->user_value;
     }
-    else if (block)
+    else
     {
         tmp = (char *)block + block_get_size( block ) - block->tail_size + sizeof(void *);
         if ((heap_get_flags( heap, flags ) & HEAP_TAIL_CHECKING_ENABLED) || RUNNING_ON_VALGRIND) tmp += ALIGNMENT;
+        *user_flags = *user_flags & ~HEAP_ADD_USER_INFO;
         *user_value = *(void **)tmp;
     }
     heap_unlock( heap, flags );
 
-    return TRUE;
+    heap_set_status( heap, flags, status );
+    return !status;
 }
 
 /***********************************************************************
@@ -2028,7 +2056,7 @@ BOOLEAN WINAPI RtlGetUserInfoHeap( HANDLE handle, ULONG flags, void *ptr, void *
 BOOLEAN WINAPI RtlSetUserValueHeap( HANDLE handle, ULONG flags, void *ptr, void *user_value )
 {
     struct block *block;
-    BOOLEAN ret = TRUE;
+    BOOLEAN ret = FALSE;
     struct heap *heap;
     SUBHEAP *subheap;
     char *tmp;
@@ -2038,17 +2066,22 @@ BOOLEAN WINAPI RtlSetUserValueHeap( HANDLE handle, ULONG flags, void *ptr, void 
     if (!(heap = unsafe_heap_from_handle( handle ))) return TRUE;
 
     heap_lock( heap, flags );
-    if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap ))) ret = FALSE;
+    if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap )))
+        WARN( "Failed to find block %p in heap %p\n", ptr, handle );
+    else if (!(block_get_flags( block ) & BLOCK_FLAG_USER_INFO))
+        WARN( "Block %p wasn't allocated with user info\n", ptr );
     else if (!subheap)
     {
         ARENA_LARGE *large = CONTAINING_RECORD( block, ARENA_LARGE, block );
         large->user_value = user_value;
+        ret = TRUE;
     }
     else
     {
         tmp = (char *)block + block_get_size( block ) - block->tail_size + sizeof(void *);
         if ((heap_get_flags( heap, flags ) & HEAP_TAIL_CHECKING_ENABLED) || RUNNING_ON_VALGRIND) tmp += ALIGNMENT;
         *(void **)tmp = user_value;
+        ret = TRUE;
     }
     heap_unlock( heap, flags );
 
@@ -2060,6 +2093,32 @@ BOOLEAN WINAPI RtlSetUserValueHeap( HANDLE handle, ULONG flags, void *ptr, void 
  */
 BOOLEAN WINAPI RtlSetUserFlagsHeap( HANDLE handle, ULONG flags, void *ptr, ULONG clear, ULONG set )
 {
-    FIXME( "handle %p, flags %#x, ptr %p, clear %#x, set %#x stub!\n", handle, flags, ptr, clear, set );
-    return FALSE;
+    struct block *block;
+    BOOLEAN ret = FALSE;
+    struct heap *heap;
+    SUBHEAP *subheap;
+
+    TRACE( "handle %p, flags %#x, ptr %p, clear %#x, set %#x.\n", handle, flags, ptr, clear, set );
+
+    if ((clear | set) & ~(0xe00))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (!(heap = unsafe_heap_from_handle( handle ))) return TRUE;
+
+    heap_lock( heap, flags );
+    if (!(block = unsafe_block_from_ptr( heap, ptr, &subheap )))
+        WARN( "Failed to find block %p in heap %p\n", ptr, handle );
+    else if (!(block_get_flags( block ) & BLOCK_FLAG_USER_INFO))
+        WARN( "Block %p wasn't allocated with user info\n", ptr );
+    else
+    {
+        block_set_flags( block, BLOCK_USER_FLAGS( clear ), BLOCK_USER_FLAGS( set ) );
+        ret = TRUE;
+    }
+    heap_unlock( heap, flags );
+
+    return ret;
 }

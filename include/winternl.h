@@ -1577,6 +1577,7 @@ typedef enum _PROCESSINFOCLASS {
     MaxProcessInfoClass,
 #ifdef __WINESRC__
     ProcessWineMakeProcessSystem = 1000,
+    ProcessWineLdtCopy,
 #endif
 } PROCESSINFOCLASS, PROCESS_INFORMATION_CLASS;
 
@@ -1894,7 +1895,10 @@ typedef enum _THREADINFOCLASS {
     ThreadManageWritesToExecutableMemory,
     ThreadPowerThrottlingState,
     ThreadWorkloadClass,
-    MaxThreadInfoClass
+    MaxThreadInfoClass,
+#ifdef __WINESRC__
+    ThreadWineNativeThreadName = 1000,
+#endif
 } THREADINFOCLASS;
 
 typedef struct _THREAD_BASIC_INFORMATION

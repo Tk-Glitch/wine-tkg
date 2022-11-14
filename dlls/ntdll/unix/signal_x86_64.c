@@ -33,9 +33,10 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #ifdef HAVE_MACHINE_SYSARCH_H
 # include <machine/sysarch.h>
@@ -72,6 +73,7 @@
 # include <linux/filter.h>
 # include <linux/seccomp.h>
 # include <sys/prctl.h>
+# include <linux/audit.h>
 #endif
 
 #define NONAMELESSUNION
@@ -232,7 +234,9 @@ _STRUCT_X86_THREAD_FULL_STATE64
         __uint64_t                      __ss;
         __uint64_t                      __gsbase;
 };
+#endif
 
+#ifndef _STRUCT_MCONTEXT64_FULL
 #define _STRUCT_MCONTEXT64_FULL      struct __darwin_mcontext64_full
 _STRUCT_MCONTEXT64_FULL
 {
@@ -240,7 +244,9 @@ _STRUCT_MCONTEXT64_FULL
         _STRUCT_X86_THREAD_FULL_STATE64 __ss;
         _STRUCT_X86_FLOAT_STATE64       __fs;
 };
+#endif
 
+#ifndef _STRUCT_MCONTEXT_AVX64_FULL
 #define _STRUCT_MCONTEXT_AVX64_FULL  struct __darwin_mcontext_avx64_full
 _STRUCT_MCONTEXT_AVX64_FULL
 {
@@ -751,8 +757,11 @@ static NTSTATUS libunwind_virtual_unwind( ULONG64 ip, ULONG64 *frame, CONTEXT *c
 /***********************************************************************
  *           unwind_builtin_dll
  */
-NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+NTSTATUS unwind_builtin_dll( void *args )
 {
+    struct unwind_builtin_dll_params *params = args;
+    DISPATCHER_CONTEXT *dispatch = params->dispatch;
+    CONTEXT *context = params->context;
     struct dwarf_eh_bases bases;
     const struct dwarf_fde *fde = _Unwind_Find_FDE( (void *)(context->Rip - 1), &bases );
 
@@ -1558,69 +1567,163 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
 }
 
 
-struct user_callback_frame
-{
-    struct syscall_frame frame;
-    void               **ret_ptr;
-    ULONG               *ret_len;
-    __wine_jmp_buf       jmpbuf;
-    NTSTATUS             status;
-    void                *teb_frame;
-};
+/***********************************************************************
+ *           call_user_mode_callback
+ */
+extern NTSTATUS CDECL call_user_mode_callback( void *func, void *stack, void **ret_ptr,
+                                               ULONG *ret_len, TEB *teb );
+__ASM_GLOBAL_FUNC( call_user_mode_callback,
+                   "subq $0xe8,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0xf0\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
+                   __ASM_CFI(".cfi_adjust_cfa_offset 0xe8\n\t")
+                   "movq %rbp,0xe0(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbp,0xe0\n\t")
+                   "leaq 0xe0(%rsp),%rbp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %rbp\n\t")
+                   "movq %rbx,-0x08(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x08\n\t")
+                   "movq %rsi,-0x10(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x10\n\t")
+                   "movq %rdi,-0x18(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x18\n\t")
+                   "movq %r12,-0x20(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r12,-0x20\n\t")
+                   "movq %r13,-0x28(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r13,-0x28\n\t")
+                   "movq %r14,-0x30(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r14,-0x30\n\t")
+                   "movq %r15,-0x38(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r15,-0x38\n\t")
+                   "stmxcsr -0x40(%rbp)\n\t"
+                   "fnstcw -0x3c(%rbp)\n\t"
+                   "movdqa %xmm6,-0x50(%rbp)\n\t"
+                   "movdqa %xmm7,-0x60(%rbp)\n\t"
+                   "movdqa %xmm8,-0x70(%rbp)\n\t"
+                   "movdqa %xmm9,-0x80(%rbp)\n\t"
+                   "movdqa %xmm10,-0x90(%rbp)\n\t"
+                   "movdqa %xmm11,-0xa0(%rbp)\n\t"
+                   "movdqa %xmm12,-0xb0(%rbp)\n\t"
+                   "movdqa %xmm13,-0xc0(%rbp)\n\t"
+                   "movdqa %xmm14,-0xd0(%rbp)\n\t"
+                   "movdqa %xmm15,-0xe0(%rbp)\n\t"
+                   "movq %r8,0x10(%rbp)\n\t"   /* ret_ptr */
+                   "movq %r9,0x18(%rbp)\n\t"   /* ret_len */
+                   "movq 0x30(%rbp),%r11\n\t"  /* teb */
+
+                   "subq $0x410,%rsp\n\t"      /* sizeof(struct syscall_frame) + ebp + exception */
+                   "andq $~63,%rsp\n\t"
+                   "movq %rbp,0x400(%rsp)\n\t"
+                   "movq 0x328(%r11),%r10\n\t" /* amd64_thread_data()->syscall_frame */
+                   "movq (%r11),%rax\n\t"      /* NtCurrentTeb()->Tib.ExceptionList */
+                   "movq %rax,0x408(%rsp)\n\t"
+                   "movq 0xa8(%r10),%rax\n\t"  /* prev_frame->syscall_table */
+                   "movq %rax,0xa8(%rsp)\n\t"  /* frame->syscall_table */
+                   "movl 0xb0(%r10),%r14d\n\t" /* prev_frame->syscall_flags */
+                   "movl %r14d,0xb0(%rsp)\n\t" /* frame->syscall_flags */
+                   "movq %r10,0xa0(%rsp)\n\t"  /* frame->prev_frame */
+                   "movq %rsp,0x328(%r11)\n\t" /* amd64_thread_data()->syscall_frame */
+#ifdef __linux__
+                   "testl $12,%r14d\n\t"       /* SYSCALL_HAVE_PTHREAD_TEB | SYSCALL_HAVE_WRFSGSBASE */
+                   "jz 1f\n\t"
+                   "movw 0x338(%r11),%fs\n"    /* amd64_thread_data()->fs */
+                   "1:\n\t"
+#endif
+                   "movq %rcx,%r9\n\t"         /* func */
+                   "movq %rdx,%rax\n\t"        /* stack */
+                   "movq 0x8(%rax),%rcx\n\t"   /* id */
+                   "movq 0x10(%rax),%rdx\n\t"  /* args */
+                   "movq 0x18(%rax),%r8\n\t"   /* len */
+                   "movq %rax,%rsp\n\t"
+                   "jmpq *%r9" )
+
+
+/***********************************************************************
+ *           user_mode_callback_return
+ */
+extern void CDECL DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                               NTSTATUS status, TEB *teb );
+__ASM_GLOBAL_FUNC( user_mode_callback_return,
+                   "movq 0x328(%r9),%r10\n\t"  /* amd64_thread_data()->syscall_frame */
+                   "movq 0xa0(%r10),%r11\n\t"  /* frame->prev_frame */
+                   "movq %r11,0x328(%r9)\n\t"  /* amd64_thread_data()->syscall_frame = prev_frame */
+                   "movq 0x400(%r10),%rbp\n\t" /* call_user_mode_callback rbp */
+                   __ASM_CFI(".cfi_def_cfa_register %rbp\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x08\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x10\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x18\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r12,-0x20\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r13,-0x28\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r14,-0x30\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r15,-0x38\n\t")
+                   "movq 0x408(%r10),%rsi\n\t" /* exception list */
+                   "movq %rsi,0(%r9)\n\t"      /* teb->Tib.ExceptionList */
+                   "movq 0x10(%rbp),%rsi\n\t"  /* ret_ptr */
+                   "movq 0x18(%rbp),%rdi\n\t"  /* ret_len */
+                   "movq %rcx,(%rsi)\n\t"
+                   "movl %edx,(%rdi)\n\t"
+                   "movdqa -0xe0(%rbp),%xmm15\n\t"
+                   "movdqa -0xd0(%rbp),%xmm14\n\t"
+                   "movdqa -0xc0(%rbp),%xmm13\n\t"
+                   "movdqa -0xb0(%rbp),%xmm12\n\t"
+                   "movdqa -0xa0(%rbp),%xmm11\n\t"
+                   "movdqa -0x90(%rbp),%xmm10\n\t"
+                   "movdqa -0x80(%rbp),%xmm9\n\t"
+                   "movdqa -0x70(%rbp),%xmm8\n\t"
+                   "movdqa -0x60(%rbp),%xmm7\n\t"
+                   "movdqa -0x50(%rbp),%xmm6\n\t"
+                   "ldmxcsr -0x40(%rbp)\n\t"
+                   "fnclex\n\t"
+                   "fldcw -0x3c(%rbp)\n\t"
+                   "movq -0x38(%rbp),%r15\n\t"
+                   __ASM_CFI(".cfi_same_value %r15\n\t")
+                   "movq -0x30(%rbp),%r14\n\t"
+                   __ASM_CFI(".cfi_same_value %r14\n\t")
+                   "movq -0x28(%rbp),%r13\n\t"
+                   __ASM_CFI(".cfi_same_value %r13\n\t")
+                   "movq -0x20(%rbp),%r12\n\t"
+                   __ASM_CFI(".cfi_same_value %r12\n\t")
+                   "movq -0x18(%rbp),%rdi\n\t"
+                   __ASM_CFI(".cfi_same_value %rdi\n\t")
+                   "movq -0x10(%rbp),%rsi\n\t"
+                   __ASM_CFI(".cfi_same_value %rsi\n\t")
+                   "movq -0x08(%rbp),%rbx\n\t"
+                   __ASM_CFI(".cfi_same_value %rbx\n\t")
+                   "leave\n"
+                   __ASM_CFI(".cfi_def_cfa %rsp,8\n\t")
+                   __ASM_CFI(".cfi_same_value %rbp\n\t")
+                   "movq %r8,%rax\n\t"
+                   "retq" )
+
 
 /***********************************************************************
  *           KeUserModeCallback
  */
 NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
 {
-    struct user_callback_frame callback_frame = { { 0 }, ret_ptr, ret_len };
+    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
+    void *args_data = (void *)((frame->rsp - len) & ~15);
+    ULONG_PTR *stack = args_data;
 
     /* if we have no syscall frame, call the callback directly */
-    if ((char *)&callback_frame < (char *)ntdll_get_thread_data()->kernel_stack ||
-        (char *)&callback_frame > (char *)amd64_thread_data()->syscall_frame)
+    if ((char *)&frame < (char *)ntdll_get_thread_data()->kernel_stack ||
+        (char *)&frame > (char *)amd64_thread_data()->syscall_frame)
     {
         NTSTATUS (WINAPI *func)(const void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
         return func( args, len );
     }
 
-    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&callback_frame)
+    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&frame)
         return STATUS_STACK_OVERFLOW;
 
-    if (!__wine_setjmpex( &callback_frame.jmpbuf, NULL ))
-    {
-        struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
-        void *args_data = (void *)(((frame->rsp - len) & ~15) - 8);
-        struct {
-            void *args;
-            ULONG id;
-            ULONG len;
-        } *params = (void *)((ULONG_PTR)args_data - 0x10);
+    memcpy( args_data, args, len );
+    *(--stack) = 0;
+    *(--stack) = len;
+    *(--stack) = (ULONG_PTR)args_data;
+    *(--stack) = id;
+    *(--stack) = 0xdeadbabe;
 
-        memcpy( args_data, args, len );
-        params->args = args_data;
-        params->id = id;
-        params->len = len;
-
-        callback_frame.frame.rcx           = id;
-        callback_frame.frame.rdx           = (ULONG_PTR)args;
-        callback_frame.frame.r8            = len;
-        callback_frame.frame.cs            = cs64_sel;
-        callback_frame.frame.fs            = amd64_thread_data()->fs;
-        callback_frame.frame.gs            = ds64_sel;
-        callback_frame.frame.ss            = ds64_sel;
-        callback_frame.frame.rsp           = (ULONG_PTR)params - 0x28;
-        callback_frame.frame.rip           = (ULONG_PTR)pKiUserCallbackDispatcher;
-        callback_frame.frame.eflags        = 0x200;
-        callback_frame.frame.restore_flags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-        callback_frame.frame.prev_frame    = frame;
-        callback_frame.frame.syscall_flags = frame->syscall_flags;
-        callback_frame.frame.syscall_table = frame->syscall_table;
-        callback_frame.teb_frame           = NtCurrentTeb()->Tib.ExceptionList;
-        amd64_thread_data()->syscall_frame = &callback_frame.frame;
-
-        __wine_syscall_dispatcher_return( &callback_frame.frame, 0 );
-    }
-    return callback_frame.status;
+    return call_user_mode_callback( pKiUserCallbackDispatcher, stack, ret_ptr, ret_len, NtCurrentTeb() );
 }
 
 
@@ -1629,16 +1732,8 @@ NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void 
  */
 NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status )
 {
-    struct user_callback_frame *frame = (struct user_callback_frame *)amd64_thread_data()->syscall_frame;
-
-    if (!frame->frame.prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
-
-    *frame->ret_ptr = ret_ptr;
-    *frame->ret_len = ret_len;
-    frame->status = status;
-    amd64_thread_data()->syscall_frame = frame->frame.prev_frame;
-    NtCurrentTeb()->Tib.ExceptionList = frame->teb_frame;
-    __wine_longjmp( &frame->jmpbuf, 1 );
+    if (!amd64_thread_data()->syscall_frame->prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
+    user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
 }
 
 
@@ -1726,75 +1821,21 @@ static inline DWORD is_privileged_instr( CONTEXT *context )
 #ifdef HAVE_SECCOMP
 static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
-    ULONG64 *dispatcher_address = (ULONG64 *)((char *)user_shared_data + page_size);
+    extern void __wine_syscall_dispatcher_prolog_end(void);
+    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
     ucontext_t *ctx = sigcontext;
-    void ***rsp;
 
-    TRACE("SIGSYS, rax %#llx, rip %#llx.\n", ctx->uc_mcontext.gregs[REG_RAX],
+    TRACE_(seh)("SIGSYS, rax %#llx, rip %#llx.\n", ctx->uc_mcontext.gregs[REG_RAX],
             ctx->uc_mcontext.gregs[REG_RIP]);
 
-    rsp = (void ***)&ctx->uc_mcontext.gregs[REG_RSP];
-    *rsp -= 1;
-    **rsp = (void *)(ctx->uc_mcontext.gregs[REG_RIP] + 0xb);
-
-    ctx->uc_mcontext.gregs[REG_RIP] = *dispatcher_address;
-}
-
-unsigned int __wine_syscall_nr_NtClose;
-unsigned int __wine_syscall_nr_NtCreateFile;
-unsigned int __wine_syscall_nr_NtGetContextThread;
-unsigned int __wine_syscall_nr_NtQueryInformationProcess;
-unsigned int __wine_syscall_nr_NtQuerySystemInformation;
-unsigned int __wine_syscall_nr_NtQueryVirtualMemory;
-unsigned int __wine_syscall_nr_NtReadFile;
-unsigned int __wine_syscall_nr_NtWriteFile;
-
-static void sigsys_handler_rdr2( int signal, siginfo_t *siginfo, void *sigcontext )
-{
-    ULONG64 *dispatcher_address = (ULONG64 *)((char *)user_shared_data + page_size);
-    ucontext_t *ctx = sigcontext;
-    void ***rsp;
-
-    TRACE("SIGSYS, rax %#llx, rip %#llx.\n", ctx->uc_mcontext.gregs[REG_RAX],
-            ctx->uc_mcontext.gregs[REG_RIP]);
-
-    rsp = (void ***)&ctx->uc_mcontext.gregs[REG_RSP];
-    *rsp -= 1;
-    **rsp = (void *)(ctx->uc_mcontext.gregs[REG_RIP] + 0xb);
-
-    ctx->uc_mcontext.gregs[REG_RIP] = *dispatcher_address;
-
-    /* syscall numbers are for Windows 10 1909 (build 18363) */
-    switch (ctx->uc_mcontext.gregs[REG_RAX])
-    {
-        case 0x19:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtQueryInformationProcess;
-            break;
-        case 0x36:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtQuerySystemInformation;
-            break;
-        case 0xed:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtGetContextThread;
-            break;
-        case 0x55:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtCreateFile;
-            break;
-        case 0x08:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtWriteFile;
-            break;
-        case 0x06:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtReadFile;
-            break;
-        case 0x0f:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtClose;
-            break;
-        case 0x23:
-            ctx->uc_mcontext.gregs[REG_RAX] = __wine_syscall_nr_NtQueryVirtualMemory;
-            break;
-         default:
-            FIXME("Unhandled syscall %#llx.\n", ctx->uc_mcontext.gregs[REG_RAX]);
-            break;
-    }
+    frame->rip = ctx->uc_mcontext.gregs[REG_RIP] + 0xb;
+    frame->rcx = ctx->uc_mcontext.gregs[REG_RIP];
+    frame->eflags = ctx->uc_mcontext.gregs[REG_EFL];
+    frame->restore_flags = 0;
+    ctx->uc_mcontext.gregs[REG_RCX] = (ULONG_PTR)frame;
+    ctx->uc_mcontext.gregs[REG_R11] = frame->eflags;
+    ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;  /* clear single-step flag */
+    ctx->uc_mcontext.gregs[REG_RIP] = (ULONG64)__wine_syscall_dispatcher_prolog_end;
 }
 #endif
 
@@ -1816,20 +1857,20 @@ static void check_bpf_jit_enable(void)
     fd = open("/proc/sys/net/core/bpf_jit_enable", O_RDONLY);
     if (fd == -1)
     {
-        WARN("Could not open /proc/sys/net/core/bpf_jit_enable.\n");
+        WARN_(seh)("Could not open /proc/sys/net/core/bpf_jit_enable.\n");
         return;
     }
 
     if (read(fd, &enabled, sizeof(enabled)) == sizeof(enabled))
     {
-        TRACE("enabled %#x.\n", enabled);
+        TRACE_(seh)("enabled %#x.\n", enabled);
 
         if (enabled != '1')
-            ERR("BPF JIT is not enabled in the kernel, enable it to reduce syscall emulation overhead.\n");
+            ERR_(seh)("BPF JIT is not enabled in the kernel, enable it to reduce syscall emulation overhead.\n");
     }
     else
     {
-        WARN("Could not read /proc/sys/net/core/bpf_jit_enable.\n");
+        WARN_(seh)("Could not read /proc/sys/net/core/bpf_jit_enable.\n");
     }
     close(fd);
 }
@@ -1844,101 +1885,110 @@ static void install_bpf(struct sigaction *sig_act)
 #   ifndef SECCOMP_SET_MODE_FILTER
 #       define SECCOMP_SET_MODE_FILTER 1
 #   endif
+    static const BYTE syscall_trap_test[] =
+    {
+        0x48, 0x89, 0xc8,   /* mov %rcx, %rax */
+        0x0f, 0x05,         /* syscall */
+        0xc3,               /* retq */
+    };
     static const unsigned int flags = SECCOMP_FILTER_FLAG_SPEC_ALLOW;
+
+#define NATIVE_SYSCALL_ADDRESS_START 0x700000000000
+
     static struct sock_filter filter[] =
     {
-       BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                (offsetof(struct seccomp_data, nr))),
-       BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0xf000, 0, 1),
-       BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
-       BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    };
-    static struct sock_filter filter_rdr2[] =
-    {
-        /* Trap anything called from RDR2 or the launcher (0x140000000 - 0x150000000)*/
-        /* > 0x140000000 */
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer) + 0),
-        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0x40000000 /*lsb*/, 0, 7),
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer) + 4),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x1 /*msb*/, 0, 5),
-
-        /* < 0x150000000 */
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer) + 0),
-        BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, 0x50000000 /*lsb*/, 3, 0),
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer) + 4),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x1 /*msb*/, 0, 1),
+        /* Native libs are loaded at high addresses. */
+        BPF_JUMP(BPF_JMP | BPF_JGT | BPF_K, NATIVE_SYSCALL_ADDRESS_START >> 32, 0, 1),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+        /* Allow i386. */
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+        BPF_JUMP (BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+        /* Allow wine64-preloader */
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer)),
+        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0x7d400000, 1, 0),
         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
-
-        /* Allow everything else */
+        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0x7d402000, 0, 1),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
     };
+    long (WINAPI *test_syscall)(long sc_number);
     struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
     struct sock_fprog prog;
-    BOOL rdr2 = FALSE;
     NTSTATUS status;
+
+    if ((ULONG_PTR)sc_seccomp < NATIVE_SYSCALL_ADDRESS_START
+            || (ULONG_PTR)syscall < NATIVE_SYSCALL_ADDRESS_START)
+    {
+        ERR_(seh)("Native libs are being loaded in low addresses, sc_seccomp %p, syscall %p, not installing seccomp.\n",
+                sc_seccomp, syscall);
+        ERR_(seh)("The known reasons are /proc/sys/vm/legacy_va_layout set to 1 or 'ulimit -s' being 'unlimited'.\n");
+        return;
+    }
 
     sig_act->sa_sigaction = sigsys_handler;
     memset(&prog, 0, sizeof(prog));
-
-    {
-        const char *sgi = getenv("SteamGameId");
-        if (sgi && (!strcmp(sgi, "1174180") || !strcmp(sgi, "1404210")))
-        {
-            /* Use specific filter and signal handler for Red Dead Redemption 2 */
-            prog.len = ARRAY_SIZE(filter_rdr2);
-            prog.filter = filter_rdr2;
-            sig_act->sa_sigaction = sigsys_handler_rdr2;
-            rdr2 = TRUE;
-        }
-    }
 
     sigaction(SIGSYS, sig_act, NULL);
 
     frame->syscall_flags = syscall_flags;
     frame->syscall_table = KeServiceDescriptorTable;
 
-    if (rdr2)
+    test_syscall = mmap((void *)0x600000000000, 0x1000, PROT_EXEC | PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (test_syscall != (void *)0x600000000000)
     {
         int ret;
+
+        ERR("Could not allocate test syscall, falling back to seccomp presence check, test_syscall %p, errno %d.\n",
+                test_syscall, errno);
+        if (test_syscall != MAP_FAILED) munmap(test_syscall, 0x1000);
 
         if ((ret = prctl(PR_GET_SECCOMP, 0, NULL, 0, 0)))
         {
             if (ret == 2)
-                TRACE("Seccomp filters already installed.\n");
+                TRACE_(seh)("Seccomp filters already installed.\n");
             else
-                ERR("Seccomp filters cannot be installed, ret %d, error %s.\n", ret, strerror(errno));
+                ERR_(seh)("Seccomp filters cannot be installed, ret %d, error %s.\n", ret, strerror(errno));
             return;
         }
     }
     else
     {
-        if ((status = syscall(0xffff)) == STATUS_INVALID_PARAMETER)
+        memcpy(test_syscall, syscall_trap_test, sizeof(syscall_trap_test));
+        status = test_syscall(0xffff);
+        munmap(test_syscall, 0x1000);
+        if (status == STATUS_INVALID_PARAMETER)
         {
-            TRACE("Seccomp filters already installed.\n");
+            TRACE_(seh)("Seccomp filters already installed.\n");
             return;
         }
         if (status != -ENOSYS && (status != -1 || errno != ENOSYS))
         {
-            ERR("Unexpected status %#x, errno %d.\n", status, errno);
+            ERR_(seh)("Unexpected status %#x, errno %d.\n", status, errno);
             return;
         }
-        prog.len = ARRAY_SIZE(filter);
-        prog.filter = filter;
     }
+
+    TRACE_(seh)("Installing seccomp filters.\n");
+
+    prog.len = ARRAY_SIZE(filter);
+    prog.filter = filter;
 
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0))
     {
-        ERR("prctl(PR_SET_NO_NEW_PRIVS, ...): %s.\n", strerror(errno));
+        ERR_(seh)("prctl(PR_SET_NO_NEW_PRIVS, ...): %s.\n", strerror(errno));
         return;
     }
     if (sc_seccomp(SECCOMP_SET_MODE_FILTER, flags, &prog))
     {
-        ERR("prctl(PR_SET_SECCOMP, ...): %s.\n", strerror(errno));
+        ERR_(seh)("prctl(PR_SET_SECCOMP, ...): %s.\n", strerror(errno));
         return;
     }
     check_bpf_jit_enable();
 #else
-    WARN("Built without seccomp.\n");
+    WARN_(seh)("Built without seccomp.\n");
 #endif
 }
 
@@ -2538,46 +2588,6 @@ static void *mac_thread_gsbase(void)
 
 
 /**********************************************************************
- *		signal_init_thread
- */
-void signal_init_thread( TEB *teb )
-{
-    const WORD fpu_cw = 0x27f;
-
-#if defined __linux__
-    arch_prctl( ARCH_SET_GS, teb );
-    arch_prctl( ARCH_GET_FS, &amd64_thread_data()->pthread_teb );
-    if (fs32_sel) alloc_fs_sel( fs32_sel >> 3, (char *)teb + teb->WowTebOffset );
-#elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
-    amd64_set_gsbase( teb );
-#elif defined(__NetBSD__)
-    sysarch( X86_64_SET_GSBASE, &teb );
-#elif defined (__APPLE__)
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
-                      :
-                      : "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
-                      :
-                      : "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
-    amd64_thread_data()->pthread_teb = mac_thread_gsbase();
-
-    /* alloc_tls_slot() needs to poke a value to an address relative to each
-       thread's gsbase.  Have each thread record its gsbase pointer into its
-       TEB so alloc_tls_slot() can find it. */
-    teb->Reserved5[0] = amd64_thread_data()->pthread_teb;
-#else
-# error Please define setting %gs for your architecture
-#endif
-
-#ifdef __GNUC__
-    __asm__ volatile ("fninit; fldcw %0" : : "m" (fpu_cw));
-#else
-    FIXME_(seh)("FPU setup not implemented for this platform.\n");
-#endif
-}
-
-
-/**********************************************************************
  *		signal_init_process
  */
 void signal_init_process(void)
@@ -2699,6 +2709,26 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     CONTEXT *ctx, context = { 0 };
     I386_CONTEXT *wow_context;
 
+#if defined __linux__
+    arch_prctl( ARCH_SET_GS, teb );
+    arch_prctl( ARCH_GET_FS, &amd64_thread_data()->pthread_teb );
+    if (fs32_sel) alloc_fs_sel( fs32_sel >> 3, (char *)teb + teb->WowTebOffset );
+#elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
+    amd64_set_gsbase( teb );
+#elif defined(__NetBSD__)
+    sysarch( X86_64_SET_GSBASE, &teb );
+#elif defined (__APPLE__)
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+    amd64_thread_data()->pthread_teb = mac_thread_gsbase();
+    /* alloc_tls_slot() needs to poke a value to an address relative to each
+       thread's gsbase.  Have each thread record its gsbase pointer into its
+       TEB so alloc_tls_slot() can find it. */
+    teb->Reserved5[0] = amd64_thread_data()->pthread_teb;
+#else
+# error Please define setting %gs for your architecture
+#endif
+
     context.ContextFlags = CONTEXT_ALL;
     context.Rcx    = (ULONG_PTR)entry;
     context.Rdx    = (ULONG_PTR)arg;
@@ -2807,33 +2837,6 @@ __ASM_GLOBAL_FUNC( signal_exit_thread,
                    __ASM_CFI(".cfi_rel_offset %r15,8\n\t")
                    "call *%rsi" )
 
-#define DW_OP_rcx DW_OP_breg2
-#define DW_OP_rbp DW_OP_breg6
-#define DW_OP_rsp DW_OP_breg7
-
-#define DW_REG_rbx 0x03
-#define DW_REG_rsi 0x04
-#define DW_REG_rdi 0x05
-#define DW_REG_rbp 0x06
-#define DW_REG_rsp 0x07
-#define DW_REG_r12 0x0c
-#define DW_REG_r13 0x0d
-#define DW_REG_r14 0x0e
-#define DW_REG_r15 0x0f
-#define DW_REG_rip 0x10
-
-#define __ASM_CFI_STR(...) #__VA_ARGS__
-#define __ASM_CFI_ESC(...) \
-    __ASM_CFI(".cfi_escape " __ASM_CFI_STR(__VA_ARGS__) "\n\t")
-#define __ASM_CFI_CFA_IS_AT1(base, offset) \
-    __ASM_CFI_ESC(DW_CFA_def_cfa_expression, 0x03, DW_OP_ ## base, offset, DW_OP_deref)
-#define __ASM_CFI_REG_IS_AT1(reg, base, offset) \
-   __ASM_CFI_ESC(DW_CFA_expression, DW_REG_ ## reg, 0x02, DW_OP_ ## base, offset)
-#define __ASM_CFI_CFA_IS_AT2(base, lo, hi) \
-    __ASM_CFI_ESC(DW_CFA_def_cfa_expression, 0x04, DW_OP_ ## base, lo, hi, DW_OP_deref)
-#define __ASM_CFI_REG_IS_AT2(reg, base, lo, hi) \
-   __ASM_CFI_ESC(DW_CFA_expression, DW_REG_ ## reg, 0x03, DW_OP_ ## base, lo, hi)
-
 /***********************************************************************
  *           __wine_syscall_dispatcher
  */
@@ -2931,7 +2934,6 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "leaq 0x28(%rsp),%rsi\n\t"      /* first argument */
                    "movq %rcx,%rsp\n\t"
                    "movq 0x00(%rcx),%rax\n\t"
-                   "subq $0xf000,%rax\n\t"
                    "movq 0x18(%rcx),%rdx\n\t"
                    "movl %eax,%ebx\n\t"
                    "shrl $8,%ebx\n\t"

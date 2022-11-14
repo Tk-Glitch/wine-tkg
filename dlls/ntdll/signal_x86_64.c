@@ -280,8 +280,9 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
 
     if (!module || (module->Flags & LDR_WINE_INTERNAL))
     {
-        status = unix_funcs->unwind_builtin_dll( type, dispatch, context );
+        struct unwind_builtin_dll_params params = { type, dispatch, context };
 
+        status = NTDLL_UNIX_CALL( unwind_builtin_dll, &params );
         if (!status && dispatch->LanguageHandler && !module)
         {
             FIXME( "calling personality routine in system library not supported yet\n" );
@@ -548,6 +549,8 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
         else
             WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
                                debugstr_a((char *)rec->ExceptionInformation[1]) );
+
+        set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
     }
     else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
     {
@@ -671,7 +674,12 @@ __ASM_GLOBAL_FUNC( KiUserApcDispatcher,
                    "int3")
 
 
-void WINAPI user_callback_dispatcher( ULONG id, void *args, ULONG len )
+/*******************************************************************
+ *		KiUserCallbackDispatcher (NTDLL.@)
+ *
+ * FIXME: not binary compatible
+ */
+void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
 {
     NTSTATUS status;
 
@@ -689,28 +697,6 @@ void WINAPI user_callback_dispatcher( ULONG id, void *args, ULONG len )
 
     RtlRaiseStatus( status );
 }
-
-/*******************************************************************
- *		KiUserCallbackDispatcher (NTDLL.@)
- *
- * FIXME: not binary compatible
- */
-#ifdef __x86_64__
-__ASM_GLOBAL_FUNC( KiUserCallbackDispatcher,
-                  ".byte 0x0f, 0x1f, 0x44, 0x00, 0x00\n\t" /* Overwatch 2 replaces the first 5 bytes with a jump */
-                  "movq 0x28(%rsp), %rdx\n\t"
-                  "movl 0x30(%rsp), %ecx\n\t"
-                  "movl 0x34(%rsp), %r8d\n\t"
-                  "andq $0xFFFFFFFFFFFFFFF0, %rsp\n\t"
-                  __ASM_SEH(".seh_endprologue\n\t")
-                  "call " __ASM_NAME("user_callback_dispatcher") "\n\t"
-                  "int3")
-#else
-void WINAPI DECLSPEC_HOTPATCH KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
-{
-    return user_callback_dispatcher( id, args, len );
-}
-#endif
 
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )

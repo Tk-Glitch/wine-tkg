@@ -2093,7 +2093,7 @@ static void dwarf2_parse_subprogram_label(dwarf2_subprogram_t* subpgm,
     if (dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc))
     {
         loc.kind = loc_absolute;
-        loc.offset = subpgm->ctx->module_ctx->load_offset + low_pc.u.uvalue - subpgm->top_func->address;
+        loc.offset = subpgm->ctx->module_ctx->load_offset + low_pc.u.uvalue - subpgm->top_func->ranges[0].low;
         symt_add_function_point(subpgm->ctx->module_ctx->module, subpgm->top_func, SymTagLabel,
                                 &loc, name.u.string);
     }
@@ -2113,16 +2113,15 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
     struct attribute    name;
     struct symt*        ret_type;
     struct symt_function_signature* sig_type;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
     struct vector*      children;
     dwarf2_debug_info_t*child;
     unsigned int        i;
-    struct addr_range*  adranges;
-    unsigned            num_adranges;
+    unsigned            num_ranges;
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    if ((adranges = dwarf2_get_ranges(di, &num_adranges)) == NULL)
+    if (!(num_ranges = dwarf2_get_num_ranges(di)))
     {
         WARN("cannot read ranges\n");
         return;
@@ -2141,14 +2140,15 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                   subpgm->top_func,
                                   subpgm->current_block ? &subpgm->current_block->symt : &subpgm->current_func->symt,
                                   dwarf2_get_cpp_name(di, name.u.string),
-                                  adranges[0].low, &sig_type->symt);
+                                  &sig_type->symt, num_ranges);
     subpgm->current_func = (struct symt_function*)inlined;
     subpgm->current_block = NULL;
 
-    for (i = 0; i < num_adranges; ++i)
-        symt_add_inlinesite_range(subpgm->ctx->module_ctx->module, inlined,
-                                  adranges[i].low, adranges[i].high);
-    free(adranges);
+    if (!dwarf2_fill_ranges(di, inlined->ranges, num_ranges))
+    {
+        FIXME("Unexpected situation\n");
+        inlined->num_ranges = 0;
+    }
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -2180,7 +2180,7 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
     }
     subpgm->current_block = symt_check_tag(subpgm->current_func->container, SymTagBlock) ?
         (struct symt_block*)subpgm->current_func->container : NULL;
-    subpgm->current_func = (struct symt_function*)symt_get_upper_inlined((struct symt_inlinesite*)subpgm->current_func);
+    subpgm->current_func = (struct symt_function*)symt_get_upper_inlined(subpgm->current_func);
 }
 
 static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
@@ -2599,7 +2599,7 @@ static void dwarf2_set_line_number(struct module* module, ULONG_PTR address,
                                    const struct vector* v, unsigned file, unsigned line)
 {
     struct symt_function*       func;
-    struct symt_inlinesite*     inlined;
+    struct symt_function*       inlined;
     struct symt_ht*             symt;
     unsigned*                   psrc;
 
@@ -2611,15 +2611,14 @@ static void dwarf2_set_line_number(struct module* module, ULONG_PTR address,
     if (symt_check_tag(&symt->symt, SymTagFunction))
     {
         func = (struct symt_function*)symt;
-        for (inlined = func->next_inlinesite; inlined; inlined = inlined->func.next_inlinesite)
+        for (inlined = func->next_inlinesite; inlined; inlined = inlined->next_inlinesite)
         {
             int i;
-            for (i = 0; i < inlined->vranges.num_elts; ++i)
+            for (i = 0; i < inlined->num_ranges; ++i)
             {
-                struct addr_range* ar = (struct addr_range*)vector_at(&inlined->vranges, i);
-                if (ar->low <= address && address < ar->high)
+                if (inlined->ranges[i].low <= address && address < inlined->ranges[i].high)
                 {
-                    symt_add_func_line(module, &inlined->func, *psrc, line, address);
+                    symt_add_func_line(module, inlined, *psrc, line, address);
                     return; /* only add to lowest matching inline site */
                 }
             }
@@ -3018,7 +3017,7 @@ static BOOL dwarf2_lookup_loclist(const struct module_format* modfmt, const dwar
 static const dwarf2_cuhead_t* get_cuhead_from_func(const struct symt_function* func)
 {
     if (symt_check_tag(&func->symt, SymTagInlineSite))
-        func = symt_get_function_from_inlined((struct symt_inlinesite*)func);
+        func = symt_get_function_from_inlined((struct symt_function*)func);
     if (symt_check_tag(&func->symt, SymTagFunction) && symt_check_tag(func->container, SymTagCompiland))
     {
         struct symt_compiland* c = (struct symt_compiland*)func->container;

@@ -36,11 +36,11 @@
 #include "dshow.h"
 #include "dsound.h"
 #include "propsys.h"
+#include "propkey.h"
 
 #include "initguid.h"
 #include "ks.h"
 #include "ksmedia.h"
-#include "propkey.h"
 #include "mmdeviceapi.h"
 #include "audioclient.h"
 #include "endpointvolume.h"
@@ -234,6 +234,7 @@ static DWORD CALLBACK pulse_mainloop_thread(void *event)
 {
     struct main_loop_params params;
     params.event = event;
+    SetThreadDescription(GetCurrentThread(), L"winepulse_mainloop");
     pulse_call(main_loop, &params);
     return 0;
 }
@@ -359,6 +360,7 @@ static DWORD WINAPI pulse_timer_cb(void *user)
     struct timer_loop_params params;
     ACImpl *This = user;
     params.stream = This->pulse_stream;
+    SetThreadDescription(GetCurrentThread(), L"winepulse_timer_loop");
     pulse_call(timer_loop, &params);
     return 0;
 }

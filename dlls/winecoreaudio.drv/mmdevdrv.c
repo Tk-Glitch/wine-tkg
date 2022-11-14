@@ -198,6 +198,7 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(dll);
         if(NtQueryVirtualMemory(GetCurrentProcess(), dll, MemoryWineUnixFuncs,
                                 &coreaudio_handle, sizeof(coreaudio_handle), NULL))
             return FALSE;
@@ -209,6 +210,7 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
     case DLL_PROCESS_DETACH:
         if (reserved) break;
         DeleteCriticalSection(&g_sessions_lock);
+        CloseHandle(g_timer_q);
         break;
     }
     return TRUE;

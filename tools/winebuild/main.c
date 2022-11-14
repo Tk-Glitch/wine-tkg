@@ -42,8 +42,8 @@ int verbose = 0;
 int link_ext_symbols = 0;
 int force_pointer_size = 0;
 int unwind_tables = 0;
+int use_dlltool = 1;
 int use_msvcrt = 0;
-int unix_lib = 0;
 int safe_seh = 0;
 int prefer_native = 0;
 int data_only = 0;
@@ -175,6 +175,7 @@ static void set_target( const char *name )
 
     if (!parse_target( name, &target )) fatal_error( "Unrecognized target '%s'\n", name );
     if (target.cpu == CPU_ARM && is_pe()) thumb_mode = 1;
+    if (is_pe()) unwind_tables = 1;
 }
 
 /* cleanup on program exit */
@@ -233,6 +234,7 @@ static const char usage_str[] =
 "   -v, --verbose             Display the programs invoked\n"
 "       --version             Print the version and exit\n"
 "   -w, --warnings            Turn on warnings\n"
+"       --without-dlltool     Generate import library without using dlltool\n"
 "\nMode options:\n"
 "       --dll                 Build a library from a .spec file and object files\n"
 "       --def                 Build a .def file from a .spec file\n"
@@ -268,7 +270,8 @@ enum long_options_values
     LONG_OPT_STATICLIB,
     LONG_OPT_SUBSYSTEM,
     LONG_OPT_SYSCALL_TABLE,
-    LONG_OPT_VERSION
+    LONG_OPT_VERSION,
+    LONG_OPT_WITHOUT_DLLTOOL,
 };
 
 static const char short_options[] = "B:C:D:E:F:H:I:K:L:M:N:b:d:e:f:hkl:m:o:r:u:vw";
@@ -300,6 +303,7 @@ static const struct long_option long_options[] =
     { "subsystem",           1, LONG_OPT_SUBSYSTEM },
     { "syscall-table",       1, LONG_OPT_SYSCALL_TABLE },
     { "version",             0, LONG_OPT_VERSION },
+    { "without-dlltool",     0, LONG_OPT_WITHOUT_DLLTOOL },
     /* aliases for short options */
     { "target",              1, 'b' },
     { "delay-lib",           1, 'd' },
@@ -403,7 +407,6 @@ static void option_callback( int optc, char *optarg )
         else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
         else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
         else if (!strcmp( optarg, "no-cygwin" )) use_msvcrt = 1;
-        else if (!strcmp( optarg, "unix" )) unix_lib = 1;
         else if (!strcmp( optarg, "unicode" )) main_spec->unicode_app = 1;
         else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
         else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
@@ -531,6 +534,9 @@ static void option_callback( int optc, char *optarg )
     case LONG_OPT_VERSION:
         printf( "winebuild version " PACKAGE_VERSION "\n" );
         exit(0);
+    case LONG_OPT_WITHOUT_DLLTOOL:
+        use_dlltool = 0;
+        break;
     case '?':
         fprintf( stderr, "winebuild: %s\n\n", optarg );
         usage(1);
@@ -616,6 +622,7 @@ int main(int argc, char **argv)
 
     target = init_argv0_target( argv[0] );
     if (target.platform == PLATFORM_CYGWIN) target.platform = PLATFORM_MINGW;
+    if (is_pe()) unwind_tables = 1;
 
     files = parse_options( argc, argv, short_options, long_options, 0, option_callback );
 
@@ -637,7 +644,7 @@ int main(int argc, char **argv)
     case MODE_EXE:
         files = load_resources( files, spec );
         if (spec_file_name && !parse_input_file( spec )) break;
-        if (!spec->init_func && !unix_lib) spec->init_func = xstrdup( get_default_entry_point( spec ));
+        if (!spec->init_func) spec->init_func = xstrdup( get_default_entry_point( spec ));
 
         if (fake_module)
         {
@@ -669,10 +676,10 @@ int main(int argc, char **argv)
     case MODE_IMPLIB:
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
-        output_static_lib( spec, files );
+        output_import_lib( spec, files );
         break;
     case MODE_STATICLIB:
-        output_static_lib( NULL, files );
+        output_static_lib( output_file_name, files, 1 );
         break;
     case MODE_BUILTIN:
         if (!files.count) fatal_error( "missing file argument for --builtin option\n" );

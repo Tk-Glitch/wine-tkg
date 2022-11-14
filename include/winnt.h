@@ -759,6 +759,13 @@ typedef struct _MEMORY_BASIC_INFORMATION
     DWORD    Type;
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
+typedef struct _MEM_ADDRESS_REQUIREMENTS
+{
+  void      *LowestStartingAddress;
+  void      *HighestEndingAddress;
+  SIZE_T     Alignment;
+} MEM_ADDRESS_REQUIREMENTS, *PMEM_ADDRESS_REQUIREMENTS;
+
 #define MEM_EXTENDED_PARAMETER_TYPE_BITS 8
 
 typedef enum MEM_EXTENDED_PARAMETER_TYPE {
@@ -2229,14 +2236,14 @@ typedef struct _NT_TIB
 
 struct _TEB;
 
-#if defined(__i386__) && defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
+#if defined(__i386__) && defined(__GNUC__) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__(".byte 0x64\n\tmovl (0x18),%0" : "=r" (teb));
     return teb;
 }
-#elif defined(__i386__) && defined(_MSC_VER)
+#elif defined(__i386__) && defined(_MSC_VER) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
   struct _TEB *teb;
@@ -2244,33 +2251,35 @@ static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
   __asm mov teb, eax;
   return teb;
 }
-#elif defined(__x86_64__) && defined(__GNUC__)
+#elif defined(__x86_64__) && defined(__GNUC__) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__(".byte 0x65\n\tmovq (0x30),%0" : "=r" (teb));
     return teb;
 }
-#elif defined(__x86_64__) && defined(_MSC_VER)
+#elif defined(__x86_64__) && defined(_MSC_VER) && !defined(WINE_UNIX_LIB)
 unsigned __int64 __readgsqword(unsigned long);
 #pragma intrinsic(__readgsqword)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     return (struct _TEB *)__readgsqword(FIELD_OFFSET(NT_TIB, Self));
 }
-#elif defined(__arm__) && defined(__GNUC__)
+#elif defined(__arm__) && defined(__GNUC__) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__("mrc p15, 0, %0, c13, c0, 2" : "=r" (teb));
     return teb;
 }
-#elif defined(__arm__) && defined(_MSC_VER)
+#elif defined(__arm__) && defined(_MSC_VER) && !defined(WINE_UNIX_LIB)
 #pragma intrinsic(_MoveFromCoprocessor)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     return (struct _TEB *)(ULONG_PTR)_MoveFromCoprocessor(15, 0, 13, 0, 2);
 }
+#elif defined(__GNUC__)
+extern struct _TEB * WINAPI NtCurrentTeb(void) __attribute__((pure));
 #else
 extern struct _TEB * WINAPI NtCurrentTeb(void);
 #endif

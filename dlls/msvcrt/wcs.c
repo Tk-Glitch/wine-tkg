@@ -1317,6 +1317,45 @@ int WINAPIV _scprintf(const char *format, ...)
 }
 
 /*********************************************************************
+ *              _scprintf_l (MSVCRT.@)
+ */
+int WINAPIV _scprintf_l(const char *format, _locale_t locale, ...)
+{
+    int retval;
+    va_list valist;
+    va_start(valist, locale);
+    retval = _vscprintf_l(format, locale, valist);
+    va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ *              _scprintf_p (MSVCRT.@)
+ */
+int WINAPIV _scprintf_p(const char *format, ...)
+{
+    int retval;
+    va_list valist;
+    va_start(valist, format);
+    retval = _vscprintf_p_l(format, NULL, valist);
+    va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ *              _scprintf_p_l (MSVCRT.@)
+ */
+int WINAPIV _scprintf_p_l(const char *format, _locale_t locale, ...)
+{
+    int retval;
+    va_list valist;
+    va_start(valist, locale);
+    retval = _vscprintf_p_l(format, locale, valist);
+    va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
  *              _vsnwprintf (MSVCRT.@)
  */
 int CDECL _vsnwprintf(wchar_t *str, size_t len,
@@ -1846,6 +1885,22 @@ int WINAPIV _sprintf_p(char *buffer, size_t length, const char *format, ...)
     return r;
 }
 #endif
+
+/*********************************************************************
+ *		_swprintf_p (MSVCRT.@)
+ */
+int WINAPIV _swprintf_p(wchar_t *buffer, size_t length,
+        const wchar_t *format, ...)
+{
+    va_list valist;
+    int r;
+
+    va_start(valist, format);
+    r = vswprintf_p_l_opt(buffer, length, format, 0, NULL, valist);
+    va_end(valist);
+
+    return r;
+}
 
 /*********************************************************************
  *		_swprintf_p_l (MSVCRT.@)
@@ -2453,7 +2508,7 @@ wchar_t* __cdecl wcscat( wchar_t *dst, const wchar_t *src )
 /*********************************************************************
  *           wcsncat_s (MSVCRT.@)
  */
-INT CDECL wcsncat_s(wchar_t *dst, size_t elem, const wchar_t *src, size_t count)
+errno_t CDECL wcsncat_s(wchar_t *dst, size_t elem, const wchar_t *src, size_t count)
 {
     size_t i, j;
 

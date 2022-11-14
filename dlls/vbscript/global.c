@@ -439,6 +439,20 @@ static HRESULT to_double(VARIANT *v, double *ret)
     return S_OK;
 }
 
+static HRESULT to_float(VARIANT *v, float *ret)
+{
+    VARIANT dst;
+    HRESULT hres;
+
+    V_VT(&dst) = VT_EMPTY;
+    hres = VariantChangeType(&dst, v, 0, VT_R4);
+    if(FAILED(hres))
+        return hres;
+
+    *ret = V_R4(&dst);
+    return S_OK;
+}
+
 static HRESULT to_string(VARIANT *v, BSTR *ret)
 {
     VARIANT dst;
@@ -1075,16 +1089,70 @@ static HRESULT Global_Sqr(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VA
         return return_double(res, sqrt(d));
 }
 
+static unsigned int get_next_rnd(int value)
+{
+    return (value * 0x43fd43fd + 0xc39ec3) & 0xffffff;
+}
+
 static HRESULT Global_Randomize(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    union
+    {
+        double d;
+        unsigned int i[2];
+    } dtoi;
+    unsigned int seed;
+    HRESULT hres;
+
+    assert(args_cnt == 0 || args_cnt == 1);
+    if (args_cnt == 1) {
+        hres = to_double(arg, &dtoi.d);
+        if (FAILED(hres))
+            return hres;
+    }
+    else
+        dtoi.d = GetTickCount() * 0.001;
+
+    seed = dtoi.i[1];
+    seed ^= (seed >> 16);
+    seed = ((seed & 0xffff) << 8) | (This->ctx->script_obj->rnd & 0xff);
+    This->ctx->script_obj->rnd = seed;
+
+    return res ? DISP_E_TYPEMISMATCH : S_OK;
 }
 
 static HRESULT Global_Rnd(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    static const float modulus = 16777216.0f;
+    unsigned int value;
+    HRESULT hres;
+    float f;
+
+    assert(args_cnt == 0 || args_cnt == 1);
+
+    value = This->ctx->script_obj->rnd;
+    if (args_cnt == 1)
+    {
+        hres = to_float(arg, &f);
+        if (FAILED(hres))
+            return hres;
+
+        if (f < 0.0f)
+        {
+            value = *(unsigned int *)&f;
+            This->ctx->script_obj->rnd = value = get_next_rnd(value + (value >> 24));
+        }
+        else if (f == 0.0f)
+            value = This->ctx->script_obj->rnd;
+        else
+            This->ctx->script_obj->rnd = value = get_next_rnd(value);
+    }
+    else
+    {
+        This->ctx->script_obj->rnd = value = get_next_rnd(value);
+    }
+
+    return return_float(res, (float)value / modulus);
 }
 
 static HRESULT Global_Timer(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -1280,22 +1348,26 @@ static HRESULT Global_Right(BuiltinDisp *This, VARIANT *args, unsigned args_cnt,
 
     TRACE("(%s %s)\n", debugstr_variant(args), debugstr_variant(args+1));
 
-    if(V_VT(args+1) == VT_BSTR) {
+    if(V_VT(args+1) == VT_NULL)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+    hres = to_int(args+1, &len);
+    if(FAILED(hres))
+        return hres;
+
+    if(len < 0)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+
+    if(V_VT(args) == VT_NULL)
+        return return_null(res);
+
+    if(V_VT(args) == VT_BSTR) {
         str = V_BSTR(args);
     }else {
         hres = to_string(args, &conv_str);
         if(FAILED(hres))
             return hres;
         str = conv_str;
-    }
-
-    hres = to_int(args+1, &len);
-    if(FAILED(hres))
-        return hres;
-
-    if(len < 0) {
-        FIXME("len = %d\n", len);
-        return E_FAIL;
     }
 
     str_len = SysStringLen(str);
@@ -1319,35 +1391,49 @@ static HRESULT Global_RightB(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt,
 static HRESULT Global_Mid(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
     int len = -1, start, str_len;
-    BSTR str;
+    BSTR str, conv_str = NULL;
     HRESULT hres;
 
     TRACE("(%s %s ...)\n", debugstr_variant(args), debugstr_variant(args+1));
 
     assert(args_cnt == 2 || args_cnt == 3);
 
-    if(V_VT(args) != VT_BSTR) {
-        FIXME("args[0] = %s\n", debugstr_variant(args));
-        return E_NOTIMPL;
-    }
+    if(V_VT(args) == VT_EMPTY)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
 
-    str = V_BSTR(args);
+    if(V_VT(args+1) == VT_NULL || (args_cnt == 3 && V_VT(args+2) == VT_NULL))
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+    if(V_VT(args+1) == VT_EMPTY)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
 
     hres = to_int(args+1, &start);
     if(FAILED(hres))
         return hres;
 
+    if(start < 0)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+
     if(args_cnt == 3) {
+        if(V_VT(args+2) == VT_EMPTY)
+            return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+
         hres = to_int(args+2, &len);
         if(FAILED(hres))
             return hres;
 
-        if(len < 0) {
-            FIXME("len = %d\n", len);
-            return E_FAIL;
-        }
+        if(len < 0)
+            return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
     }
 
+    if(V_VT(args) == VT_BSTR) {
+        str = V_BSTR(args);
+    }else {
+        hres = to_string(args, &conv_str);
+        if(FAILED(hres))
+            return hres;
+        str = conv_str;
+    }
 
     str_len = SysStringLen(str);
     start--;
@@ -1363,10 +1449,12 @@ static HRESULT Global_Mid(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, V
         V_VT(res) = VT_BSTR;
         V_BSTR(res) = SysAllocStringLen(str+start, len);
         if(!V_BSTR(res))
-            return E_OUTOFMEMORY;
+            hres = E_OUTOFMEMORY;
     }
 
-    return S_OK;
+    SysFreeString(conv_str);
+
+    return hres;
 }
 
 static HRESULT Global_MidB(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -3092,12 +3180,12 @@ static const builtin_prop_t global_props[] = {
     {L"MsgBox",                    Global_MsgBox, 0, 1, 5},
     {L"Now",                       Global_Now, 0, 0},
     {L"Oct",                       Global_Oct, 0, 1},
-    {L"Randomize",                 Global_Randomize, 0, 1},
+    {L"Randomize",                 Global_Randomize, 0, 0, 1},
     {L"Replace",                   Global_Replace, 0, 3, 6},
     {L"RGB",                       Global_RGB, 0, 3},
     {L"Right",                     Global_Right, 0, 2},
     {L"RightB",                    Global_RightB, 0, 2},
-    {L"Rnd",                       Global_Rnd, 0, 1},
+    {L"Rnd",                       Global_Rnd, 0, 0, 1},
     {L"Round",                     Global_Round, 0, 1, 2},
     {L"RTrim",                     Global_RTrim, 0, 1},
     {L"ScriptEngine",              Global_ScriptEngine, 0, 0},

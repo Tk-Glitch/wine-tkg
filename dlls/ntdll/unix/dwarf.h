@@ -233,6 +233,8 @@
 #define DW_EH_PE_indirect 0x80
 #define DW_EH_PE_omit     0xff
 
+#ifndef NTDLL_DWARF_H_NO_UNWINDER
+
 struct dwarf_eh_bases
 {
     void *tbase;
@@ -1009,5 +1011,55 @@ static void apply_frame_state( CONTEXT *context, struct frame_state *state,
 #endif
     *context = new_context;
 }
+
+#endif /* NTDLL_DWARF_H_NO_UNWINDER */
+
+#if defined(__i386__)
+
+#define DW_OP_ecx DW_OP_breg1
+#define DW_OP_ebx DW_OP_breg3
+#define DW_OP_esp DW_OP_breg4
+#define DW_OP_ebp DW_OP_breg5
+
+#define DW_REG_eax 0x00
+#define DW_REG_ecx 0x01
+#define DW_REG_edx 0x02
+#define DW_REG_ebx 0x03
+#define DW_REG_esp 0x04
+#define DW_REG_ebp 0x05
+#define DW_REG_esi 0x06
+#define DW_REG_edi 0x07
+#define DW_REG_eip 0x08
+
+#elif defined(__x86_64__)
+
+#define DW_OP_rcx DW_OP_breg2
+#define DW_OP_rbp DW_OP_breg6
+#define DW_OP_rsp DW_OP_breg7
+
+#define DW_REG_rbx 0x03
+#define DW_REG_rsi 0x04
+#define DW_REG_rdi 0x05
+#define DW_REG_rbp 0x06
+#define DW_REG_rsp 0x07
+#define DW_REG_r12 0x0c
+#define DW_REG_r13 0x0d
+#define DW_REG_r14 0x0e
+#define DW_REG_r15 0x0f
+#define DW_REG_rip 0x10
+
+#endif /* defined(__x86_64__) */
+
+#define __ASM_CFI_STR(...) #__VA_ARGS__
+#define __ASM_CFI_ESC(...) \
+    __ASM_CFI(".cfi_escape " __ASM_CFI_STR(__VA_ARGS__) "\n\t")
+#define __ASM_CFI_CFA_IS_AT1(base, offset) \
+    __ASM_CFI_ESC(DW_CFA_def_cfa_expression, 0x03, DW_OP_ ## base, offset, DW_OP_deref)
+#define __ASM_CFI_REG_IS_AT1(reg, base, offset) \
+   __ASM_CFI_ESC(DW_CFA_expression, DW_REG_ ## reg, 0x02, DW_OP_ ## base, offset)
+#define __ASM_CFI_CFA_IS_AT2(base, lo, hi) \
+    __ASM_CFI_ESC(DW_CFA_def_cfa_expression, 0x04, DW_OP_ ## base, lo, hi, DW_OP_deref)
+#define __ASM_CFI_REG_IS_AT2(reg, base, lo, hi) \
+   __ASM_CFI_ESC(DW_CFA_expression, DW_REG_ ## reg, 0x03, DW_OP_ ## base, lo, hi)
 
 #endif /* __NTDLL_DWARF_H */

@@ -332,6 +332,16 @@ const WCHAR *process_getenv(const struct process *process, const WCHAR *name)
     return NULL;
 }
 
+const struct cpu* process_get_cpu(const struct process* pcs)
+{
+    const struct module* m = pcs->lmodules;
+
+    /* main module is the last one in list */
+    if (!m) return dbghelp_current_cpu;
+    while (m->next) m = m->next;
+    return m->cpu;
+}
+
 /******************************************************************
  *		check_live_target
  *
@@ -694,7 +704,7 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
     sym = symt_index2ptr(pair.effective, index);
     if (!symt_check_tag(sym, SymTagFunction)) return FALSE;
 
-    pair.pcs->localscope_pc = ((struct symt_function*)sym)->address; /* FIXME of FuncDebugStart when it exists? */
+    pair.pcs->localscope_pc = ((struct symt_function*)sym)->ranges[0].low; /* FIXME of FuncDebugStart when it exists? */
     pair.pcs->localscope_symt = sym;
 
     return TRUE;
@@ -706,7 +716,7 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
 BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD inlinectx)
 {
     struct module_pair pair;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
 
     TRACE("(%p %I64x %lx)\n", hProcess, addr, inlinectx);
 
@@ -718,7 +728,7 @@ BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD in
         if (inlined)
         {
             pair.pcs->localscope_pc = addr;
-            pair.pcs->localscope_symt = &inlined->func.symt;
+            pair.pcs->localscope_symt = &inlined->symt;
             return TRUE;
         }
         /* fall through */

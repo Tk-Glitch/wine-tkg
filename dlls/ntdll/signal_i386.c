@@ -59,8 +59,6 @@ static inline struct x86_thread_data *x86_thread_data(void)
     return (struct x86_thread_data *)&NtCurrentTeb()->GdiTebBatch;
 }
 
-struct ldt_copy *__wine_ldt_copy = NULL;
-
 /* Exception record for handling exceptions happening inside exception handlers */
 typedef struct
 {
@@ -200,6 +198,8 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
         else
             WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
                                debugstr_a((char *)rec->ExceptionInformation[1]) );
+
+        set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
     }
     else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
     {

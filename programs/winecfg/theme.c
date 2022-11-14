@@ -508,7 +508,7 @@ static struct
     {-1,                COLOR_INFOTEXT,         L"InfoText"      }, /* IDC_SYSPARAMS_TOOLTIP_TEXT */
     {-1,                COLOR_WINDOW,           L"Window"        }, /* IDC_SYSPARAMS_WINDOW */
     {-1,                COLOR_WINDOWTEXT,       L"WindowText"    }, /* IDC_SYSPARAMS_WINDOW_TEXT */
-    {SM_CXSIZE,         COLOR_ACTIVECAPTION,    L"ActiveTitle"   }, /* IDC_SYSPARAMS_ACTIVE_TITLE */
+    {SM_CYSIZE,         COLOR_ACTIVECAPTION,    L"ActiveTitle"   }, /* IDC_SYSPARAMS_ACTIVE_TITLE */
     {-1,                COLOR_CAPTIONTEXT,      L"TitleText"     }, /* IDC_SYSPARAMS_ACTIVE_TITLE_TEXT */
     {-1,                COLOR_INACTIVECAPTION,  L"InactiveTitle" }, /* IDC_SYSPARAMS_INACTIVE_TITLE */
     {-1,                COLOR_INACTIVECAPTIONTEXT,L"InactiveTitleText" }, /* IDC_SYSPARAMS_INACTIVE_TITLE_TEXT */
@@ -1107,6 +1107,24 @@ static void update_mime_types(HWND hDlg)
     set_reg_key(config_key, keypath(L"FileOpenAssociations"), L"Enable", state);
 }
 
+static BOOL CALLBACK update_window_pos_proc(HWND hwnd, LPARAM lp)
+{
+    RECT rect;
+
+    GetClientRect(hwnd, &rect);
+    AdjustWindowRectEx(&rect, GetWindowLongW(hwnd, GWL_STYLE), !!GetMenu(hwnd),
+                       GetWindowLongW(hwnd, GWL_EXSTYLE));
+    SetWindowPos(hwnd, 0, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    return TRUE;
+}
+
+/* Adjust the rectangle for top-level windows because the new non-client metrics may be different */
+static void update_window_pos(void)
+{
+    EnumWindows(update_window_pos_proc, 0);
+}
+
 INT_PTR CALLBACK
 ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -1261,6 +1279,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     read_shell_folder_link_targets();
                     update_shell_folder_listview(hDlg);
                     update_mime_types(hDlg);
+                    update_window_pos();
                     SetWindowLongPtrW(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
                     break;
                 }

@@ -539,10 +539,6 @@ static void test_OpenThemeData(void)
     ok( GetLastError() == E_PROP_ID_UNSUPPORTED, "Expected 0x%08lx, got 0x%08lx\n",
         E_PROP_ID_UNSUPPORTED, GetLastError() );
 
-    /* Close invalid handle */
-    hRes = CloseThemeData((HTHEME)0xdeadbeef);
-    ok( hRes == E_HANDLE, "Expected E_HANDLE, got 0x%08lx\n", hRes);
-
     if (!bThemeActive)
     {
         SetLastError(0xdeadbeef);
@@ -839,6 +835,8 @@ static void test_CloseThemeData(void)
     ok( hRes == E_HANDLE, "Expected E_HANDLE, got 0x%08lx\n", hRes);
     hRes = CloseThemeData(INVALID_HANDLE_VALUE);
     ok( hRes == E_HANDLE, "Expected E_HANDLE, got 0x%08lx\n", hRes);
+    hRes = CloseThemeData((HTHEME)0xdeadbeef);
+    ok(hRes == E_HANDLE, "Expected E_HANDLE, got 0x%08lx\n", hRes);
 }
 
 static void test_buffer_dc_props(HDC hdc, const RECT *rect)

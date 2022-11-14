@@ -911,6 +911,8 @@ HRESULT map_nsresult(nsresult nsres)
         return E_UNEXPECTED;
     case NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR:
         return 0x80700007; /* according to tests */
+    case NS_BINDING_ABORTED:
+        return E_ABORT;
     }
     return E_FAIL;
 }
@@ -1681,7 +1683,12 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
     case CONTEXT_TEXT: {
         nsISelection *selection;
 
-        nsres = nsIDOMHTMLDocument_GetSelection(This->doc->doc_node->nsdoc, &selection);
+        if(!This->doc->doc_node->html_document) {
+            FIXME("Not implemented for XML document\n");
+            break;
+        }
+
+        nsres = nsIDOMHTMLDocument_GetSelection(This->doc->doc_node->html_document, &selection);
         if(NS_SUCCEEDED(nsres) && selection) {
             cpp_bool is_collapsed;
 

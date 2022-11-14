@@ -388,7 +388,7 @@ static NTSTATUS invoke_user_apc( CONTEXT *context, const user_apc_t *apc, NTSTAT
  */
 static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOOL self )
 {
-    SIZE_T size, bits;
+    SIZE_T size, bits, limit, align;
     void *addr;
 
     memset( result, 0, sizeof(*result) );
@@ -431,6 +431,36 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
         }
         else result->virtual_alloc.status = STATUS_WORKING_SET_LIMIT_RANGE;
         break;
+    case APC_VIRTUAL_ALLOC_EX:
+    {
+        MEM_ADDRESS_REQUIREMENTS r = { NULL };
+        MEM_EXTENDED_PARAMETER ext =
+        {
+            .Type = MemExtendedParameterAddressRequirements,
+            .Pointer = &r
+        };
+        SYSTEM_BASIC_INFORMATION sbi;
+
+        virtual_get_system_info( &sbi, !!NtCurrentTeb()->WowTebOffset );
+        result->type = call->type;
+        addr = wine_server_get_ptr( call->virtual_alloc_ex.addr );
+        size = call->virtual_alloc_ex.size;
+        limit = min( (ULONG_PTR)sbi.HighestUserAddress, call->virtual_alloc_ex.limit );
+        align = call->virtual_alloc_ex.align;
+        if ((ULONG_PTR)addr == call->virtual_alloc_ex.addr && size == call->virtual_alloc_ex.size
+            && align == call->virtual_alloc_ex.align)
+        {
+            r.HighestEndingAddress = (void *)limit;
+            r.Alignment = align;
+            result->virtual_alloc_ex.status = NtAllocateVirtualMemoryEx( NtCurrentProcess(), &addr, &size,
+                                                                         call->virtual_alloc_ex.op_type,
+                                                                         call->virtual_alloc_ex.prot, &ext, 1 );
+            result->virtual_alloc_ex.addr = wine_server_client_ptr( addr );
+            result->virtual_alloc_ex.size = size;
+        }
+        else result->virtual_alloc_ex.status = STATUS_WORKING_SET_LIMIT_RANGE;
+        break;
+    }
     case APC_VIRTUAL_FREE:
         result->type = call->type;
         addr = wine_server_get_ptr( call->virtual_free.addr );
@@ -543,7 +573,7 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
         result->type = call->type;
         addr = wine_server_get_ptr( call->unmap_view.addr );
         if ((ULONG_PTR)addr == call->unmap_view.addr)
-            result->unmap_view.status = NtUnmapViewOfSection( NtCurrentProcess(), addr );
+            result->unmap_view.status = NtUnmapViewOfSectionEx( NtCurrentProcess(), addr, call->unmap_view.flags );
         else
             result->unmap_view.status = STATUS_INVALID_PARAMETER;
         break;

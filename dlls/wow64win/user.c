@@ -770,6 +770,28 @@ static NTSTATUS WINAPI wow64_NtUserCopyImage( void *arg, ULONG size )
     return dispatch_callback( NtUserCopyImage, &params32, sizeof(params32) );
 }
 
+static NTSTATUS WINAPI wow64_NtUserDrawNonClientButton( void *arg, ULONG size )
+{
+    struct draw_non_client_button_params *params = arg;
+    struct
+    {
+        ULONG hwnd;
+        ULONG hdc;
+        enum NONCLIENT_BUTTON_TYPE type;
+        RECT rect;
+        BOOL down;
+        BOOL grayed;
+    } params32;
+
+    params32.hwnd = HandleToUlong( params->hwnd );
+    params32.hdc = HandleToUlong( params->hdc );
+    params32.type = params->type;
+    params32.rect = params->rect;
+    params32.down = params->down;
+    params32.grayed = params->grayed;
+    return dispatch_callback( NtUserDrawNonClientButton, &params32, sizeof(params32) );
+}
+
 static NTSTATUS WINAPI wow64_NtUserDrawScrollBar( void *arg, ULONG size )
 {
     struct draw_scroll_bar_params *params = arg;
@@ -1008,6 +1030,12 @@ static NTSTATUS WINAPI wow64_NtUserCallVulkanDebugUtilsCallback( void *arg, ULON
     return 0;
 }
 
+static NTSTATUS WINAPI wow64_NtUserCallOpenGLDebugMessageCallback( void *arg, ULONG size )
+{
+    FIXME( "\n" );
+    return 0;
+}
+
 static NTSTATUS WINAPI wow64_NtUserDriverCallbackFirst0( void *arg, ULONG size )
 {
     return dispatch_callback( NtUserDriverCallbackFirst + 0, arg, size );
@@ -1067,6 +1095,7 @@ user_callback user_callbacks[] =
     wow64_NtUserCallWinProc,
     wow64_NtUserCallWindowsHook,
     wow64_NtUserCopyImage,
+    wow64_NtUserDrawNonClientButton,
     wow64_NtUserDrawScrollBar,
     wow64_NtUserDrawText,
     wow64_NtUserFreeCachedClipboardData,
@@ -1085,6 +1114,8 @@ user_callback user_callbacks[] =
     /* Vulkan support */
     wow64_NtUserCallVulkanDebugReportCallback,
     wow64_NtUserCallVulkanDebugUtilsCallback,
+    /* OpenGL support */
+    wow64_NtUserCallOpenGLDebugMessageCallback,
     /* Driver-specific callbacks */
     wow64_NtUserDriverCallbackFirst0,
     wow64_NtUserDriverCallbackFirst1,

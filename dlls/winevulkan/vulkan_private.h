@@ -24,6 +24,7 @@
 #if defined(__i386__)
 #define USE_STRUCT_CONVERSION
 #endif
+#define WINE_VK_HOST
 #define VK_NO_PROTOTYPES
 
 #include <pthread.h>
@@ -230,7 +231,6 @@ BOOL wine_vk_device_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
 
 BOOL wine_vk_is_type_wrapped(VkObjectType type) DECLSPEC_HIDDEN;
-uint64_t wine_vk_unwrap_handle(VkObjectType type, uint64_t handle) DECLSPEC_HIDDEN;
 
 NTSTATUS init_vulkan(void *args) DECLSPEC_HIDDEN;
 
@@ -275,6 +275,19 @@ static inline void *conversion_context_alloc(struct conversion_context *pool, si
         list_add_tail(&pool->alloc_entries, entry);
         return entry + 1;
     }
+}
+
+static inline void *find_next_struct(const void *s, VkStructureType t)
+{
+    VkBaseOutStructure *header;
+
+    for (header = (VkBaseOutStructure *)s; header; header = header->pNext)
+    {
+        if (header->sType == t)
+            return header;
+    }
+
+    return NULL;
 }
 
 #endif /* __WINE_VULKAN_PRIVATE_H */

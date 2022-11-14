@@ -66,14 +66,9 @@ void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *new_handle
  * Default handlers if resolution switching is not enabled
  *
  */
-static BOOL nores_get_id(const WCHAR *device_name, ULONG_PTR *id)
+static BOOL nores_get_id(const WCHAR *device_name, BOOL is_primary, ULONG_PTR *id)
 {
-    WCHAR primary_adapter[CCHDEVICENAME];
-
-    if (!get_primary_adapter( primary_adapter ))
-        return FALSE;
-
-    *id = !wcsicmp( device_name, primary_adapter ) ? 1 : 0;
+    *id = is_primary ? 1 : 0;
     return TRUE;
 }
 
@@ -196,24 +191,6 @@ void init_registry_display_settings(void)
     }
 }
 
-BOOL get_primary_adapter(WCHAR *name)
-{
-    DISPLAY_DEVICEW dd;
-    DWORD i;
-
-    dd.cb = sizeof(dd);
-    for (i = 0; !NtUserEnumDisplayDevices( NULL, i, &dd, 0 ); ++i)
-    {
-        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
-        {
-            lstrcpyW(name, dd.DeviceName);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
 static void set_display_depth(ULONG_PTR display_id, DWORD depth)
 {
     struct x11drv_display_depth *display_depth;
@@ -266,12 +243,12 @@ static DWORD get_display_depth(ULONG_PTR display_id)
  *      GetCurrentDisplaySettings  (X11DRV.@)
  *
  */
-BOOL X11DRV_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode )
+BOOL X11DRV_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
 {
     DEVMODEW mode;
     ULONG_PTR id;
 
-    if (!settings_handler.get_id( name, &id ) || !settings_handler.get_current_mode( id, &mode ))
+    if (!settings_handler.get_id( name, is_primary, &id ) || !settings_handler.get_current_mode( id, &mode ))
     {
         ERR("Failed to get %s current display settings.\n", wine_dbgstr_w(name));
         return FALSE;
@@ -390,7 +367,7 @@ static LONG apply_display_settings( DEVMODEW *displays, ULONG_PTR *ids, BOOL do_
  *      ChangeDisplaySettings  (X11DRV.@)
  *
  */
-LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     INT left_most = INT_MAX, top_most = INT_MAX;
     LONG count, ret = DISP_CHANGE_BADPARAM;
@@ -409,7 +386,7 @@ LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, 
     if (!(ids = calloc( count, sizeof(*ids) ))) return DISP_CHANGE_FAILED;
     for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
     {
-        if (!settings_handler.get_id( mode->dmDeviceName, ids + count )) goto done;
+        if (!settings_handler.get_id( mode->dmDeviceName, !wcsicmp( mode->dmDeviceName, primary_name ), ids + count )) goto done;
         mode->dmPosition.x -= left_most;
         mode->dmPosition.y -= top_most;
     }
@@ -418,8 +395,6 @@ LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, 
     ret = apply_display_settings( displays, ids, FALSE );
     if (ret == DISP_CHANGE_SUCCESSFUL)
         ret = apply_display_settings( displays, ids, TRUE );
-    if (ret == DISP_CHANGE_SUCCESSFUL)
-        X11DRV_DisplayDevices_Init(TRUE);
 
 done:
     free( ids );
@@ -556,6 +531,12 @@ void X11DRV_DisplayDevices_RegisterEventHandlers(void)
 
     if (handler->register_event_handlers)
         handler->register_event_handlers();
+}
+
+/* Report whether a display device handler supports detecting dynamic device changes */
+BOOL X11DRV_DisplayDevices_SupportEventHandlers(void)
+{
+    return !!host_handler.register_event_handlers;
 }
 
 static BOOL force_display_devices_refresh;

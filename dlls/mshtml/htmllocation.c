@@ -524,6 +524,8 @@ static HRESULT WINAPI HTMLLocation_get_search(IHTMLLocation *iface, BSTR *p)
 static HRESULT WINAPI HTMLLocation_put_hash(IHTMLLocation *iface, BSTR v)
 {
     HTMLLocation *This = impl_from_IHTMLLocation(iface);
+    WCHAR *hash = v;
+    HRESULT hres;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
@@ -532,7 +534,19 @@ static HRESULT WINAPI HTMLLocation_put_hash(IHTMLLocation *iface, BSTR v)
         return E_FAIL;
     }
 
-    return navigate_url(This->window->base.outer_window, v, This->window->base.outer_window->uri, 0);
+    if(hash[0] != '#') {
+        unsigned size = (1 /* # */ + wcslen(v) + 1) * sizeof(WCHAR);
+        if(!(hash = heap_alloc(size)))
+            return E_OUTOFMEMORY;
+        hash[0] = '#';
+        memcpy(hash + 1, v, size - sizeof(WCHAR));
+    }
+
+    hres = navigate_url(This->window->base.outer_window, hash, This->window->base.outer_window->uri, BINDING_NAVIGATED);
+
+    if(hash != v)
+        heap_free(hash);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLLocation_get_hash(IHTMLLocation *iface, BSTR *p)

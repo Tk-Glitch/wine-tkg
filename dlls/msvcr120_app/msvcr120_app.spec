@@ -1104,10 +1104,10 @@
 @ cdecl -arch=!i386 _fpclassf(float) msvcr120._fpclassf
 @ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr) msvcr120._fpieee_flt
 @ cdecl _fpreset() msvcr120._fpreset
-@ stub _fprintf_l
-@ stub _fprintf_p
-@ stub _fprintf_p_l
-@ stub _fprintf_s_l
+@ varargs _fprintf_l(ptr str ptr) msvcr120._fprintf_l
+@ varargs _fprintf_p(ptr str) msvcr120._fprintf_p
+@ varargs _fprintf_p_l(ptr str ptr) msvcr120._fprintf_p_l
+@ varargs _fprintf_s_l(ptr str ptr) msvcr120._fprintf_s_l
 @ cdecl _fputc_nolock(long ptr) msvcr120._fputc_nolock
 @ cdecl _fputchar(long) msvcr120._fputchar
 @ cdecl _fputwc_nolock(long ptr) msvcr120._fputwc_nolock
@@ -1140,9 +1140,9 @@
 @ cdecl _futime32(long ptr) msvcr120._futime32
 @ cdecl _futime64(long ptr) msvcr120._futime64
 @ varargs _fwprintf_l(ptr wstr ptr) msvcr120._fwprintf_l
-@ stub _fwprintf_p
-@ stub _fwprintf_p_l
-@ stub _fwprintf_s_l
+@ varargs _fwprintf_p(ptr wstr) msvcr120._fwprintf_p
+@ varargs _fwprintf_p_l(ptr wstr ptr) msvcr120._fwprintf_p_l
+@ varargs _fwprintf_s_l(ptr wstr ptr) msvcr120._fwprintf_s_l
 @ cdecl _fwrite_nolock(ptr long long ptr) msvcr120._fwrite_nolock
 @ varargs _fwscanf_l(ptr wstr ptr) msvcr120._fwscanf_l
 @ varargs _fwscanf_s_l(ptr wstr ptr) msvcr120._fwscanf_s_l
@@ -1354,9 +1354,9 @@
 @ varargs _scanf_l(str ptr) msvcr120._scanf_l
 @ varargs _scanf_s_l(str ptr) msvcr120._scanf_s_l
 @ varargs _scprintf(str) msvcr120._scprintf
-@ stub _scprintf_l
-@ stub _scprintf_p
-@ stub _scprintf_p_l
+@ varargs _scprintf_l(str ptr) msvcr120._scprintf_l
+@ varargs _scprintf_p(str) msvcr120._scprintf_p
+@ varargs _scprintf_p_l(str ptr) msvcr120._scprintf_p_l
 @ varargs _scwprintf(wstr) msvcr120._scwprintf
 @ stub _scwprintf_l
 @ stub _scwprintf_p
@@ -1465,7 +1465,7 @@
 @ varargs _swprintf(ptr wstr) msvcr120._swprintf
 @ varargs _swprintf_c(ptr long str) msvcr120._swprintf_c
 @ varargs _swprintf_c_l(ptr long str ptr) msvcr120._swprintf_c_l
-@ stub _swprintf_p
+@ varargs _swprintf_p(ptr long wstr) msvcr120._swprintf_p
 @ varargs _swprintf_p_l(ptr long wstr ptr) msvcr120._swprintf_p_l
 @ varargs _swprintf_s_l(ptr long wstr ptr) msvcr120._swprintf_s_l
 @ varargs _swscanf_l(wstr wstr ptr) msvcr120._swscanf_l

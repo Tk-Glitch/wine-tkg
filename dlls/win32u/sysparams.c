@@ -334,7 +334,7 @@ struct sysparam_binary_entry
 struct sysparam_path_entry
 {
     struct sysparam_entry hdr;
-    WCHAR                 path[MAX_PATH];
+    WCHAR                *path;
 };
 
 struct sysparam_font_entry
@@ -348,7 +348,7 @@ struct sysparam_font_entry
 struct sysparam_pref_entry
 {
     struct sysparam_entry hdr;
-    struct sysparam_binary_entry *parent;
+    union sysparam_all_entry *parent;
     UINT                  offset;
     UINT                  mask;
 };
@@ -496,6 +496,51 @@ static BOOL adapter_set_registry_settings( const struct adapter *adapter, const 
     else
     {
         ret = write_adapter_mode( hkey, ENUM_REGISTRY_SETTINGS, mode );
+        NtClose( hkey );
+    }
+
+    release_display_device_init_mutex( mutex );
+    return ret;
+}
+
+static BOOL adapter_get_current_settings( const struct adapter *adapter, DEVMODEW *mode )
+{
+    BOOL is_primary = !!(adapter->dev.state_flags & DISPLAY_DEVICE_PRIMARY_DEVICE);
+    HANDLE mutex;
+    HKEY hkey;
+    BOOL ret;
+
+    if ((ret = user_driver->pGetCurrentDisplaySettings( adapter->dev.device_name, is_primary, mode ))) return TRUE;
+
+    /* default implementation: read current display settings from the registry. */
+
+    mutex = get_display_device_init_mutex();
+
+    if (!config_key && !(config_key = reg_open_key( NULL, config_keyW, sizeof(config_keyW) ))) ret = FALSE;
+    else if (!(hkey = reg_open_key( config_key, adapter->config_key, lstrlenW( adapter->config_key ) * sizeof(WCHAR) ))) ret = FALSE;
+    else
+    {
+        ret = read_adapter_mode( hkey, ENUM_CURRENT_SETTINGS, mode );
+        NtClose( hkey );
+    }
+
+    release_display_device_init_mutex( mutex );
+    return ret;
+}
+
+static BOOL adapter_set_current_settings( const struct adapter *adapter, const DEVMODEW *mode )
+{
+    HANDLE mutex;
+    HKEY hkey;
+    BOOL ret;
+
+    mutex = get_display_device_init_mutex();
+
+    if (!config_key && !(config_key = reg_open_key( NULL, config_keyW, sizeof(config_keyW) ))) ret = FALSE;
+    if (!(hkey = reg_open_key( config_key, adapter->config_key, lstrlenW( adapter->config_key ) * sizeof(WCHAR) ))) ret = FALSE;
+    else
+    {
+        ret = write_adapter_mode( hkey, ENUM_CURRENT_SETTINGS, mode );
         NtClose( hkey );
     }
 
@@ -1512,7 +1557,7 @@ static BOOL update_display_cache_from_registry(void)
     return ret;
 }
 
-static BOOL update_display_cache(void)
+static BOOL update_display_cache( BOOL force )
 {
     HWINSTA winstation = NtUserGetProcessWindowStation();
     struct device_manager_ctx ctx = {0};
@@ -1529,18 +1574,11 @@ static BOOL update_display_cache(void)
         return TRUE;
     }
 
-    user_driver->pUpdateDisplayDevices( &device_manager, FALSE, &ctx );
-    release_display_manager_ctx( &ctx );
-
-    if (update_display_cache_from_registry()) return TRUE;
-    if (ctx.gpu_count)
+    if (!user_driver->pUpdateDisplayDevices( &device_manager, force, &ctx ) && force)
     {
-        ERR( "driver reported devices, but we failed to read them\n" );
-        return FALSE;
-    }
-
-    if (!user_driver->pUpdateDisplayDevices( &device_manager, TRUE, &ctx ))
-    {
+        /* default implementation: expose an adapter and a monitor with a few standard modes,
+         * and read / write current display settings from / to the registry.
+         */
         static const DEVMODEW modes[] =
         {
             { .dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
@@ -1564,13 +1602,24 @@ static BOOL update_display_cache(void)
         struct gdi_monitor monitor =
         {
             .state_flags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED,
-            .rc_monitor = {.right = modes[2].dmPelsWidth, .bottom = modes[2].dmPelsHeight},
-            .rc_work = {.right = modes[2].dmPelsWidth, .bottom = modes[2].dmPelsHeight},
         };
+        DEVMODEW mode = {{0}};
         UINT i;
 
         add_gpu( &gpu, &ctx );
         add_adapter( &adapter, &ctx );
+
+        if (!read_adapter_mode( ctx.adapter_key, ENUM_CURRENT_SETTINGS, &mode ))
+        {
+            mode = modes[2];
+            mode.dmFields |= DM_POSITION;
+            write_adapter_mode( ctx.adapter_key, ENUM_CURRENT_SETTINGS, &mode );
+        }
+        monitor.rc_monitor.right = mode.dmPelsWidth;
+        monitor.rc_monitor.bottom = mode.dmPelsHeight;
+        monitor.rc_work.right = mode.dmPelsWidth;
+        monitor.rc_work.bottom = mode.dmPelsHeight;
+
         add_monitor( &monitor, &ctx );
         for (i = 0; i < ARRAY_SIZE(modes); ++i) add_mode( modes + i, &ctx );
     }
@@ -1578,15 +1627,27 @@ static BOOL update_display_cache(void)
 
     if (!update_display_cache_from_registry())
     {
-        ERR( "failed to read display config\n" );
-        return FALSE;
+        if (force)
+        {
+            ERR( "Failed to read display config.\n" );
+            return FALSE;
+        }
+
+        if (ctx.gpu_count)
+        {
+            ERR( "Driver reported devices, but we failed to read them.\n" );
+            return FALSE;
+        }
+
+        return update_display_cache( TRUE );
     }
+
     return TRUE;
 }
 
 static BOOL lock_display_devices(void)
 {
-    if (!update_display_cache()) return FALSE;
+    if (!update_display_cache( FALSE )) return FALSE;
     pthread_mutex_lock( &display_lock );
     return TRUE;
 }
@@ -1838,6 +1899,9 @@ static BOOL is_window_rect_full_screen( const RECT *rect )
 
     LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
     {
+        if (!(monitor->dev.state_flags & DISPLAY_DEVICE_ACTIVE))
+            continue;
+
         if (rect->left <= monitor->rc_monitor.left && rect->right >= monitor->rc_monitor.right &&
             rect->top <= monitor->rc_monitor.top && rect->bottom >= monitor->rc_monitor.bottom)
         {
@@ -2172,7 +2236,8 @@ static BOOL adapter_get_full_mode( const struct adapter *adapter, const DEVMODEW
     if (!is_detached_mode( full_mode ) && (!full_mode->dmPelsWidth || !full_mode->dmPelsHeight || !(full_mode->dmFields & DM_POSITION)))
     {
         DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};
-        if (!user_driver->pGetCurrentDisplaySettings( adapter->dev.device_name, &current_mode )) return FALSE;
+
+        if (!adapter_get_current_settings( adapter, &current_mode )) return FALSE;
         if (!full_mode->dmPelsWidth) full_mode->dmPelsWidth = current_mode.dmPelsWidth;
         if (!full_mode->dmPelsHeight) full_mode->dmPelsHeight = current_mode.dmPelsHeight;
         if (!(full_mode->dmFields & DM_POSITION))
@@ -2199,10 +2264,8 @@ static DEVMODEW *get_display_settings( const WCHAR *devname, const DEVMODEW *dev
     struct adapter *adapter;
     BOOL ret;
 
-    if (!lock_display_devices()) return NULL;
-
     /* allocate an extra mode for easier iteration */
-    if (!(displays = calloc( list_count( &adapters ) + 1, sizeof(DEVMODEW) ))) goto done;
+    if (!(displays = calloc( list_count( &adapters ) + 1, sizeof(DEVMODEW) ))) return NULL;
     mode = displays;
 
     LIST_FOR_EACH_ENTRY( adapter, &adapters, struct adapter, entry )
@@ -2213,21 +2276,19 @@ static DEVMODEW *get_display_settings( const WCHAR *devname, const DEVMODEW *dev
         else
         {
             if (!devname) ret = adapter_get_registry_settings( adapter, mode );
-            else ret = user_driver->pGetCurrentDisplaySettings( adapter->dev.device_name, mode );
-            if (!ret) goto done;
+            else ret = adapter_get_current_settings( adapter, mode );
+            if (!ret)
+            {
+                free( displays );
+                return NULL;
+            }
         }
 
         lstrcpyW( mode->dmDeviceName, adapter->dev.device_name );
         mode = NEXT_DEVMODEW(mode);
     }
 
-    unlock_display_devices();
     return displays;
-
-done:
-    unlock_display_devices();
-    free( displays );
-    return NULL;
 }
 
 static INT offset_length( POINT offset )
@@ -2420,15 +2481,22 @@ static BOOL all_detached_settings( const DEVMODEW *displays )
 static LONG apply_display_settings( const WCHAR *devname, const DEVMODEW *devmode,
                                     HWND hwnd, DWORD flags, void *lparam )
 {
+    WCHAR primary_name[CCHDEVICENAME];
+    struct display_device *primary;
+    DEVMODEW *mode, *displays;
     struct adapter *adapter;
-    DEVMODEW *displays;
     LONG ret;
 
-    displays = get_display_settings( devname, devmode );
-    if (!displays) return DISP_CHANGE_FAILED;
+    if (!lock_display_devices()) return DISP_CHANGE_FAILED;
+    if (!(displays = get_display_settings( devname, devmode )))
+    {
+        unlock_display_devices();
+        return DISP_CHANGE_FAILED;
+    }
 
     if (all_detached_settings( displays ))
     {
+        unlock_display_devices();
         WARN( "Detaching all modes is not permitted.\n" );
         free( displays );
         return DISP_CHANGE_SUCCESSFUL;
@@ -2436,15 +2504,34 @@ static LONG apply_display_settings( const WCHAR *devname, const DEVMODEW *devmod
 
     place_all_displays( displays );
 
-    ret = user_driver->pChangeDisplaySettings( displays, hwnd, flags, lparam );
+    if (!(primary = find_adapter_device_by_id( 0 ))) primary_name[0] = 0;
+    else wcscpy( primary_name, primary->device_name );
+
+    if ((ret = user_driver->pChangeDisplaySettings( displays, primary_name, hwnd, flags, lparam )) == E_NOTIMPL)
+    {
+        /* default implementation: write current display settings to the registry. */
+        mode = displays;
+        LIST_FOR_EACH_ENTRY( adapter, &adapters, struct adapter, entry )
+        {
+            if (!adapter_set_current_settings( adapter, mode ))
+                WARN( "Failed to write adapter %s current mode.\n", debugstr_w(adapter->dev.device_name) );
+            mode = NEXT_DEVMODEW(mode);
+        }
+        ret = DISP_CHANGE_SUCCESSFUL;
+    }
+    unlock_display_devices();
 
     free( displays );
     if (ret) return ret;
 
+    if (!update_display_cache( TRUE ))
+        WARN( "Failed to update display cache after mode change.\n" );
+
     if ((adapter = find_adapter( NULL )))
     {
         DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};
-        user_driver->pGetCurrentDisplaySettings( adapter->dev.device_name, &current_mode );
+
+        if (!adapter_get_current_settings( adapter, &current_mode )) WARN( "Failed to get primary adapter current display settings.\n" );
         adapter_release( adapter );
 
         send_notify_message( NtUserGetDesktopWindow(), WM_DISPLAYCHANGE, current_mode.dmBitsPerPel,
@@ -2489,7 +2576,7 @@ static BOOL adapter_enum_display_settings( const struct adapter *adapter, DWORD 
     DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};
     const DEVMODEW *adapter_mode;
 
-    if (!(flags & EDS_ROTATEDMODE) && !user_driver->pGetCurrentDisplaySettings( adapter->dev.device_name, &current_mode ))
+    if (!(flags & EDS_ROTATEDMODE) && !adapter_get_current_settings( adapter, &current_mode ))
     {
         WARN( "Failed to query current display mode for EDS_ROTATEDMODE flag.\n" );
         return FALSE;
@@ -2537,7 +2624,7 @@ BOOL WINAPI NtUserEnumDisplaySettings( UNICODE_STRING *device, DWORD index, DEVM
     devmode->dmDriverExtra = 0;
 
     if (index == ENUM_REGISTRY_SETTINGS) ret = adapter_get_registry_settings( adapter, devmode );
-    else if (index == ENUM_CURRENT_SETTINGS) ret = user_driver->pGetCurrentDisplaySettings( adapter->dev.device_name, devmode );
+    else if (index == ENUM_CURRENT_SETTINGS) ret = adapter_get_current_settings( adapter, devmode );
     else ret = adapter_enum_display_settings( adapter, index, devmode, flags );
     adapter_release( adapter );
 
@@ -3516,7 +3603,7 @@ static BOOL init_font_entry( union sysparam_all_entry *entry )
 /* get a user pref parameter in the registry */
 static BOOL get_userpref_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
-    union sysparam_all_entry *parent_entry = (union sysparam_all_entry *)entry->pref.parent;
+    union sysparam_all_entry *parent_entry = entry->pref.parent;
     BYTE prefs[8];
 
     if (!ptr_param) return FALSE;
@@ -3529,7 +3616,7 @@ static BOOL get_userpref_entry( union sysparam_all_entry *entry, UINT int_param,
 /* set a user pref parameter in the registry */
 static BOOL set_userpref_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT flags )
 {
-    union sysparam_all_entry *parent_entry = (union sysparam_all_entry *)entry->pref.parent;
+    union sysparam_all_entry *parent_entry = entry->pref.parent;
     BYTE prefs[8];
 
     parent_entry->hdr.loaded = FALSE;  /* force loading it again */
@@ -3558,53 +3645,41 @@ static BOOL set_entry( void *ptr, UINT int_param, void *ptr_param, UINT flags )
     return entry->hdr.set( entry, int_param, ptr_param, flags );
 }
 
-#define UINT_ENTRY(name,val,base,reg)                                   \
-    struct sysparam_uint_entry entry_##name = { { get_uint_entry, set_uint_entry, init_uint_entry, \
-                                                  base, reg }, (val) }
+#define UINT_ENTRY(name,val,base,reg) union sysparam_all_entry entry_##name = \
+    { .uint = { { get_uint_entry, set_uint_entry, init_uint_entry, base, reg }, (val) } }
 
-#define UINT_ENTRY_MIRROR(name,val,base,reg,mirror_base) \
-    struct sysparam_uint_entry entry_##name = { { get_uint_entry, set_uint_entry, init_uint_entry, \
-                                                  base, reg, mirror_base, reg }, (val) }
+#define UINT_ENTRY_MIRROR(name,val,base,reg,mirror_base) union sysparam_all_entry entry_##name = \
+    { .uint = { { get_uint_entry, set_uint_entry, init_uint_entry, base, reg, mirror_base, reg }, (val) } }
 
-#define INT_ENTRY(name,val,base,reg) \
-    struct sysparam_uint_entry entry_##name = { { get_uint_entry, set_int_entry, init_int_entry, \
-                                                  base, reg }, (val) }
+#define INT_ENTRY(name,val,base,reg) union sysparam_all_entry entry_##name = \
+    { .uint = { { get_uint_entry, set_int_entry, init_int_entry, base, reg }, (val) } }
 
-#define BOOL_ENTRY(name,val,base,reg) \
-    struct sysparam_bool_entry entry_##name = { { get_bool_entry, set_bool_entry, init_bool_entry, \
-                                                  base, reg }, (val) }
+#define BOOL_ENTRY(name,val,base,reg) union sysparam_all_entry entry_##name = \
+    { .bool = { { get_bool_entry, set_bool_entry, init_bool_entry, base, reg }, (val) } }
 
-#define BOOL_ENTRY_MIRROR(name,val,base,reg,mirror_base) \
-    struct sysparam_bool_entry entry_##name = { { get_bool_entry, set_bool_entry, init_bool_entry, \
-                                                  base, reg, mirror_base, reg }, (val) }
+#define BOOL_ENTRY_MIRROR(name,val,base,reg,mirror_base) union sysparam_all_entry entry_##name = \
+    { .bool = { { get_bool_entry, set_bool_entry, init_bool_entry, base, reg, mirror_base, reg }, (val) } }
 
-#define TWIPS_ENTRY(name,val,base,reg) \
-    struct sysparam_uint_entry entry_##name = { { get_twips_entry, set_twips_entry, init_int_entry, \
-                                                  base, reg }, (val) }
+#define TWIPS_ENTRY(name,val,base,reg) union sysparam_all_entry entry_##name = \
+    { .uint = { { get_twips_entry, set_twips_entry, init_int_entry, base, reg }, (val) } }
 
-#define YESNO_ENTRY(name,val,base,reg) \
-    struct sysparam_bool_entry entry_##name = { { get_yesno_entry, set_yesno_entry, init_yesno_entry, \
-                                                  base, reg }, (val) }
+#define YESNO_ENTRY(name,val,base,reg) union sysparam_all_entry entry_##name = \
+    { .bool = { { get_yesno_entry, set_yesno_entry, init_yesno_entry, base, reg }, (val) } }
 
-#define DWORD_ENTRY(name,val,base,reg)                                  \
-    struct sysparam_dword_entry entry_##name = { { get_dword_entry, set_dword_entry, init_dword_entry, \
-                                                   base, reg }, (val) }
+#define DWORD_ENTRY(name,val,base,reg) union sysparam_all_entry entry_##name = \
+    { .dword = { { get_dword_entry, set_dword_entry, init_dword_entry, base, reg }, (val) } }
 
-#define BINARY_ENTRY(name,data,base,reg) \
-    struct sysparam_binary_entry entry_##name = { { get_binary_entry, set_binary_entry, init_binary_entry, \
-                                                    base, reg }, data, sizeof(data) }
+#define BINARY_ENTRY(name,data,base,reg) union sysparam_all_entry entry_##name = \
+    { .bin = { { get_binary_entry, set_binary_entry, init_binary_entry, base, reg }, data, sizeof(data) } }
 
-#define PATH_ENTRY(name,base,reg) \
-    struct sysparam_path_entry entry_##name = { { get_path_entry, set_path_entry, init_path_entry, \
-                                                  base, reg } }
+#define PATH_ENTRY(name,base,reg,buffer) union sysparam_all_entry entry_##name = \
+    { .path = { { get_path_entry, set_path_entry, init_path_entry, base, reg }, buffer } }
 
-#define FONT_ENTRY(name,weight,base,reg) \
-    struct sysparam_font_entry entry_##name = { { get_font_entry, set_font_entry, init_font_entry, \
-                                                  base, reg }, (weight) }
+#define FONT_ENTRY(name,weight,base,reg) union sysparam_all_entry entry_##name = \
+    { .font = { { get_font_entry, set_font_entry, init_font_entry, base, reg }, (weight) } }
 
-#define USERPREF_ENTRY(name,offset,mask) \
-    struct sysparam_pref_entry entry_##name = { { get_userpref_entry, set_userpref_entry }, \
-                                                &entry_USERPREFERENCESMASK, (offset), (mask) }
+#define USERPREF_ENTRY(name,offset,mask) union sysparam_all_entry entry_##name = \
+    { .pref = { { get_userpref_entry, set_userpref_entry }, &entry_USERPREFERENCESMASK, (offset), (mask) } }
 
 static UINT_ENTRY( DRAGWIDTH, 4, DESKTOP_KEY, "DragWidth" );
 static UINT_ENTRY( DRAGHEIGHT, 4, DESKTOP_KEY, "DragHeight" );
@@ -3678,8 +3753,10 @@ static DWORD_ENTRY( LOGPIXELS, 0, DESKTOP_KEY, "LogPixels" );
 static DWORD_ENTRY( MOUSECLICKLOCKTIME, 1200, DESKTOP_KEY, "ClickLockTime" );
 static DWORD_ENTRY( AUDIODESC_LOCALE, 0, AUDIODESC_KEY, "Locale" );
 
-static PATH_ENTRY( DESKPATTERN, DESKTOP_KEY, "Pattern" );
-static PATH_ENTRY( DESKWALLPAPER, DESKTOP_KEY, "Wallpaper" );
+static WCHAR desk_pattern_path[MAX_PATH];
+static WCHAR desk_wallpaper_path[MAX_PATH];
+static PATH_ENTRY( DESKPATTERN, DESKTOP_KEY, "Pattern", desk_pattern_path );
+static PATH_ENTRY( DESKWALLPAPER, DESKTOP_KEY, "Wallpaper", desk_wallpaper_path );
 
 static BYTE user_prefs[8] = { 0x30, 0x00, 0x00, 0x80, 0x12, 0x00, 0x00, 0x00 };
 static BINARY_ENTRY( USERPREFERENCESMASK, user_prefs, DESKTOP_KEY, "UserPreferencesMask" );

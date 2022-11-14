@@ -76,6 +76,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(thread);
 WINE_DECLARE_DEBUG_CHANNEL(seh);
 WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
+pthread_key_t teb_key = 0;
+
 static int nb_threads = 1;
 
 static inline int get_unix_exit_code( NTSTATUS status )
@@ -1069,7 +1071,7 @@ static void start_thread( TEB *teb )
     BOOL suspend;
 
     thread_data->pthread_id = pthread_self();
-    signal_init_thread( teb );
+    pthread_setspecific( teb_key, teb );
     server_init_thread( thread_data->start, &suspend );
     signal_start_thread( thread_data->start, thread_data->param, suspend, teb );
 }
@@ -1548,6 +1550,15 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
 
     NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
     return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *           NtCurrentTeb   (NTDLL.@)
+ */
+TEB * WINAPI NtCurrentTeb(void)
+{
+    return pthread_getspecific( teb_key );
 }
 
 
@@ -2310,9 +2321,10 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         if (!info) return STATUS_ACCESS_VIOLATION;
         if (info->ThreadName.Length && !info->ThreadName.Buffer) return STATUS_ACCESS_VIOLATION;
 
-        if (handle == GetCurrentThread())
+        status = NtQueryInformationThread( handle, ThreadBasicInformation, &tbi, sizeof(tbi), NULL );
+        if (handle == GetCurrentThread() || (!status && (HandleToULong(tbi.ClientId.UniqueThread) == GetCurrentThreadId())))
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_us(&info->ThreadName) );
-        else if (!NtQueryInformationThread( handle, ThreadBasicInformation, &tbi, sizeof(tbi), NULL ))
+        else if (!status)
             WARN_(threadname)( "Thread ID %04x renamed to %s\n", HandleToULong( tbi.ClientId.UniqueThread ), debugstr_us(&info->ThreadName) );
         else
             WARN_(threadname)( "Thread handle %p renamed to %s\n", handle, debugstr_us(&info->ThreadName) );
@@ -2329,6 +2341,16 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         set_native_thread_name( handle, &info->ThreadName );
 
         return status;
+    }
+
+    case ThreadWineNativeThreadName:
+    {
+        const THREAD_NAME_INFORMATION *info = data;
+
+        if (length != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+
+        set_native_thread_name( handle, &info->ThreadName );
+        return STATUS_SUCCESS;
     }
 
     case ThreadWow64Context:

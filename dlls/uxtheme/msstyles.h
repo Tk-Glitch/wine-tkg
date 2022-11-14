@@ -50,6 +50,7 @@ struct _THEME_FILE;
 
 typedef struct _THEME_CLASS {
     DWORD signature;
+    LONG refcount;
     HMODULE hTheme;
     struct _THEME_FILE* tf;
     WCHAR szAppName[MAX_THEME_APP_NAME];
@@ -65,12 +66,12 @@ typedef struct _THEME_IMAGE {
     WCHAR name[MAX_PATH];
     HBITMAP image;
     BOOL hasAlpha;
-
+    
     struct _THEME_IMAGE *next;
 } THEME_IMAGE, *PTHEME_IMAGE;
 
 typedef struct _THEME_FILE {
-    DWORD dwRefCount;
+    LONG refcount;
     HMODULE hTheme;
     WCHAR szThemeFile[MAX_PATH];
     LPWSTR pszAvailColors;

@@ -753,15 +753,15 @@ static void nulldrv_UpdateClipboard(void)
 {
 }
 
-static LONG nulldrv_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd,
+static LONG nulldrv_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd,
                                            DWORD flags, LPVOID lparam )
 {
-    return DISP_CHANGE_FAILED;
+    return E_NOTIMPL; /* use default implementation */
 }
 
-static BOOL nulldrv_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW mode )
+static BOOL nulldrv_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW mode )
 {
-    return FALSE;
+    return FALSE; /* use default implementation */
 }
 
 static BOOL nulldrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, BOOL force, void *param )
@@ -1075,15 +1075,15 @@ static SHORT loaderdrv_VkKeyScanEx( WCHAR ch, HKL layout )
     return load_driver()->pVkKeyScanEx( ch, layout );
 }
 
-static LONG loaderdrv_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd,
+static LONG loaderdrv_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd,
                                              DWORD flags, LPVOID lparam )
 {
-    return load_driver()->pChangeDisplaySettings( displays, hwnd, flags, lparam );
+    return load_driver()->pChangeDisplaySettings( displays, primary_name, hwnd, flags, lparam );
 }
 
-static BOOL loaderdrv_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW mode )
+static BOOL loaderdrv_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW mode )
 {
-    return load_driver()->pGetCurrentDisplaySettings( name, mode );
+    return load_driver()->pGetCurrentDisplaySettings( name, is_primary, mode );
 }
 
 static void loaderdrv_SetCursor( HCURSOR cursor )

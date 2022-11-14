@@ -27,6 +27,7 @@
 #include "wine/unixlib.h"
 #include "wine/server.h"
 #include "wine/list.h"
+#include "wine/debug.h"
 
 struct msghdr;
 
@@ -40,6 +41,10 @@ static const WORD current_machine = IMAGE_FILE_MACHINE_ARMNT;
 static const WORD current_machine = IMAGE_FILE_MACHINE_ARM64;
 #endif
 extern WORD native_machine DECLSPEC_HIDDEN;
+extern HMODULE ntdll_module DECLSPEC_HIDDEN;
+
+extern const unixlib_entry_t __wine_unix_call_funcs[];
+extern const unixlib_entry_t __wine_unix_call_wow64_funcs[];
 
 static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
 
@@ -107,9 +112,6 @@ extern void     (WINAPI *p__wine_ctrl_routine)(void *) DECLSPEC_HIDDEN;
 extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock DECLSPEC_HIDDEN;
 extern LONGLONG CDECL fast_RtlGetSystemTimePrecise(void) DECLSPEC_HIDDEN;
 
-extern NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispatch,
-                                          CONTEXT *context ) DECLSPEC_HIDDEN;
-
 struct _FILE_FS_DEVICE_INFORMATION;
 
 extern const char wine_build[] DECLSPEC_HIDDEN;
@@ -121,6 +123,7 @@ extern const char *config_dir DECLSPEC_HIDDEN;
 extern const char *user_name DECLSPEC_HIDDEN;
 extern const char **dll_paths DECLSPEC_HIDDEN;
 extern const char **system_dll_paths DECLSPEC_HIDDEN;
+extern pthread_key_t teb_key DECLSPEC_HIDDEN;
 extern PEB *peb DECLSPEC_HIDDEN;
 extern USHORT *uctable DECLSPEC_HIDDEN;
 extern USHORT *lctable DECLSPEC_HIDDEN;
@@ -196,6 +199,7 @@ extern NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *se
 extern NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
 extern NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
                                          data_size_t *ret_len ) DECLSPEC_HIDDEN;
+extern NTSTATUS system_time_precise( void *args ) DECLSPEC_HIDDEN;
 
 extern void *anon_mmap_fixed( void *start, size_t size, int prot, int flags ) DECLSPEC_HIDDEN;
 extern void *anon_mmap_alloc( size_t size, int prot ) DECLSPEC_HIDDEN;
@@ -231,6 +235,7 @@ extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
 extern void release_builtin_module( void *module ) DECLSPEC_HIDDEN;
 extern void *get_builtin_so_handle( void *module ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_builtin_unixlib( void *module, const char *name ) DECLSPEC_HIDDEN;
+extern NTSTATUS unwind_builtin_dll( void *args ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len ) DECLSPEC_HIDDEN;
 extern void *get_native_context( CONTEXT *context ) DECLSPEC_HIDDEN;
@@ -240,7 +245,6 @@ extern BOOL get_thread_times( int unix_pid, int unix_tid, LARGE_INTEGER *kernel_
 extern void signal_init_threading(void) DECLSPEC_HIDDEN;
 extern NTSTATUS signal_alloc_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_free_thread( TEB *teb ) DECLSPEC_HIDDEN;
-extern void signal_init_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_process(void) DECLSPEC_HIDDEN;
 extern void signal_init_early(void) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg,

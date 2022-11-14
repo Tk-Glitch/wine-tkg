@@ -30,19 +30,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
-#define wine_vk_find_struct(s, t) wine_vk_find_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
-static void *wine_vk_find_struct_(void *s, VkStructureType t)
-{
-    VkBaseOutStructure *header;
-
-    for (header = s; header; header = header->pNext)
-    {
-        if (header->sType == t)
-            return header;
-    }
-
-    return NULL;
-}
 
 #define wine_vk_count_struct(s, t) wine_vk_count_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
 static uint32_t wine_vk_count_struct_(void *s, VkStructureType t)
@@ -110,7 +97,7 @@ static uint64_t wine_vk_get_wrapper(struct wine_instance *instance, uint64_t nat
 
 static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     VkDebugUtilsMessageTypeFlagsEXT message_types,
-    const VkDebugUtilsMessengerCallbackDataEXT_host *callback_data,
+    const VkDebugUtilsMessengerCallbackDataEXT *callback_data,
     void *user_data)
 {
     struct wine_vk_debug_utils_params params;
@@ -366,19 +353,11 @@ static void wine_vk_device_get_queues(struct wine_device *device,
     }
 }
 
-static VkResult wine_vk_device_convert_create_info(struct conversion_context *ctx, const VkDeviceCreateInfo *src,
-        VkDeviceCreateInfo *dst)
+static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src, VkDeviceCreateInfo *dst)
 {
     unsigned int i;
-    VkResult res;
 
     *dst = *src;
-
-    if ((res = convert_VkDeviceCreateInfo_struct_chain(ctx, src->pNext, dst)) < 0)
-    {
-        WARN("Failed to convert VkDeviceCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
 
     /* Should be filtered out by loader as ICDs don't support layers. */
     dst->enabledLayerCount = 0;
@@ -449,29 +428,22 @@ NTSTATUS init_vulkan(void *args)
  * This function takes care of extensions handled at winevulkan layer, a Wine graphics
  * driver is responsible for handling e.g. surface extensions.
  */
-static VkResult wine_vk_instance_convert_create_info(struct conversion_context *ctx, const VkInstanceCreateInfo *src,
+static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo *src,
         VkInstanceCreateInfo *dst, struct wine_instance *object)
 {
     VkDebugUtilsMessengerCreateInfoEXT *debug_utils_messenger;
     VkDebugReportCallbackCreateInfoEXT *debug_report_callback;
     VkBaseInStructure *header;
     unsigned int i;
-    VkResult res;
 
     *dst = *src;
-
-    if ((res = convert_VkInstanceCreateInfo_struct_chain(ctx, src->pNext, dst)) < 0)
-    {
-        WARN("Failed to convert VkInstanceCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
 
     object->utils_messenger_count = wine_vk_count_struct(dst, DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
     object->utils_messengers =  calloc(object->utils_messenger_count, sizeof(*object->utils_messengers));
     header = (VkBaseInStructure *) dst;
     for (i = 0; i < object->utils_messenger_count; i++)
     {
-        header = wine_vk_find_struct(header->pNext, DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
+        header = find_next_struct(header->pNext, VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
         debug_utils_messenger = (VkDebugUtilsMessengerCreateInfoEXT *) header;
 
         object->utils_messengers[i].instance = object;
@@ -479,14 +451,13 @@ static VkResult wine_vk_instance_convert_create_info(struct conversion_context *
         object->utils_messengers[i].user_callback = debug_utils_messenger->pfnUserCallback;
         object->utils_messengers[i].user_data = debug_utils_messenger->pUserData;
 
-        /* convert_VkInstanceCreateInfo_struct_chain already copied the chain,
-         * so we can modify it in-place.
-         */
+        /* convert_VkInstanceCreateInfo_* already copied the chain, so we can modify it in-place. */
         debug_utils_messenger->pfnUserCallback = (void *) &debug_utils_callback_conversion;
         debug_utils_messenger->pUserData = &object->utils_messengers[i];
     }
 
-    debug_report_callback = wine_vk_find_struct(header->pNext, DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT);
+    debug_report_callback = find_next_struct(header->pNext,
+                                             VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT);
     if (debug_report_callback)
     {
         object->default_callback.instance = object;
@@ -638,7 +609,7 @@ static void wine_vk_instance_free(struct wine_instance *instance)
     free(instance);
 }
 
-VkResult wine_vkAllocateCommandBuffers(VkDevice handle, const VkCommandBufferAllocateInfo_host *allocate_info,
+VkResult wine_vkAllocateCommandBuffers(VkDevice handle, const VkCommandBufferAllocateInfo *allocate_info,
                                        VkCommandBuffer *buffers )
 {
     struct wine_device *device = wine_device_from_handle(handle);
@@ -651,7 +622,7 @@ VkResult wine_vkAllocateCommandBuffers(VkDevice handle, const VkCommandBufferAll
 
     for (i = 0; i < allocate_info->commandBufferCount; i++)
     {
-        VkCommandBufferAllocateInfo_host allocate_info_host;
+        VkCommandBufferAllocateInfo allocate_info_host;
 
         /* TODO: future extensions (none yet) may require pNext conversion. */
         allocate_info_host.pNext = allocate_info->pNext;
@@ -700,7 +671,6 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice phys_dev_handle, const VkDeviceCre
     struct VkQueue_T *queue_handles;
     struct wine_queue *next_queue;
     struct wine_device *object;
-    struct conversion_context ctx;
     unsigned int i;
     VkResult res;
 
@@ -709,7 +679,7 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice phys_dev_handle, const VkDeviceCre
 
     if (TRACE_ON(vulkan))
     {
-        VkPhysicalDeviceProperties_host properties;
+        VkPhysicalDeviceProperties properties;
 
         phys_dev->instance->funcs.p_vkGetPhysicalDeviceProperties(phys_dev->phys_dev, &properties);
 
@@ -723,12 +693,10 @@ VkResult wine_vkCreateDevice(VkPhysicalDevice phys_dev_handle, const VkDeviceCre
 
     object->phys_dev = phys_dev;
 
-    init_conversion_context(&ctx);
-    res = wine_vk_device_convert_create_info(&ctx, create_info, &create_info_host);
+    res = wine_vk_device_convert_create_info(create_info, &create_info_host);
     if (res == VK_SUCCESS)
         res = phys_dev->instance->funcs.p_vkCreateDevice(phys_dev->phys_dev,
                 &create_info_host, NULL /* allocator */, &object->device);
-    free_conversion_context(&ctx);
     WINE_VK_ADD_DISPATCHABLE_MAPPING(phys_dev->instance, device_handle, object->device, object);
     if (res != VK_SUCCESS)
     {
@@ -794,7 +762,6 @@ VkResult wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
     VkInstanceCreateInfo create_info_host;
     const VkApplicationInfo *app_info;
     struct wine_instance *object;
-    struct conversion_context ctx;
     VkResult res;
 
     if (allocator)
@@ -808,11 +775,9 @@ VkResult wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
     list_init(&object->wrappers);
     pthread_rwlock_init(&object->wrapper_lock, NULL);
 
-    init_conversion_context(&ctx);
-    res = wine_vk_instance_convert_create_info(&ctx, create_info, &create_info_host, object);
+    res = wine_vk_instance_convert_create_info(create_info, &create_info_host, object);
     if (res == VK_SUCCESS)
         res = vk_funcs->p_vkCreateInstance(&create_info_host, NULL /* allocator */, &object->instance);
-    free_conversion_context(&ctx);
     if (res != VK_SUCCESS)
     {
         ERR("Failed to create instance, res=%d\n", res);
@@ -1198,7 +1163,7 @@ void wine_vkGetPhysicalDeviceExternalBufferPropertiesKHR(VkPhysicalDevice phys_d
 
 VkResult wine_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice phys_dev_handle,
                                                         const VkPhysicalDeviceImageFormatInfo2 *format_info,
-                                                        VkImageFormatProperties2_host *properties)
+                                                        VkImageFormatProperties2 *properties)
 {
     struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
     VkExternalImageFormatProperties *external_image_properties;
@@ -1207,7 +1172,8 @@ VkResult wine_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice phys_de
     res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceImageFormatProperties2(phys_dev->phys_dev,
             format_info, properties);
 
-    if ((external_image_properties = wine_vk_find_struct(properties, EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
+    if ((external_image_properties = find_next_struct(properties,
+                                                      VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
     {
         VkExternalMemoryProperties *p = &external_image_properties->externalMemoryProperties;
         p->externalMemoryFeatures = 0;
@@ -1220,7 +1186,7 @@ VkResult wine_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice phys_de
 
 VkResult wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevice phys_dev_handle,
                                                            const VkPhysicalDeviceImageFormatInfo2 *format_info,
-                                                           VkImageFormatProperties2_host *properties)
+                                                           VkImageFormatProperties2 *properties)
 {
     struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
     VkExternalImageFormatProperties *external_image_properties;
@@ -1229,7 +1195,8 @@ VkResult wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevice phys
     res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceImageFormatProperties2KHR(phys_dev->phys_dev,
             format_info, properties);
 
-    if ((external_image_properties = wine_vk_find_struct(properties, EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
+    if ((external_image_properties = find_next_struct(properties,
+                                                      VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
     {
         VkExternalMemoryProperties *p = &external_image_properties->externalMemoryProperties;
         p->externalMemoryFeatures = 0;
@@ -1487,12 +1454,12 @@ VkResult wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice handle,
 }
 
 VkResult wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice handle,
-                                                         const VkPhysicalDeviceSurfaceInfo2KHR_host *surface_info,
+                                                         const VkPhysicalDeviceSurfaceInfo2KHR *surface_info,
                                                          VkSurfaceCapabilities2KHR *capabilities)
 {
     struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(handle);
     struct wine_surface *surface = wine_surface_from_handle(surface_info->surface);
-    VkPhysicalDeviceSurfaceInfo2KHR_host host_info;
+    VkPhysicalDeviceSurfaceInfo2KHR host_info;
     VkResult res;
 
     host_info.sType = surface_info->sType;
@@ -1618,109 +1585,6 @@ void wine_vkDestroyDebugReportCallbackEXT(VkInstance handle, VkDebugReportCallba
     WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
 
     free(object);
-}
-
-static void fixup_pipeline_feedback(VkPipelineCreationFeedback *feedback, uint32_t count)
-{
-#if defined(USE_STRUCT_CONVERSION)
-    struct host_pipeline_feedback
-    {
-        VkPipelineCreationFeedbackFlags flags;
-        uint64_t duration;
-    } *host_feedback;
-    int64_t i;
-
-    host_feedback = (void *) feedback;
-
-    for (i = count - 1; i >= 0; i--)
-    {
-        memmove(&feedback[i].duration, &host_feedback[i].duration, sizeof(uint64_t));
-        feedback[i].flags = host_feedback[i].flags;
-    }
-#endif
-}
-
-static void fixup_pipeline_feedback_info(const void *pipeline_info)
-{
-    VkPipelineCreationFeedbackCreateInfo *feedback;
-
-    feedback = wine_vk_find_struct(pipeline_info, PIPELINE_CREATION_FEEDBACK_CREATE_INFO);
-
-    if (!feedback)
-        return;
-
-    fixup_pipeline_feedback(feedback->pPipelineCreationFeedback, 1);
-    fixup_pipeline_feedback(feedback->pPipelineStageCreationFeedbacks,
-        feedback->pipelineStageCreationFeedbackCount);
-}
-
-VkResult wine_vkCreateComputePipelines(VkDevice handle, VkPipelineCache pipeline_cache,
-                                       uint32_t count, const VkComputePipelineCreateInfo_host *create_infos,
-                                       const VkAllocationCallbacks *allocator, VkPipeline *pipelines)
-{
-    struct wine_device *device = wine_device_from_handle(handle);
-    VkResult res;
-    uint32_t i;
-
-    res = device->funcs.p_vkCreateComputePipelines(device->device, pipeline_cache, count, create_infos,
-                                                   allocator, pipelines);
-
-    for (i = 0; i < count; i++)
-        fixup_pipeline_feedback_info(&create_infos[i]);
-
-    return res;
-}
-
-VkResult wine_vkCreateGraphicsPipelines(VkDevice handle, VkPipelineCache pipeline_cache,
-                                        uint32_t count, const VkGraphicsPipelineCreateInfo_host *create_infos,
-                                        const VkAllocationCallbacks *allocator, VkPipeline *pipelines)
-{
-    struct wine_device *device = wine_device_from_handle(handle);
-    VkResult res;
-    uint32_t i;
-
-    res = device->funcs.p_vkCreateGraphicsPipelines(device->device, pipeline_cache, count, create_infos,
-                                                    allocator, pipelines);
-
-    for (i = 0; i < count; i++)
-        fixup_pipeline_feedback_info(&create_infos[i]);
-
-    return res;
-}
-
-VkResult wine_vkCreateRayTracingPipelinesKHR(VkDevice handle, VkDeferredOperationKHR deferred_operation,
-                                             VkPipelineCache pipeline_cache, uint32_t count,
-                                             const VkRayTracingPipelineCreateInfoKHR_host *create_infos,
-                                             const VkAllocationCallbacks *allocator, VkPipeline *pipelines)
-{
-    struct wine_device *device = wine_device_from_handle(handle);
-    VkResult res;
-    uint32_t i;
-
-    res = device->funcs.p_vkCreateRayTracingPipelinesKHR(device->device, deferred_operation, pipeline_cache,
-                                                         count, create_infos, allocator, pipelines);
-
-    for (i = 0; i < count; i++)
-        fixup_pipeline_feedback_info(&create_infos[i]);
-
-    return res;
-}
-
-VkResult wine_vkCreateRayTracingPipelinesNV(VkDevice handle, VkPipelineCache pipeline_cache, uint32_t count,
-                                            const VkRayTracingPipelineCreateInfoNV_host *create_infos,
-                                            const VkAllocationCallbacks *allocator, VkPipeline *pipelines)
-{
-    struct wine_device *device = wine_device_from_handle(handle);
-    VkResult res;
-    uint32_t i;
-
-    res = device->funcs.p_vkCreateRayTracingPipelinesNV(device->device, pipeline_cache, count, create_infos,
-                                                        allocator, pipelines);
-
-    for (i = 0; i < count; i++)
-        fixup_pipeline_feedback_info(&create_infos[i]);
-
-    return res;
 }
 
 NTSTATUS vk_is_available_instance_function(void *arg)

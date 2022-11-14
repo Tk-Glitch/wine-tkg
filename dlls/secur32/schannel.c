@@ -65,6 +65,7 @@ struct schan_context
     ULONG req_ctx_attr;
     const CERT_CONTEXT *cert;
     SIZE_T header_size;
+    BOOL shutdown_requested;
 };
 
 static struct schan_handle *schan_handle_table;
@@ -901,9 +902,9 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
         unsigned char *ptr;
 
         if (!(ctx = schan_get_object(phContext->dwLower, SCHAN_HANDLE_CTX))) return SEC_E_INVALID_HANDLE;
-        if (!pInput && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
+        if (!pInput && !ctx->shutdown_requested && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
 
-        if (pInput)
+        if (!ctx->shutdown_requested && pInput)
         {
             if (!validate_input_buffers(pInput)) return SEC_E_INVALID_TOKEN;
             if ((idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) == -1) return SEC_E_INCOMPLETE_MESSAGE;
@@ -945,13 +946,6 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     ctx->req_ctx_attr = fContextReq;
 
     /* Perform the TLS handshake */
-    if (fContextReq & ISC_REQ_ALLOCATE_MEMORY)
-    {
-        alloc_buffer.cbBuffer = extra_size;
-        alloc_buffer.BufferType = SECBUFFER_TOKEN;
-        alloc_buffer.pvBuffer = RtlAllocateHeap( GetProcessHeap(), 0, extra_size );
-    }
-
     memset(&input_desc, 0, sizeof(input_desc));
     if (pInput && (idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) != -1)
     {
@@ -967,8 +961,13 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     {
         output_desc.cBuffers = 1;
         output_desc.pBuffers = &pOutput->pBuffers[idx];
-        if (!output_desc.pBuffers->pvBuffer)
+        if (!output_desc.pBuffers->pvBuffer || (fContextReq & ISC_REQ_ALLOCATE_MEMORY))
+        {
+            alloc_buffer.cbBuffer = extra_size;
+            alloc_buffer.BufferType = SECBUFFER_TOKEN;
+            alloc_buffer.pvBuffer = RtlAllocateHeap( GetProcessHeap(), 0, extra_size );
             output_desc.pBuffers = &alloc_buffer;
+        }
     }
 
     params.session = ctx->session;
@@ -978,6 +977,8 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     params.input_offset = &input_offset;
     params.output_buffer_idx = &output_buffer_idx;
     params.output_offset = &output_offset;
+    params.control_token = ctx->shutdown_requested ? control_token_shutdown : control_token_none;
+    ctx->shutdown_requested = FALSE;
     ret = GNUTLS_CALL( handshake, &params );
 
     if (output_buffer_idx != -1)
@@ -1575,6 +1576,28 @@ static SECURITY_STATUS SEC_ENTRY schan_DeleteSecurityContext(PCtxtHandle context
     return SEC_E_OK;
 }
 
+static SECURITY_STATUS SEC_ENTRY schan_ApplyControlToken(PCtxtHandle context_handle, PSecBufferDesc input)
+{
+    struct schan_context *ctx;
+
+    TRACE("%p %p\n", context_handle, input);
+
+    dump_buffer_desc(input);
+
+    if (!context_handle) return SEC_E_INVALID_HANDLE;
+    if (!input) return SEC_E_INTERNAL_ERROR;
+
+    if (input->cBuffers != 1) return SEC_E_INVALID_TOKEN;
+    if (input->pBuffers[0].BufferType != SECBUFFER_TOKEN) return SEC_E_INVALID_TOKEN;
+    if (input->pBuffers[0].cbBuffer < sizeof(DWORD)) return SEC_E_UNSUPPORTED_FUNCTION;
+    if (*(DWORD *)input->pBuffers[0].pvBuffer != SCHANNEL_SHUTDOWN) return SEC_E_UNSUPPORTED_FUNCTION;
+
+    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
+    ctx->shutdown_requested = TRUE;
+
+    return SEC_E_OK;
+}
+
 static const SecurityFunctionTableA schanTableA = {
     1,
     NULL, /* EnumerateSecurityPackagesA */
@@ -1586,7 +1609,7 @@ static const SecurityFunctionTableA schanTableA = {
     NULL, /* AcceptSecurityContext */
     NULL, /* CompleteAuthToken */
     schan_DeleteSecurityContext,
-    NULL, /* ApplyControlToken */
+    schan_ApplyControlToken, /* ApplyControlToken */
     schan_QueryContextAttributesA,
     NULL, /* ImpersonateSecurityContext */
     NULL, /* RevertSecurityContext */
@@ -1617,7 +1640,7 @@ static const SecurityFunctionTableW schanTableW = {
     NULL, /* AcceptSecurityContext */
     NULL, /* CompleteAuthToken */
     schan_DeleteSecurityContext,
-    NULL, /* ApplyControlToken */
+    schan_ApplyControlToken, /* ApplyControlToken */
     schan_QueryContextAttributesW,
     NULL, /* ImpersonateSecurityContext */
     NULL, /* RevertSecurityContext */

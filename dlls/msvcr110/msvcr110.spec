@@ -1174,9 +1174,9 @@
 @ cdecl -arch=!i386 _fpclassf(float)
 @ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr)
 @ cdecl _fpreset()
-@ stub _fprintf_l
-@ stub _fprintf_p
-@ stub _fprintf_p_l
+@ varargs _fprintf_l(ptr str ptr)
+@ varargs _fprintf_p(ptr str)
+@ varargs _fprintf_p_l(ptr str ptr)
 @ stub _fprintf_s_l
 @ cdecl _fputc_nolock(long ptr)
 @ cdecl _fputchar(long)
@@ -1210,9 +1210,9 @@
 @ cdecl _futime32(long ptr)
 @ cdecl _futime64(long ptr)
 @ varargs _fwprintf_l(ptr wstr ptr)
-@ stub _fwprintf_p
-@ stub _fwprintf_p_l
-@ stub _fwprintf_s_l
+@ varargs _fwprintf_p(ptr wstr)
+@ varargs _fwprintf_p_l(ptr wstr ptr)
+@ varargs _fwprintf_s_l(ptr wstr ptr)
 @ cdecl _fwrite_nolock(ptr long long ptr)
 @ varargs _fwscanf_l(ptr wstr ptr)
 @ varargs _fwscanf_s_l(ptr wstr ptr)
@@ -1617,9 +1617,9 @@
 @ varargs _scanf_l(str ptr)
 @ varargs _scanf_s_l(str ptr)
 @ varargs _scprintf(str)
-@ stub _scprintf_l
-@ stub _scprintf_p
-@ stub _scprintf_p_l
+@ varargs _scprintf_l(str ptr)
+@ varargs _scprintf_p(str)
+@ varargs _scprintf_p_l(str ptr)
 @ varargs _scwprintf(wstr)
 @ stub _scwprintf_l
 @ stub _scwprintf_p
@@ -1735,7 +1735,7 @@
 @ varargs _swprintf(ptr wstr)
 @ varargs _swprintf_c(ptr long str)
 @ varargs _swprintf_c_l(ptr long str ptr)
-@ stub _swprintf_p
+@ varargs _swprintf_p(ptr long wstr)
 @ varargs _swprintf_p_l(ptr long wstr ptr)
 @ varargs _swprintf_s_l(ptr long wstr ptr)
 @ varargs _swscanf_l(wstr wstr ptr)

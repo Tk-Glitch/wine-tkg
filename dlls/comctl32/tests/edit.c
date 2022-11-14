@@ -54,6 +54,24 @@ struct edit_notify {
 
 static struct edit_notify notifications;
 
+/* try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    MSG msg;
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
+}
+
 static INT_PTR CALLBACK multi_edit_dialog_proc(HWND hdlg, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static int num_ok_commands = 0;
@@ -3445,12 +3463,13 @@ static void test_change_focus(void)
     SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)oldproc);
 
     SetCursorPos(400, 400);
+    flush_events();
 
     SetFocus(parent_wnd);
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     SetFocus(hwnd);
     while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-    ok_sequence(sequences, COMBINED_SEQ_INDEX, setfocus_combined_seq, "Set focus", TRUE);
+    ok_sequence(sequences, COMBINED_SEQ_INDEX, setfocus_combined_seq, "Set focus", FALSE);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     SetFocus(parent_wnd);
@@ -3622,6 +3641,7 @@ static void test_ime(void)
     /* Test IME messages when EIMES_GETCOMPSTRATONCE is not set */
     old_proc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)edit_ime_subclass_proc);
     SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)old_proc);
+    flush_events();
 
     himc = ImmGetContext(hwnd);
     ret = ImmSetCompositionStringA(himc, SCS_SETSTR, "Wine", 4, NULL, 0);

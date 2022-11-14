@@ -605,10 +605,59 @@ TestMid "test", 1, 2, "te"
 TestMid "test", 1, 0, ""
 TestMid "test", 1, 0, ""
 TestMid "test", 5, 2, ""
+TestMid 1234, 1, 2, "12"
+TestMid 1234, 5, 2, ""
 TestMid2 "test", 1, "test"
 TestMid2 "test", 2, "est"
 TestMid2 "test", 4, "t"
 TestMid2 "test", 5, ""
+TestMid2 1234, 5, ""
+
+sub TestMidError()
+    on error resume next
+    call Err.clear()
+    call Mid("test", "a", 1)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", "a", null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", "a", empty)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Mid("test", 0, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", -1, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid(null, -1, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", 0, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", -1, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", null, 2)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", null, -1)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid(null, -1, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", empty, 1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", 0, empty)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid(empty, 0, 0)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+end sub
+call TestMidError()
 
 Sub TestUCase(str, ex)
     x = UCase(str)
@@ -840,7 +889,30 @@ TestRight "test", 2, "st"
 TestRight "test", 5, "test"
 TestRight "test", 0, ""
 TestRight 123, 2, "23"
+TestRight "test", "3", "est"
+TestRight 123, "2", "23"
+TestRight empty, 0, ""
+TestRight empty, 1, ""
+TestRight "test", empty, ""
+TestRight "test", empty, ""
 if isEnglishLang then TestRight true, 2, "ue"
+call Right(null, 0)
+call ok(getVT(Right(null, 0)) = "VT_NULL", "getVT(Right(null, 0)) = " & getVT(Right(null, 0)))
+call ok(getVT(Right(null, 1)) = "VT_NULL", "getVT(Right(null, 1)) = " & getVT(Right(null, 1)))
+
+sub TestRightError()
+    on error resume next
+    call Err.clear()
+    call Right("test", -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Right(null, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Right("test", null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+end sub
+call TestRightError()
 
 Sub TestTrim(str, exstr)
     Call ok(Trim(str) = exstr, "Trim(" & str & ") = " & Trim(str))
@@ -2220,5 +2292,47 @@ call testTimeSerial(50, 2, 1, 2, 2, 1, DateSerial(1900, 1, 1))
 call testTimeSerial(10, 60, 2, 11, 0, 2, DateSerial(1899, 12, 30))
 call testTimeSerial(10, 0, 60, 10, 1, 0, DateSerial(1899, 12, 30))
 call testTimeSerialError()
+
+sub testRnd(arg, expresult)
+    dim x
+    x = Rnd(arg)
+    call ok(x = expresult, "result = " & x & " expected " & expresult)
+    call ok(getVT(x) = "VT_R4*", "getVT = " & getVT(x))
+end sub
+
+' Initial seed value
+call testRnd(0, 327680 / 16777216)
+call testRnd(0, 327680 / 16777216)
+' Negative argument is a seed, does not use current RNG state
+call ok(Rnd(-2) = Rnd(-2), "Expected same result")
+call ok(Rnd(-1) <> Rnd(-2), "Expected differing result")
+
+sub testRandomizeError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = Randomize(0)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+' Randomize uses current RNG value, so it's reset using Rnd(-1)
+sub testRandomize()
+    dim x, y
+
+    Rnd(-1)
+    Randomize(123)
+    x = Rnd()
+    Randomize(123)
+    y = Rnd()
+    call ok(x <> y, "Expected differing result")
+    Rnd(-1)
+    Randomize(123)
+    y = Rnd()
+    call ok(x = y, "Expected same result")
+end sub
+
+call testRandomize()
+call testRandomizeError()
 
 Call reportSuccess()

@@ -163,7 +163,9 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
 
     if (!module || (module->Flags & LDR_WINE_INTERNAL))
     {
-        status = unix_funcs->unwind_builtin_dll( type, dispatch, context );
+        struct unwind_builtin_dll_params params = { type, dispatch, context };
+
+        status = NTDLL_UNIX_CALL( unwind_builtin_dll, &params );
         if (status != STATUS_SUCCESS) return status;
 
         if (dispatch->EstablisherFrame)
@@ -482,6 +484,8 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
         else
             WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
                                debugstr_a((char *)rec->ExceptionInformation[1]) );
+
+        set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
     }
     else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
     {
@@ -1129,6 +1133,18 @@ __ASM_GLOBAL_FUNC( call_consolidate_callback,
                    __ASM_CFI(".cfi_escape 0x10,0x8e,0x02,0x03,0x7d,0xc0,0x01\n\t") /* DW_CFA_expression: D14 DW_OP_breg13 + 192 */
                    __ASM_CFI(".cfi_escape 0x10,0x8f,0x02,0x03,0x7d,0xc8,0x01\n\t") /* DW_CFA_expression: D15 DW_OP_breg13 + 200 */
 #endif
+                   /* These EHABI opcodes are to be read bottom up - they
+                    * restore relevant registers from the CONTEXT. */
+                   __ASM_EHABI(".save {sp}\n\t") /* Restore Sp last */
+                   __ASM_EHABI(".pad #-(0x80 + 0x0c + 0x0c)\n\t") /* Move back across D0-D15, Cpsr, Fpscr, Padding, Pc, Lr and Sp */
+                   __ASM_EHABI(".vsave {d8-d15}\n\t")
+                   __ASM_EHABI(".pad #0x40\n\t") /* Skip past D0-D7 */
+                   __ASM_EHABI(".pad #0x0c\n\t") /* Skip past Cpsr, Fpscr and Padding */
+                   __ASM_EHABI(".save {lr, pc}\n\t")
+                   __ASM_EHABI(".pad #0x08\n\t") /* Skip past R12 and Sp - Sp is restored last */
+                   __ASM_EHABI(".save {r4-r11}\n\t")
+                   __ASM_EHABI(".pad #0x14\n\t") /* Skip past ContextFlags and R0-R3 */
+
                    "ldrd r1, r2, [sp, #0x1a4]\n\t"
                    "mov r0, r2\n\t"
                    "blx r1\n\t"
@@ -1327,6 +1343,7 @@ extern LONG __C_ExecuteExceptionFilter(PEXCEPTION_POINTERS ptrs, PVOID frame,
                                        PUCHAR nonvolatile);
 __ASM_GLOBAL_FUNC( __C_ExecuteExceptionFilter,
                    "push {r4-r11,lr}\n\t"
+                   __ASM_EHABI(".save {r4-r11,lr}\n\t")
                    __ASM_SEH(".seh_save_regs_w {r4-r11,lr}\n\t")
                    __ASM_SEH(".seh_endprologue\n\t")
 
@@ -1439,8 +1456,10 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
  */
 __ASM_STDCALL_FUNC( RtlRaiseException, 4,
                     "push {r0, lr}\n\t"
+                    __ASM_EHABI(".save {r0, lr}\n\t")
                     __ASM_SEH(".seh_save_regs {r0, lr}\n\t")
                     "sub sp, sp, #0x1a0\n\t"  /* sizeof(CONTEXT) */
+                    __ASM_EHABI(".pad #0x1a0\n\t")
                     __ASM_SEH(".seh_stackalloc 0x1a0\n\t")
                     __ASM_SEH(".seh_endprologue\n\t")
                     __ASM_CFI(".cfi_adjust_cfa_offset 424\n\t")

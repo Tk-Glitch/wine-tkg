@@ -91,10 +91,69 @@ NTSTATUS WINAPI wow64_NtAllocateVirtualMemoryEx( UINT *args )
     void *addr;
     SIZE_T size;
     NTSTATUS status;
+    SIZE_T alloc_size = count * sizeof(*params);
+    MEM_EXTENDED_PARAMETER *params64;
+    BOOL set_highest_address = (!*addr32 && process == GetCurrentProcess());
+    BOOL add_address_requirements = set_highest_address;
+    MEM_ADDRESS_REQUIREMENTS *buf;
+    unsigned int i;
 
-    if (count) FIXME( "%ld extended parameters %p\n", count, params );
+    if (count && !params) return STATUS_INVALID_PARAMETER;
+
+    for (i = 0; i < count; ++i)
+    {
+        if (params[i].Type == MemExtendedParameterAddressRequirements)
+        {
+            alloc_size += sizeof(MEM_ADDRESS_REQUIREMENTS);
+            add_address_requirements = FALSE;
+        }
+        else if (params[i].Type && params[i].Type < MemExtendedParameterMax)
+        {
+            FIXME( "Unsupported parameter type %d.\n", params[i].Type);
+        }
+    }
+
+    if (add_address_requirements)
+        alloc_size += sizeof(*params) + sizeof(MEM_ADDRESS_REQUIREMENTS);
+    params64 = Wow64AllocateTemp( alloc_size );
+    memcpy( params64, params, count * sizeof(*params64) );
+    if (add_address_requirements)
+    {
+        buf = (MEM_ADDRESS_REQUIREMENTS *)((char *)params64 + (count + 1) * sizeof(*params64));
+        params64[count].Type = MemExtendedParameterAddressRequirements;
+        params64[count].Pointer = buf;
+        memset(buf, 0, sizeof(*buf));
+        buf->HighestEndingAddress = (void *)highest_user_address;
+        ++buf;
+    }
+    else
+    {
+        buf = (MEM_ADDRESS_REQUIREMENTS *)((char *)params64 + count * sizeof(*params64));
+    }
+    for (i = 0; i < count; ++i)
+    {
+        if (params64[i].Type == MemExtendedParameterAddressRequirements)
+        {
+            MEM_ADDRESS_REQUIREMENTS32 *p = (MEM_ADDRESS_REQUIREMENTS32 *)params[i].Pointer;
+
+            buf->LowestStartingAddress = ULongToPtr(p->LowestStartingAddress);
+            if (p->HighestEndingAddress)
+            {
+                if (p->HighestEndingAddress > highest_user_address) return STATUS_INVALID_PARAMETER;
+                buf->HighestEndingAddress = ULongToPtr(p->HighestEndingAddress);
+            }
+            else
+            {
+                buf->HighestEndingAddress = set_highest_address ? (void *)highest_user_address : NULL;
+            }
+            buf->Alignment = p->Alignment;
+            params64[i].Pointer = buf;
+            ++buf;
+        }
+    }
+
     status = NtAllocateVirtualMemoryEx( process, addr_32to64( &addr, addr32 ), size_32to64( &size, size32 ),
-                                        type, protect, params, count );
+                                        type, protect, params64, count + add_address_requirements );
     if (!status)
     {
         put_addr( addr32, addr );
@@ -399,6 +458,8 @@ NTSTATUS WINAPI wow64_NtQueryVirtualMemory( UINT *args )
                 info32->State = info.State;
                 info32->Protect = info.Protect;
                 info32->Type = info.Type;
+                if ((ULONG_PTR)info.BaseAddress + info.RegionSize > highest_user_address)
+                    info32->RegionSize = highest_user_address - (ULONG_PTR)info.BaseAddress + 1;
             }
         }
         res_len = sizeof(MEMORY_BASIC_INFORMATION32);
@@ -424,7 +485,11 @@ NTSTATUS WINAPI wow64_NtQueryVirtualMemory( UINT *args )
 
     case MemoryRegionInformation: /* MEMORY_REGION_INFORMATION */
     {
-        if (len >= sizeof(MEMORY_REGION_INFORMATION32))
+        if (len < sizeof(MEMORY_REGION_INFORMATION32))
+            status = STATUS_INFO_LENGTH_MISMATCH;
+        if ((ULONG_PTR)addr > highest_user_address)
+            status = STATUS_INVALID_PARAMETER;
+        else
         {
             MEMORY_REGION_INFORMATION info;
             MEMORY_REGION_INFORMATION32 *info32 = ptr;
@@ -438,9 +503,10 @@ NTSTATUS WINAPI wow64_NtQueryVirtualMemory( UINT *args )
                 info32->CommitSize = info.CommitSize;
                 info32->PartitionId = info.PartitionId;
                 info32->NodePreference = info.NodePreference;
+                if ((ULONG_PTR)info.AllocationBase + info.RegionSize > highest_user_address)
+                    info32->RegionSize = highest_user_address - (ULONG_PTR)info.AllocationBase + 1;
             }
         }
-        else status = STATUS_INFO_LENGTH_MISMATCH;
         res_len = sizeof(MEMORY_REGION_INFORMATION32);
         break;
     }

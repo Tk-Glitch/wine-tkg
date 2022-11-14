@@ -50,7 +50,7 @@ static HRESULT MSSTYLES_GetFont (LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPC
 
 #define MSSTYLES_VERSION 0x0003
 
-#define THEME_CLASS_SIGNATURE (('T' << 24) | ('H' << 16) | ('E' << 8) | 'M')
+#define THEME_CLASS_SIGNATURE 0x12bc6d83
 
 static PTHEME_FILE tfActiveTheme;
 
@@ -171,7 +171,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     (*tf)->pszAvailSizes = pszSizes;
     (*tf)->pszSelectedColor = pszSelectedColor;
     (*tf)->pszSelectedSize = pszSelectedSize;
-    (*tf)->dwRefCount = 1;
+    (*tf)->refcount = 1;
     return S_OK;
 
 invalid_theme:
@@ -187,9 +187,12 @@ invalid_theme:
  */
 void MSSTYLES_CloseThemeFile(PTHEME_FILE tf)
 {
+    LONG refcount;
+
     if(tf) {
-        tf->dwRefCount--;
-        if(!tf->dwRefCount) {
+        refcount = InterlockedDecrement(&tf->refcount);
+        if (!refcount)
+        {
             if(tf->hTheme) FreeLibrary(tf->hTheme);
             if(tf->classes) {
                 while(tf->classes) {
@@ -235,7 +238,7 @@ HRESULT MSSTYLES_SetActiveTheme(PTHEME_FILE tf, BOOL setMetrics)
     tfActiveTheme = tf;
     if (tfActiveTheme)
     {
-	tfActiveTheme->dwRefCount++;
+        InterlockedIncrement(&tfActiveTheme->refcount);
 	if(!tfActiveTheme->classes)
 	    MSSTYLES_ParseThemeIni(tfActiveTheme, setMetrics);
     }
@@ -447,6 +450,7 @@ static PTHEME_CLASS MSSTYLES_AddClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWST
 
     cur = heap_alloc(sizeof(*cur));
     cur->signature = THEME_CLASS_SIGNATURE;
+    cur->refcount = 0;
     cur->hTheme = tf->hTheme;
     lstrcpyW(cur->szAppName, pszAppName);
     lstrcpyW(cur->szClassName, pszClassName);
@@ -1060,7 +1064,8 @@ PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList, U
     if(cls) {
         TRACE("Opened app %s, class %s from list %s\n", debugstr_w(cls->szAppName), debugstr_w(cls->szClassName), debugstr_w(pszClassList));
 	cls->tf = tfActiveTheme;
-	cls->tf->dwRefCount++;
+        InterlockedIncrement(&cls->tf->refcount);
+        InterlockedIncrement(&cls->refcount);
         cls->dpi = dpi;
     }
     return cls;
@@ -1080,6 +1085,8 @@ PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList, U
  */
 HRESULT MSSTYLES_CloseThemeClass(PTHEME_CLASS tc)
 {
+    LONG refcount;
+
     __TRY
     {
         if (tc->signature != THEME_CLASS_SIGNATURE)
@@ -1097,7 +1104,10 @@ HRESULT MSSTYLES_CloseThemeClass(PTHEME_CLASS tc)
         return E_HANDLE;
     }
 
-    MSSTYLES_CloseThemeFile (tc->tf);
+    refcount = InterlockedDecrement(&tc->refcount);
+    /* Some buggy apps may double free HTHEME handles */
+    if (refcount >= 0)
+        MSSTYLES_CloseThemeFile(tc->tf);
     return S_OK;
 }
 

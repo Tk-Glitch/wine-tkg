@@ -80,7 +80,9 @@ enum unix_call
     unix_vkCmdCopyImageToBuffer,
     unix_vkCmdCopyImageToBuffer2,
     unix_vkCmdCopyImageToBuffer2KHR,
+    unix_vkCmdCopyMemoryIndirectNV,
     unix_vkCmdCopyMemoryToAccelerationStructureKHR,
+    unix_vkCmdCopyMemoryToImageIndirectNV,
     unix_vkCmdCopyMemoryToMicromapEXT,
     unix_vkCmdCopyMicromapEXT,
     unix_vkCmdCopyMicromapToMemoryEXT,
@@ -89,6 +91,8 @@ enum unix_call
     unix_vkCmdDebugMarkerBeginEXT,
     unix_vkCmdDebugMarkerEndEXT,
     unix_vkCmdDebugMarkerInsertEXT,
+    unix_vkCmdDecompressMemoryIndirectCountNV,
+    unix_vkCmdDecompressMemoryNV,
     unix_vkCmdDispatch,
     unix_vkCmdDispatchBase,
     unix_vkCmdDispatchBaseKHR,
@@ -1044,10 +1048,29 @@ struct vkCmdCopyImageToBuffer2KHR_params
     const VkCopyImageToBufferInfo2 *pCopyImageToBufferInfo;
 };
 
+struct vkCmdCopyMemoryIndirectNV_params
+{
+    VkCommandBuffer commandBuffer;
+    VkDeviceAddress DECLSPEC_ALIGN(8) copyBufferAddress;
+    uint32_t copyCount;
+    uint32_t stride;
+};
+
 struct vkCmdCopyMemoryToAccelerationStructureKHR_params
 {
     VkCommandBuffer commandBuffer;
     const VkCopyMemoryToAccelerationStructureInfoKHR *pInfo;
+};
+
+struct vkCmdCopyMemoryToImageIndirectNV_params
+{
+    VkCommandBuffer commandBuffer;
+    VkDeviceAddress DECLSPEC_ALIGN(8) copyBufferAddress;
+    uint32_t copyCount;
+    uint32_t stride;
+    VkImage DECLSPEC_ALIGN(8) dstImage;
+    VkImageLayout dstImageLayout;
+    const VkImageSubresourceLayers *pImageSubresources;
 };
 
 struct vkCmdCopyMemoryToMicromapEXT_params
@@ -1101,6 +1124,21 @@ struct vkCmdDebugMarkerInsertEXT_params
 {
     VkCommandBuffer commandBuffer;
     const VkDebugMarkerMarkerInfoEXT *pMarkerInfo;
+};
+
+struct vkCmdDecompressMemoryIndirectCountNV_params
+{
+    VkCommandBuffer commandBuffer;
+    VkDeviceAddress DECLSPEC_ALIGN(8) indirectCommandsAddress;
+    VkDeviceAddress DECLSPEC_ALIGN(8) indirectCommandsCountAddress;
+    uint32_t stride;
+};
+
+struct vkCmdDecompressMemoryNV_params
+{
+    VkCommandBuffer commandBuffer;
+    uint32_t decompressRegionCount;
+    const VkDecompressMemoryRegionNV *pDecompressMemoryRegions;
 };
 
 struct vkCmdDispatch_params
@@ -1519,14 +1557,14 @@ struct vkCmdResetEvent2_params
 {
     VkCommandBuffer commandBuffer;
     VkEvent DECLSPEC_ALIGN(8) event;
-    VkPipelineStageFlags2 stageMask;
+    VkPipelineStageFlags2 DECLSPEC_ALIGN(8) stageMask;
 };
 
 struct vkCmdResetEvent2KHR_params
 {
     VkCommandBuffer commandBuffer;
     VkEvent DECLSPEC_ALIGN(8) event;
-    VkPipelineStageFlags2 stageMask;
+    VkPipelineStageFlags2 DECLSPEC_ALIGN(8) stageMask;
 };
 
 struct vkCmdResetQueryPool_params
@@ -2171,7 +2209,7 @@ struct vkCmdSubpassShadingHUAWEI_params
 struct vkCmdTraceRaysIndirect2KHR_params
 {
     VkCommandBuffer commandBuffer;
-    VkDeviceAddress indirectDeviceAddress;
+    VkDeviceAddress DECLSPEC_ALIGN(8) indirectDeviceAddress;
 };
 
 struct vkCmdTraceRaysIndirectKHR_params
@@ -2181,7 +2219,7 @@ struct vkCmdTraceRaysIndirectKHR_params
     const VkStridedDeviceAddressRegionKHR *pMissShaderBindingTable;
     const VkStridedDeviceAddressRegionKHR *pHitShaderBindingTable;
     const VkStridedDeviceAddressRegionKHR *pCallableShaderBindingTable;
-    VkDeviceAddress indirectDeviceAddress;
+    VkDeviceAddress DECLSPEC_ALIGN(8) indirectDeviceAddress;
 };
 
 struct vkCmdTraceRaysKHR_params
@@ -2278,7 +2316,7 @@ struct vkCmdWriteAccelerationStructuresPropertiesNV_params
 struct vkCmdWriteBufferMarker2AMD_params
 {
     VkCommandBuffer commandBuffer;
-    VkPipelineStageFlags2 stage;
+    VkPipelineStageFlags2 DECLSPEC_ALIGN(8) stage;
     VkBuffer DECLSPEC_ALIGN(8) dstBuffer;
     VkDeviceSize DECLSPEC_ALIGN(8) dstOffset;
     uint32_t marker;
@@ -2314,7 +2352,7 @@ struct vkCmdWriteTimestamp_params
 struct vkCmdWriteTimestamp2_params
 {
     VkCommandBuffer commandBuffer;
-    VkPipelineStageFlags2 stage;
+    VkPipelineStageFlags2 DECLSPEC_ALIGN(8) stage;
     VkQueryPool DECLSPEC_ALIGN(8) queryPool;
     uint32_t query;
 };
@@ -2322,7 +2360,7 @@ struct vkCmdWriteTimestamp2_params
 struct vkCmdWriteTimestamp2KHR_params
 {
     VkCommandBuffer commandBuffer;
-    VkPipelineStageFlags2 stage;
+    VkPipelineStageFlags2 DECLSPEC_ALIGN(8) stage;
     VkQueryPool DECLSPEC_ALIGN(8) queryPool;
     uint32_t query;
 };

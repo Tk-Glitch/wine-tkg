@@ -2,6 +2,7 @@
 # Wine Vulkan generator
 #
 # Copyright 2017-2018 Roderick Colenbrander
+# Copyright 2022 Jacek Caban for CodeWeavers
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -64,7 +65,7 @@ from enum import Enum
 LOGGER = logging.Logger("vulkan")
 LOGGER.addHandler(logging.StreamHandler())
 
-VK_XML_VERSION = "1.3.230"
+VK_XML_VERSION = "1.3.233"
 WINE_VK_VERSION = (1, 3)
 
 # Filenames to create.
@@ -209,8 +210,6 @@ FUNCTION_OVERRIDES = {
     # Device functions
     "vkAllocateCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkCreateCommandPool" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE, "extra_param" : "client_ptr"},
-    "vkCreateComputePipelines" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.PRIVATE},
-    "vkCreateGraphicsPipelines" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.PRIVATE},
     "vkDestroyCommandPool" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkDestroyDevice" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkFreeCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
@@ -258,9 +257,6 @@ FUNCTION_OVERRIDES = {
     "vkGetDeviceGroupSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
     "vkGetPhysicalDevicePresentRectanglesKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
 
-    # VK_KHR_ray_tracing_pipeline
-    "vkCreateRayTracingPipelinesKHR" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.PRIVATE},
-
     # VK_EXT_calibrated_timestamps
     "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkGetCalibratedTimestampsEXT" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
@@ -272,9 +268,6 @@ FUNCTION_OVERRIDES = {
     # VK_EXT_debug_report
     "vkCreateDebugReportCallbackEXT" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkDestroyDebugReportCallbackEXT" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
-
-    # VK_NV_ray_tracing
-    "vkCreateRayTracingPipelinesNV" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.PRIVATE},
 }
 
 STRUCT_CHAIN_CONVERSIONS = {
@@ -288,7 +281,6 @@ class Direction(Enum):
     """ Parameter direction: input, output, input_output. """
     INPUT = 1
     OUTPUT = 2
-    INPUT_OUTPUT = 3
 
 
 class VkBaseType(object):
@@ -593,13 +585,10 @@ class VkFunction(object):
 
         params = []
         for param in command.findall("param"):
-            vk_param = VkParam.from_xml(param, types)
+            vk_param = VkParam.from_xml(param, types, params)
             params.append(vk_param)
 
-        func = VkFunction(_type=func_type, name=func_name, params=params)
-        for param in params:
-            param.set_conversions(func)
-        return func
+        return VkFunction(_type=func_type, name=func_name, params=params)
 
     def get_conversions(self):
         """ Get a list of conversion functions required for this function if any.
@@ -610,10 +599,7 @@ class VkFunction(object):
 
         conversions = []
         for param in self.params:
-            convs = param.get_conversions(self)
-            if convs is not None:
-                conversions.extend(convs)
-
+            conversions.extend(param.get_conversions(self.thunk_type == ThunkType.PUBLIC))
         return conversions
 
     def is_alias(self):
@@ -666,39 +652,12 @@ class VkFunction(object):
     def returns_longlong(self):
         return self.type in ["uint64_t", "VkDeviceAddress"]
 
-    def needs_conversion(self):
-        """ Check if the function needs any input/output type conversion.
-        Functions need input/output conversion if struct parameters have
-        alignment differences between Win32 and Linux 32-bit.
-        """
-
-        for p in self.params:
-            if p.needs_conversion():
-                LOGGER.debug("Parameter {0} to {1} requires conversion".format(p.name, self.name))
-                return True
-
-        return False
-
-    def needs_unwrapping(self):
-        """ Check if the function needs any input/output type unwrapping.
-        Functions need input/output unwrapping if struct parameters have
-        wrapped handles.
-        """
-
-        for p in self.params:
-            if p.needs_unwrapping():
-                return True
-
-        return False
-
     def needs_dispatch(self):
         return self.dispatch
 
-    def needs_thunk(self):
-        return self.thunk_type != ThunkType.NONE
-
     def needs_private_thunk(self):
-        return self.thunk_type == ThunkType.PRIVATE
+        return self.needs_exposing() and self.loader_thunk_type != ThunkType.NONE and \
+            self.thunk_type != ThunkType.PUBLIC
 
     def needs_exposing(self):
         # The function needs exposed if at-least one extension isn't both UNSUPPORTED and UNEXPOSED
@@ -710,7 +669,7 @@ class VkFunction(object):
             return True
         return self.name in DIRECT_CALL_FUNCTIONS
 
-    def pfn(self, prefix="p", call_conv=None, conv=False):
+    def pfn(self, prefix="p", call_conv=None):
         """ Create function pointer. """
 
         if call_conv:
@@ -723,8 +682,6 @@ class VkFunction(object):
                 pfn += param.const + " "
 
             pfn += param.type
-            if conv and param.needs_conversion():
-                pfn += "_host"
 
             if param.is_pointer():
                 pfn += " " + param.pointer
@@ -757,7 +714,7 @@ class VkFunction(object):
             proto += " {0}(".format(self.name)
 
         # Add all the parameters.
-        proto += ", ".join([p.definition(is_thunk=is_thunk) for p in self.params])
+        proto += ", ".join([p.definition() for p in self.params])
 
         if is_thunk and self.extra_param:
             proto += ", void *" + self.extra_param
@@ -771,33 +728,34 @@ class VkFunction(object):
 
     def loader_body(self):
         body = "    struct {0}_params params;\n".format(self.name)
+        body += "    NTSTATUS status;\n"
         for p in self.params:
             body += "    params.{0} = {0};\n".format(p.name)
         body += "    ";
 
         # Call the Unix function.
         if self.needs_direct_call():
-            body += "p_vk_direct_unix_call(unix_handle, unix_{0}, &params);\n".format(self.name)
+            body += "status = p_vk_direct_unix_call(unix_handle, unix_{0}, &params);\n".format(self.name)
         else:
-            body += "vk_unix_call(unix_{0}, &params);\n".format(self.name)
+            body += "status = vk_unix_call(unix_{0}, &params);\n".format(self.name)
+        body += "    assert(!status);\n"
         if self.type != "void":
             body += "    return params.result;\n"
         return body
 
-    def body(self, conv, unwrap=True, params_prefix=""):
+    def body(self, conv, unwrap, params_prefix=""):
         body = ""
         needs_alloc = False
 
         # Declare any tmp parameters for conversion.
         for p in self.params:
-            if p.needs_conversion() and conv:
+            if p.needs_variable(conv, unwrap):
                 if p.is_dynamic_array():
-                    body += "    {0}_host *{1}_host;\n".format(p.type, p.name)
-                else:
-                    body += "    {0}_host {1}_host;\n".format(p.type, p.name)
-            elif unwrap and p.needs_unwrapping():
-                if p.is_dynamic_array():
-                    body += "    {0} *{1}_host;\n".format(p.type, p.name)
+                    body += "    {2}{0} *{1}_host;\n".format(
+                        p.type, p.name, "const " if p.is_const() else "")
+                elif p.optional:
+                    body += "    {0} *{1}_host = NULL;\n".format(p.type, p.name)
+                    needs_alloc = True
                 else:
                     body += "    {0} {1}_host;\n".format(p.type, p.name)
             if p.needs_alloc(conv, unwrap):
@@ -805,15 +763,26 @@ class VkFunction(object):
 
         if needs_alloc:
             body += "    struct conversion_context ctx;\n"
+        body += "\n"
         body += "    {0}\n".format(self.trace(params_prefix=params_prefix))
+
+        if self.params[0].optional and self.params[0].is_handle():
+            if self.type != "void":
+                LOGGER.warning("return type {0} with optional handle not supported".format(self.type))
+            body += "    if (!{0}{1})\n".format(params_prefix, self.params[0].name)
+            body += "        return STATUS_SUCCESS;\n\n"
+
         if needs_alloc:
             body += "    init_conversion_context(&ctx);\n"
 
         # Call any win_to_host conversion calls.
         unwrap = self.thunk_type == ThunkType.PUBLIC
         for p in self.params:
-            if p.needs_input_conversion(conv) and (conv or (unwrap and p.needs_unwrapping())):
+            if p.needs_conversion(conv, unwrap, Direction.INPUT):
                 body += p.copy(Direction.INPUT, conv, unwrap, prefix=params_prefix)
+            elif p.is_dynamic_array() and p.needs_conversion(conv, unwrap, Direction.OUTPUT):
+                body += "    {0}_host = ({2}{0} && {1}) ? conversion_context_alloc(&ctx, sizeof(*{0}_host) * {1}) : NULL;\n".format(
+                    p.name, p.get_dyn_array_len(params_prefix), params_prefix)
 
         # Build list of parameters containing converted and non-converted parameters.
         # The param itself knows if conversion is needed and applies it when we set conv=True.
@@ -833,11 +802,8 @@ class VkFunction(object):
             body += "    {0}result = {1}{2}({3});\n".format(params_prefix, func_prefix, self.name, params)
 
         # Call any host_to_win conversion calls.
-        if conv:
-            for p in self.params:
-                if not p.needs_output_conversion(conv):
-                    continue
-
+        for p in self.params:
+            if p.needs_conversion(conv, unwrap, Direction.OUTPUT):
                 body += p.copy(Direction.OUTPUT, conv, unwrap, prefix=params_prefix)
 
         if needs_alloc:
@@ -887,7 +853,18 @@ class VkFunction(object):
     def thunk(self, prefix=None, conv=False):
         thunk = "NTSTATUS {0}{1}(void *args)\n".format(prefix, self.name)
         thunk += "{\n"
-        thunk += "    struct {0}_params *params = args;\n".format(self.name)
+        if conv:
+            thunk += "    struct\n"
+            thunk += "    {\n"
+            for p in self.params:
+                thunk += "        {0};\n".format(p.definition(conv=True, is_member=True))
+            if self.extra_param:
+                thunk += "        void *{0};\n".format(self.extra_param)
+            if self.type != "void":
+                thunk += "        {0} result;\n".format(self.type)
+            thunk += "    } *params = args;\n"
+        else:
+            thunk += "    struct {0}_params *params = args;\n".format(self.name)
         thunk += self.body(conv=conv, unwrap=self.thunk_type == ThunkType.PUBLIC, params_prefix="params->")
         thunk += "}\n\n"
         return thunk
@@ -1103,25 +1080,37 @@ class VkHandle(object):
     def is_wrapped(self):
         return self.native_handle("test") is not None
 
-    def needs_conversion(self):
-        return False
-
     def needs_unwrapping(self):
         return self.is_wrapped()
 
 class VkVariable(object):
     def __init__(self, const=False, type_info=None, type=None, name=None, pointer=None, array_len=None,
-                 dyn_array_len=None, object_type=None):
+                 dyn_array_len=None, object_type=None, optional=False, returnedonly=False, parent=None):
         self.const = const
         self.type_info = type_info
         self.type = type
         self.name = name
+        self.parent = parent
+        self.object_type = object_type
+        self.optional = optional
+        self.returnedonly = returnedonly
+
         self.pointer = pointer
         self.array_len = array_len
         self.dyn_array_len = dyn_array_len
-        self.object_type = object_type
+        self.pointer_array = False
+        if isinstance(dyn_array_len, str):
+            i = dyn_array_len.find(",")
+            if i != -1:
+                self.dyn_array_len = dyn_array_len[0:i]
+                self.pointer_array = True
+
         if type_info:
             self.set_type_info(type_info)
+
+    def __eq__(self, other):
+        """ Compare member based on name against a string. """
+        return self.name == other
 
     def set_type_info(self, type_info):
         """ Helper function to set type information from the type registry.
@@ -1131,6 +1120,31 @@ class VkVariable(object):
         self.type_info = type_info
         self.handle = type_info["data"] if type_info["category"] == "handle" else None
         self.struct = type_info["data"] if type_info["category"] == "struct" else None
+
+    def get_dyn_array_len(self, prefix):
+        if isinstance(self.dyn_array_len, int):
+            return self.dyn_array_len
+
+        len_str = self.dyn_array_len
+        parent = self.parent
+        len = prefix
+
+        # check if lenght is a member of another struct (for example pAllocateInfo->commandBufferCount)
+        i = len_str.find("->")
+        if i != -1:
+            var = parent[parent.index(len_str[0:i])]
+            len_str = len_str[i+2:]
+            len += var.name + "->"
+            parent = var.struct.members
+
+        len += len_str
+        if not len_str in parent:
+            return len
+
+        var = parent[parent.index(len_str)]
+        if var.is_pointer():
+            len = "*" + len
+        return len
 
     def is_const(self):
         return self.const
@@ -1143,6 +1157,15 @@ class VkVariable(object):
 
     def is_struct(self):
         return self.struct is not None
+
+    def is_union(self):
+        return self.type_info["category"] == "union"
+
+    def is_bitmask(self):
+        return self.type_info["category"] == "bitmask"
+
+    def is_enum(self):
+        return self.type_info["category"] == "enum"
 
     def is_dynamic_array(self):
         """ Returns if the member is an array element.
@@ -1174,28 +1197,28 @@ class VkVariable(object):
             return False
         elif self.type == "size_t":
             return False
-        elif self.type in ["uint64_t", "VkDeviceSize"]:
+        elif self.type in ["uint64_t", "VkDeviceAddress", "VkDeviceSize"]:
             return True
-        elif self.is_struct():
-            return self.struct.needs_alignment()
+        elif self.is_bitmask():
+            return self.type_info["data"].type == "VkFlags64"
+        elif self.is_enum():
+            return self.type_info["data"].bitwidth == 64
+        elif self.is_struct() or self.is_union():
+            return self.type_info["data"].needs_alignment()
         elif self.is_handle():
             # Dispatchable handles are pointers to objects, while
             # non-dispatchable are uint64_t and hence need alignment.
             return not self.handle.is_dispatchable()
         return False
 
-    def needs_conversion(self):
-        """ Structures requiring alignment, need conversion between win32 and host. """
-        return self.struct.needs_conversion() if self.is_struct() else False
-
     def needs_unwrapping(self):
-        """ Structures with wrapped handles need unwrapping. """
+        """ Returns if variable needs unwrapping of handle. """
 
         if self.is_struct():
             return self.struct.needs_unwrapping()
 
         if self.is_handle():
-            return self.handle.is_wrapped()
+            return self.handle.needs_unwrapping()
 
         if self.is_generic_handle():
             return True
@@ -1205,36 +1228,65 @@ class VkVariable(object):
     def needs_alloc(self, conv, unwrap):
         """ Returns True if conversion needs allocation """
         if self.is_dynamic_array():
-            if (conv and self.needs_conversion()) or (unwrap and self.needs_unwrapping()):
-                return True
+            return self.needs_conversion(conv, unwrap, Direction.INPUT, False) \
+                or self.needs_conversion(conv, unwrap, Direction.OUTPUT, False)
 
         return self.is_struct() and self.struct.needs_alloc(conv, unwrap)
 
-class VkMember(VkVariable):
-    def __init__(self, const=False, struct_fwd_decl=False,_type=None, pointer=None, name=None, array_len=None,
-            dyn_array_len=None, optional=False, values=None, object_type=None, bit_width=None):
-        VkVariable.__init__(self, const=const, type=_type, name=name, pointer=pointer, array_len=array_len,
-                            dyn_array_len=dyn_array_len, object_type=object_type)
-        self.struct_fwd_decl = struct_fwd_decl
-        self.optional = optional
-        self.values = values
-        self.bit_width = bit_width
+    def needs_host_type(self):
+        return self.is_struct() and self.struct.needs_host_type()
 
-    def __eq__(self, other):
-        """ Compare member based on name against a string.
-
-        This method is for convenience by VkStruct, which holds a number of members and needs quick checking
-        if certain members exist.
+    def get_conversions(self, unwrap, parent_const=False):
+        """ Get a list of conversions required for this parameter if any.
+        Parameters which are structures may require conversion between win32
+        and the host platform. This function returns a list of conversions
+        required.
         """
 
-        return self.name == other
+        conversions = []
+
+        # Collect any member conversions first, so we can guarantee
+        # those functions will be defined prior to usage by the
+        # 'parent' param requiring conversion.
+        if self.is_struct():
+            struct = self.struct
+            is_const = self.is_const() if self.is_pointer() else parent_const
+
+            conversions.extend(struct.get_conversions(unwrap, is_const))
+
+            for conv in [False, True]:
+                if struct.needs_conversion(conv, unwrap, Direction.INPUT, is_const):
+                    conversions.append(StructConversionFunction(struct, Direction.INPUT, conv, unwrap, is_const))
+                if struct.needs_conversion(conv, unwrap, Direction.OUTPUT, is_const):
+                    conversions.append(StructConversionFunction(struct, Direction.OUTPUT, conv, unwrap, is_const))
+
+        if self.is_static_array() or self.is_dynamic_array():
+            for conv in [False, True]:
+                if self.needs_conversion(conv, unwrap, Direction.INPUT, parent_const):
+                    conversions.append(ArrayConversionFunction(self, Direction.INPUT, conv, unwrap))
+                if self.needs_conversion(conv, unwrap, Direction.OUTPUT, parent_const):
+                    conversions.append(ArrayConversionFunction(self, Direction.OUTPUT, conv, unwrap))
+
+        return conversions
+
+
+class VkMember(VkVariable):
+    def __init__(self, const=False, struct_fwd_decl=False,_type=None, pointer=None, name=None, array_len=None,
+                 dyn_array_len=None, optional=False, values=None, object_type=None, bit_width=None,
+                 returnedonly=False, parent=None):
+        VkVariable.__init__(self, const=const, type=_type, name=name, pointer=pointer, array_len=array_len,
+                            dyn_array_len=dyn_array_len, object_type=object_type, optional=optional,
+                            returnedonly=returnedonly, parent=parent)
+        self.struct_fwd_decl = struct_fwd_decl
+        self.values = values
+        self.bit_width = bit_width
 
     def __repr__(self):
         return "{0} {1} {2} {3} {4} {5} {6}".format(self.const, self.struct_fwd_decl, self.type, self.pointer,
                 self.name, self.array_len, self.dyn_array_len)
 
     @staticmethod
-    def from_xml(member):
+    def from_xml(member, returnedonly, parent):
         """ Helper function for parsing a member tag within a struct or union. """
 
         name_elem = member.find("name")
@@ -1297,28 +1349,33 @@ class VkMember(VkVariable):
             LOGGER.debug("Found bit field")
             bit_width = int(name_elem.tail[1:])
 
-        return VkMember(const=const, struct_fwd_decl=struct_fwd_decl, _type=member_type, pointer=pointer, name=name_elem.text,
-                array_len=array_len, dyn_array_len=dyn_array_len, optional=optional, values=values, object_type=object_type, bit_width=bit_width)
+        return VkMember(const=const, struct_fwd_decl=struct_fwd_decl, _type=member_type, pointer=pointer,
+                        name=name_elem.text, array_len=array_len, dyn_array_len=dyn_array_len, optional=optional,
+                        values=values, object_type=object_type, bit_width=bit_width, returnedonly=returnedonly,
+                        parent=parent)
 
     def copy(self, input, output, direction, conv, unwrap):
         """ Helper method for use by conversion logic to generate a C-code statement to copy this member.
             - `conv` indicates whether the statement is in a struct alignment conversion path. """
 
         win_type = "win32" if conv else "win64"
-        if (conv and self.needs_conversion()) or (unwrap and self.needs_unwrapping()):
+        if self.needs_conversion(conv, unwrap, direction, False):
             if self.is_dynamic_array():
+                # Array length is either a variable name (string) or an int.
+                count = self.get_dyn_array_len(input)
+                host_part = "host" if unwrap else "unwrapped_host"
+                pointer_part = "pointer_" if self.pointer_array else ""
                 if direction == Direction.OUTPUT:
-                    LOGGER.warn("TODO: implement copying of returnedonly dynamic array for {0}.{1}".format(self.type, self.name))
+                    return "convert_{2}_{7}array_{6}_to_{5}({3}{1}, {0}{1}, {4});\n".format(
+                        output, self.name, self.type, input, count, win_type, host_part, pointer_part)
                 else:
-                    # Array length is either a variable name (string) or an int.
-                    count = self.dyn_array_len if isinstance(self.dyn_array_len, int) else "{0}{1}".format(input, self.dyn_array_len)
-                    host_part = "host" if unwrap else "unwrapped_host"
-                    return "{0}{1} = convert_{2}_array_{5}_to_{6}(ctx, {3}{1}, {4});\n".format(output, self.name, self.type, input, count, win_type, host_part)
+                    return "{0}{1} = convert_{2}_{7}array_{5}_to_{6}(ctx, {3}{1}, {4});\n".format(
+                        output, self.name, self.type, input, count, win_type, host_part, pointer_part)
             elif self.is_static_array():
                 count = self.array_len
                 if direction == Direction.OUTPUT:
                     # Needed by VkMemoryHeap.memoryHeaps
-                    return "convert_{0}_static_array_host_to_{5}({2}{1}, {3}{1}, {4});\n".format(self.type, self.name, input, output, count, win_type)
+                    return "convert_{0}_array_host_to_{5}({2}{1}, {3}{1}, {4});\n".format(self.type, self.name, input, output, count, win_type)
                 else:
                     # Nothing needed this yet.
                     LOGGER.warn("TODO: implement copying of static array for {0}.{1}".format(self.type, self.name))
@@ -1361,16 +1418,18 @@ class VkMember(VkVariable):
         if self.is_struct_forward_declaration():
             text += "struct "
 
-        if conv and self.is_struct():
-            text += "{0}_host".format(self.type)
-        else:
-            text += self.type
+        text += self.type
+        if conv and self.needs_host_type():
+            text += "32"
 
         if self.is_pointer():
             text += " {0}{1}".format(self.pointer, self.name)
         else:
             if align and self.needs_alignment():
-                text += " WINE_VK_ALIGN(8) " + self.name
+                if conv:
+                    text += " DECLSPEC_ALIGN(8) " + self.name
+                else:
+                    text += " WINE_VK_ALIGN(8) " + self.name
             else:
                 text += " " + self.name
 
@@ -1382,70 +1441,60 @@ class VkMember(VkVariable):
 
         return text
 
-    def get_conversions(self, func=None):
-        """ Return any conversion description for this member and its children when conversion is needed. """
-
-        # Check if we need conversion either for this member itself or for any child members
-        # in case member represents a struct.
-        if not self.needs_conversion() and not self.needs_unwrapping():
-            return None
-
-        conversions = []
-
-        # Collect any conversion for any member structs.
-        if self.is_struct():
-            struct = self.type_info["data"]
-            for m in struct:
-                m.needs_struct_extensions_conversion()
-                if m.needs_conversion() or m.needs_unwrapping():
-                    conversions.extend(m.get_conversions(func))
-
-            struct.needs_struct_extensions_conversion()
-            direction = Direction.OUTPUT if struct.returnedonly else Direction.INPUT
-        elif self.is_handle() or self.is_generic_handle():
-            direction = Direction.INPUT
-
-        unwrap = not func or func.thunk_type == ThunkType.PUBLIC
-        if unwrap and self.needs_unwrapping():
-            conversions.append(ConversionFunction(self, direction, False, True))
-            conversions.append(ConversionFunction(self, direction, True, True))
-        elif self.needs_conversion():
-            conversions.append(ConversionFunction(self, direction, True, unwrap or not self.needs_unwrapping()))
-
-        return conversions
-
     def is_struct_forward_declaration(self):
         return self.struct_fwd_decl
-
-    def is_union(self):
-        return self.type_info["category"] == "union"
 
     def is_bit_field(self):
         return self.bit_width is not None
 
-    def needs_struct_extensions_conversion(self):
-        if not self.is_struct():
+    def needs_conversion(self, conv, unwrap, direction, struct_const):
+        """ Check if member needs conversion. """
+
+        is_const = self.is_const() if self.is_pointer() else struct_const
+
+        # const members don't needs output conversion unless they are structs with non-const pointers
+        if direction == Direction.OUTPUT and is_const and not self.is_struct():
             return False
 
-        struct = self.type_info["data"]
-        return struct.needs_struct_extensions_conversion()
+        if direction == Direction.INPUT:
+            # returnedonly members don't needs input conversions
+            if not self.is_pointer() and self.returnedonly:
+                return False
+
+        if self.is_handle():
+            if unwrap and self.handle.is_wrapped():
+                return True
+        elif self.is_generic_handle():
+            if unwrap:
+                return True
+        elif self.is_struct():
+            if self.struct.needs_conversion(conv, unwrap, direction, is_const):
+                return True
+
+        # if pointer member needs output conversion, it also needs input conversion
+        # to allocate the pointer
+        if direction == Direction.INPUT and self.is_pointer() and \
+           self.needs_conversion(conv, unwrap, Direction.OUTPUT, struct_const):
+            return True
+
+        return False
 
 class VkParam(VkVariable):
     """ Helper class which describes a parameter to a function call. """
 
-    def __init__(self, type_info, const=None, pointer=None, name=None, array_len=None, dyn_array_len=None, object_type=None):
+    def __init__(self, type_info, const=None, pointer=None, name=None, parent=None, array_len=None,
+                 dyn_array_len=None, object_type=None, optional=False):
         VkVariable.__init__(self, const=const, type_info=type_info, type=type_info["name"], name=name,
                             pointer=pointer, array_len=array_len, dyn_array_len=dyn_array_len,
-                            object_type=object_type)
+                            object_type=object_type, optional=optional, parent=parent)
 
-        self._set_direction()
         self._set_format_string()
 
     def __repr__(self):
         return "{0} {1} {2} {3} {4} {5}".format(self.const, self.type, self.pointer, self.name, self.array_len, self.dyn_array_len)
 
     @staticmethod
-    def from_xml(param, types):
+    def from_xml(param, types, parent):
         """ Helper function to create VkParam from xml. """
 
         # Parameter parsing is slightly tricky. All the data is contained within
@@ -1469,6 +1518,9 @@ class VkParam(VkVariable):
         type_elem = param.find("type")
         pointer = type_elem.tail.strip() if type_elem.tail.strip() != "" else None
 
+        attr = param.get("optional")
+        optional = attr and attr.startswith("true")
+
         # Some uint64_t are actually handles with a separate type param
         object_type = param.get("objecttype", None)
 
@@ -1477,65 +1529,9 @@ class VkParam(VkVariable):
         if type_info is None:
             LOGGER.err("type info not found for: {0}".format(type_elem.text))
 
-        return VkParam(type_info, const=const, pointer=pointer, name=name, array_len=array_len, dyn_array_len=dyn_array_len, object_type=object_type)
-
-    def set_conversions(self, func):
-        """ Internal helper function to configure any needed conversion functions. """
-
-        self.func = func
-        self.input_conv = None
-        self.input_unwrap = None
-        self.output_conv = None
-        self.output_unwrap = None
-
-        unwrap = func.thunk_type == ThunkType.PUBLIC;
-
-        # Input functions require win to host conversion.
-        if self._direction in [Direction.INPUT, Direction.INPUT_OUTPUT]:
-            if unwrap and self.needs_unwrapping():
-                self.input_unwrap = ConversionFunction(self, Direction.INPUT, False, True)
-                self.input_conv = ConversionFunction(self, Direction.INPUT, True, True)
-            elif self.needs_conversion():
-                self.input_conv = ConversionFunction(self, Direction.INPUT, True, unwrap or not self.needs_unwrapping())
-
-        # Output functions require host to win conversion.
-        if self._direction in [Direction.INPUT_OUTPUT, Direction.OUTPUT]:
-            if unwrap and self.needs_unwrapping():
-                self.output_conv = ConversionFunction(self, Direction.OUTPUT, False)
-                self.output_conv = ConversionFunction(self, Direction.OUTPUT, True)
-            elif self.needs_conversion():
-                self.output_conv = ConversionFunction(self, Direction.OUTPUT, True, unwrap or not self.needs_unwrapping())
-
-    def _set_direction(self):
-        """ Internal helper function to set parameter direction (input/output/input_output). """
-
-        # The parameter direction needs to be determined from hints in vk.xml like returnedonly,
-        # parameter constness and other heuristics.
-        # For now we need to get this right for structures as we need to convert these, we may have
-        # missed a few other edge cases (e.g. count variables).
-        # See also https://github.com/KhronosGroup/Vulkan-Docs/issues/610
-
-        if not self.is_pointer():
-            self._direction = Direction.INPUT
-        elif self.is_const() and self.is_pointer():
-            self._direction = Direction.INPUT
-        elif self.is_struct():
-            if not self.struct.returnedonly:
-                self._direction = Direction.INPUT
-                return
-
-            # Returnedonly hints towards output, however in some cases
-            # it is inputoutput. In particular if pNext / sType exist,
-            # which are used to link in other structures without having
-            # to introduce new APIs. E.g. vkGetPhysicalDeviceProperties2KHR.
-            if "pNext" in self.struct:
-                self._direction = Direction.INPUT_OUTPUT
-                return
-
-            self._direction = Direction.OUTPUT
-        else:
-            # This should mostly be right. Count variables can be inout, but we don't care about these yet.
-            self._direction = Direction.OUTPUT
+        return VkParam(type_info, const=const, pointer=pointer, name=name, array_len=array_len,
+                       dyn_array_len=dyn_array_len, object_type=object_type, optional=optional,
+                       parent=parent)
 
     def _set_format_string(self):
         """ Internal helper function to be used by constructor to set format string. """
@@ -1587,20 +1583,31 @@ class VkParam(VkVariable):
 
     def copy(self, direction, conv, unwrap, prefix=""):
         win_type = "win32" if conv else "win64"
+        wrap_part = "" if unwrap or not self.needs_unwrapping() else "unwrapped_"
         if direction == Direction.INPUT:
             ctx_param = "&ctx, " if self.needs_alloc(conv, unwrap) else ""
-            wrap_part = "" if unwrap or not self.needs_unwrapping() else "unwrapped_"
             if self.is_dynamic_array():
-                return "    {1}_host = convert_{2}_array_{4}_to_{6}host({5}{0}{1}, {0}{3});\n".format(prefix, self.name, self.type, self.dyn_array_len, win_type, ctx_param, wrap_part)
+                return "    {1}_host = convert_{2}_array_{4}_to_{6}host({5}{0}{1}, {3});\n".format(
+                    prefix, self.name, self.type, self.get_dyn_array_len(prefix), win_type, ctx_param, wrap_part)
+            elif self.optional:
+                ret  = "    if ({0}{1})\n".format(prefix, self.name)
+                ret += "    {\n"
+                ret += "        {0}_host = conversion_context_alloc(&ctx, sizeof(*{0}_host));\n".format(self.name)
+                ret += "        convert_{0}_{3}_to_{5}host({4}{1}{2}, {2}_host);\n".format(self.type, prefix, self.name, win_type, ctx_param, wrap_part)
+                ret += "    }\n"
+                return ret
             else:
                 return "    convert_{0}_{3}_to_{5}host({4}{1}{2}, &{2}_host);\n".format(self.type, prefix, self.name, win_type, ctx_param, wrap_part)
         else:
             if self.is_dynamic_array():
-                LOGGER.error("Unimplemented output conversion for: {0}".format(self.name))
+                return "    convert_{0}_array_{1}host_to_{2}({3}_host, {4}{3}, {5});\n".format(
+                    self.type, wrap_part, win_type, self.name, prefix, self.get_dyn_array_len(prefix))
             else:
-                return "    convert_{0}_host_to_{3}(&{2}_host, {1}{2});\n".format(self.type, prefix, self.name, win_type)
+                ref_part = "" if self.optional else "&"
+                return "    convert_{0}_host_to_{3}({4}{2}_host, {1}{2});\n".format(
+                    self.type, prefix, self.name, win_type, ref_part)
 
-    def definition(self, postfix=None, is_member=False, is_thunk=False):
+    def definition(self, postfix=None, is_member=False, conv=False):
         """ Return prototype for the parameter. E.g. 'const char *foo' """
 
         proto = ""
@@ -1609,8 +1616,8 @@ class VkParam(VkVariable):
 
         proto += self.type
         name = self.name
-        if is_thunk and self.needs_conversion():
-            proto += "_host"
+        if conv and self.needs_host_type():
+            proto += "32"
 
         if is_member and self.needs_alignment():
             proto += " DECLSPEC_ALIGN(8)"
@@ -1632,14 +1639,6 @@ class VkParam(VkVariable):
 
         return proto
 
-    def direction(self):
-        """ Returns parameter direction: input, output, input_output.
-
-        Parameter direction in Vulkan is not straight-forward, which this function determines.
-        """
-
-        return self._direction
-
     def dispatch_table(self, params_prefix=""):
         """ Return functions dispatch table pointer for dispatchable objects. """
 
@@ -1651,96 +1650,41 @@ class VkParam(VkVariable):
     def format_string(self):
         return self.format_str
 
-    def get_conversions(self, func):
-        """ Get a list of conversions required for this parameter if any.
-        Parameters which are structures may require conversion between win32
-        and the host platform. This function returns a list of conversions
-        required.
-        """
-
-        if self.is_struct():
-            self.struct.needs_struct_extensions_conversion()
-            for m in self.struct:
-                m.needs_struct_extensions_conversion()
-        elif not self.is_handle():
-            return None
-
-        if not self.needs_conversion() and not self.needs_unwrapping():
-            return None
-
-        conversions = []
-
-        # Collect any member conversions first, so we can guarantee
-        # those functions will be defined prior to usage by the
-        # 'parent' param requiring conversion.
-        if self.is_struct():
-            for m in self.struct:
-                if not m.is_struct():
-                    continue
-
-                if not m.needs_conversion() and not m.needs_unwrapping():
-                    continue
-
-                conversions.extend(m.get_conversions(func))
-
-        # Conversion requirements for the 'parent' parameter.
-        if self.input_unwrap is not None:
-            conversions.append(self.input_unwrap)
-        if self.input_conv is not None:
-            conversions.append(self.input_conv)
-        if self.output_unwrap is not None:
-            conversions.append(self.output_unwrap)
-        if self.output_conv is not None:
-            conversions.append(self.output_conv)
-
-        return conversions
-
     def is_dispatchable(self):
         if not self.is_handle():
             return False
 
         return self.handle.is_dispatchable()
 
-    def needs_conversion(self):
-        """ Returns if parameter needs conversion between win32 and host. """
+    def needs_conversion(self, conv, unwrap, direction, parent_const=False):
+        """ Check if param needs conversion. """
 
-        if not self.is_struct():
-            return False
-
-        # VkSparseImageMemoryRequirements(2) is used by vkGetImageSparseMemoryRequirements(2).
-        # This function is tricky to wrap, because how to wrap depends on whether
-        # pSparseMemoryRequirements is NULL or not. Luckily for VkSparseImageMemoryRequirements(2)
-        # the alignment works out in such a way that no conversion is needed between win32 and Linux.
-        if self.type in ["VkSparseImageMemoryRequirements", "VkSparseImageMemoryRequirements2"]:
-            return False
-
-        # If a structure needs alignment changes, it means we need to
-        # perform parameter conversion between win32 and host.
-        if self.struct.needs_conversion():
-            return True
-
-        return False
-
-    def needs_unwrapping(self):
-        """ Returns if parameter needs unwrapping of handle. """
-
-        if self.func.needs_private_thunk():
-            return False
-
-        # Wrapped handle parameters are handled separately, only look for wrapped handles in structs
         if self.is_struct():
-            return self.struct.needs_unwrapping()
+            return self.struct.needs_conversion(conv, unwrap, direction, self.is_const())
 
-        if self.is_handle() and self.is_dynamic_array():
-            return self.handle.needs_unwrapping()
+        if self.is_handle():
+            # non-array handles are handled inline in thunks
+            if not self.is_dynamic_array() and not self.is_static_array():
+                return False
+
+            # vkAllocateCommandBuffers is a special case, we use it in our private thunk as an input param
+            param_direction = (Direction.INPUT if self.is_const() else Direction.OUTPUT)
+            if self.name == "pCommandBuffers":
+                param_direction = Direction.INPUT
+            if direction != param_direction:
+                return False
+
+            if unwrap and self.handle.is_wrapped():
+                return True
 
         return False
 
-    def needs_input_conversion(self, conv):
-        return (self.input_conv if conv else self.input_unwrap) is not None
-
-    def needs_output_conversion(self, conv):
-        return (self.output_conv if conv else self.output_unwrap) is not None
+    def needs_variable(self, conv, unwrap):
+        if self.needs_conversion(conv, unwrap, Direction.INPUT):
+            return True
+        if self.needs_conversion(conv, unwrap, Direction.OUTPUT):
+            return True
+        return False
 
     def spec(self):
         """ Generate spec file entry for this parameter. """
@@ -1783,8 +1727,8 @@ class VkParam(VkVariable):
             LOGGER.debug("TODO: setting NULL VkAllocationCallbacks for {0}".format(self.name))
             return "NULL"
 
-        if (unwrap and self.needs_unwrapping()) or (conv and self.needs_conversion()):
-            if self.is_dynamic_array():
+        if self.needs_variable(conv, unwrap):
+            if self.is_dynamic_array() or self.optional:
                 return "{0}_host".format(self.name)
             else:
                 return "&{0}_host".format(self.name)
@@ -1842,12 +1786,18 @@ class VkStruct(Sequence):
         # marked as 'returnedonly'.
         returnedonly = True if struct.attrib.get("returnedonly") else False
 
+        # Those structs seem to be broken in spec, they are specified as
+        # returned only, but documented as input structs.
+        if name in ["VkSubpassShadingPipelineCreateInfoHUAWEI",
+                    "VkPipelineShaderStageRequiredSubgroupSizeCreateInfo"]:
+            returnedonly = False
+
         structextends = struct.attrib.get("structextends")
         structextends = structextends.split(",") if structextends else []
 
         members = []
         for member in struct.findall("member"):
-            vk_member = VkMember.from_xml(member)
+            vk_member = VkMember.from_xml(member, returnedonly, members)
             members.append(vk_member)
 
         return VkStruct(name, members, returnedonly, structextends, union=union)
@@ -1905,7 +1855,7 @@ class VkStruct(Sequence):
 
         return decoupled_structs
 
-    def definition(self, align=False, conv=False, postfix=None):
+    def definition(self, align=False, conv=False):
         """ Convert structure to textual definition.
 
         Args:
@@ -1914,35 +1864,28 @@ class VkStruct(Sequence):
             postfix (str, optional): text to append to end of struct name, useful for struct renaming.
         """
 
-        # Only define alias structs when doing conversions
-        if self.is_alias() and not conv:
+        if self.is_alias():
             return ""
 
+        suffix = "32" if conv else ""
         if self.union:
             text = "typedef union {0}".format(self.name)
         else:
             text = "typedef struct {0}".format(self.name)
-
-        if postfix is not None:
-            text += postfix
+        text += suffix
 
         text += "\n{\n"
 
         for m in self:
             if align and m.needs_alignment():
-                text += "    {0};\n".format(m.definition(align=align))
-            elif conv and m.needs_conversion():
-                text += "    {0};\n".format(m.definition(conv=conv))
+                text += "    {0};\n".format(m.definition(align=align, conv=conv))
             else:
-                text += "    {0};\n".format(m.definition())
+                text += "    {0};\n".format(m.definition(conv=conv))
 
-        if postfix is not None:
-            text += "}} {0}{1};\n".format(self.name, postfix)
-        else:
-            text += "}} {0};\n".format(self.name)
+        text += "}} {0}{1};\n".format(self.name, suffix)
 
         for aliasee in self.aliased_by:
-            text += "typedef {0} {1};\n".format(self.name, aliasee.name)
+            text += "typedef {0}{2} {1}{2};\n".format(self.name, aliasee.name, suffix)
 
         return text
 
@@ -1965,22 +1908,6 @@ class VkStruct(Sequence):
                 return True
         return False
 
-    def needs_conversion(self):
-        """ Returns if struct members needs conversion between win32 and host.
-        Structures need conversion if they contain members requiring alignment
-        or if they include other structures which need alignment.
-        """
-
-        if self.needs_alignment():
-            return True
-
-        for m in self.members:
-            if self.name == m.type:
-                continue
-            if m.needs_conversion():
-                return True
-        return False
-
     def needs_unwrapping(self):
         """ Returns if struct members need unwrapping of handle. """
 
@@ -1991,8 +1918,92 @@ class VkStruct(Sequence):
                 return True
         return False
 
+    def needs_extensions_conversion(self, conv, direction):
+        """ Check if struct contains extensions chain that needs to be converted """
+
+        if direction == Direction.INPUT and self.name in STRUCT_CHAIN_CONVERSIONS:
+            return True
+
+        if not "pNext" in self:
+            return False
+        is_const = self.members[self.members.index("pNext")].is_const()
+        # VkOpticalFlowSessionCreateInfoNV is missing const in its pNext pointer
+        if self.name == "VkOpticalFlowSessionCreateInfoNV":
+            is_const = True
+        needs_output_copy = False
+
+        for e in self.struct_extensions:
+            if not e.required:
+                continue
+            if e.needs_conversion(conv, True, direction, is_const, check_extensions=False):
+                return True
+            if direction == Direction.INPUT:
+                # we need input conversion of structs containing struct chain even if it's returnedonly,
+                # so that we have a chance to allocate buffers
+                if e.needs_conversion(conv, True, Direction.OUTPUT, is_const, check_extensions=False):
+                    return True
+            elif not needs_output_copy and not is_const:
+                for m in e:
+                    if m.name in ["sType", "pNext"]:
+                        continue
+                    # pointers will be handled by needs_conversion, but if we have any other non-const
+                    # member, we may need to copy output
+                    if not m.is_pointer() and not m.is_const():
+                        needs_output_copy = True
+                        break
+
+        # if output needs any copy and we need input conversion, then we also need output conversion
+        if needs_output_copy and self.needs_extensions_conversion(conv, Direction.INPUT):
+            return True
+        return False
+
+    def needs_conversion(self, conv, unwrap, direction, is_const, check_extensions=True):
+        """ Check if struct needs conversion. """
+
+        # VkAllocationCallbacks never needs conversion
+        if self.name == "VkAllocationCallbacks":
+            return False
+
+        # pFixedRateFlags field is missing const, but it doesn't need output conversion
+        if direction == Direction.OUTPUT and self.name == "VkImageCompressionControlEXT":
+            return False
+
+        for m in self.members:
+            if self.name == m.type:
+                continue
+
+            if m.name == "pNext":
+                # we need input conversion of structs containing struct chain even if it's returnedonly
+                if direction == Direction.INPUT and \
+                   self.needs_conversion(conv, unwrap, Direction.OUTPUT, is_const):
+                    return True
+                continue
+
+            # for non-pointer members, check for returnedonly and const attributes
+            if not m.is_pointer() or m.type == "void":
+                if direction == Direction.INPUT:
+                    if self.returnedonly:
+                        continue
+                else:
+                    if is_const or m.is_const():
+                        continue
+
+            # check alignment for 32-bit conversions
+            if conv and (direction == Direction.INPUT or not is_const):
+                # we don't check structs here, they will will be traversed by needs_conversion chain anyway
+                if not m.is_struct() and m.needs_alignment():
+                    return True
+
+            if m.needs_conversion(conv, unwrap, direction, is_const):
+                return True
+
+        return check_extensions and self.needs_extensions_conversion(conv, direction)
+
     def needs_alloc(self, conv, unwrap):
         """ Check if any struct member needs some memory allocation."""
+
+        if self.needs_extensions_conversion(conv, Direction.INPUT):
+            return True
 
         for m in self.members:
             if self.name == m.type:
@@ -2002,19 +2013,14 @@ class VkStruct(Sequence):
 
         return False
 
-    def needs_struct_extensions_conversion(self):
-        """ Checks if structure extensions in pNext chain need conversion. """
-        ret = False
-
-        for e in self.struct_extensions:
-            if e.required and e.needs_conversion():
-                LOGGER.error("Unhandled pNext chain alignment conversion for {0}".format(e.name))
-                ret = True
-            if e.required and e.needs_unwrapping():
-                LOGGER.error("Unhandled pNext chain unwrapping conversion for {0}".format(e.name))
-                ret = True
-
-        return ret
+    def needs_host_type(self):
+        for m in self.members:
+            if self.name == m.type:
+                continue
+            if m.needs_alignment():
+                return True
+            if m.is_struct() and m.struct.needs_host_type():
+                return True
 
     def set_type_info(self, types):
         """ Helper function to set type information from the type registry.
@@ -2025,90 +2031,63 @@ class VkStruct(Sequence):
             type_info = types[m.type]
             m.set_type_info(type_info)
 
+    def get_conversions(self, unwrap, parent_const):
+        conversions = []
 
-class ConversionFunction(object):
-    def __init__(self, variable, direction, conv, unwrap):
+        # Collect any conversion for any extension structs.
+        for e in self.struct_extensions:
+            if not e.required:
+                continue
+            conversions.extend(e.get_conversions(True, parent_const))
+
+        # Collect any conversion for any member structs.
+        for m in self:
+            if m.type == self.name:
+                continue
+            conversions.extend(m.get_conversions(unwrap, parent_const))
+
+        return conversions
+
+
+class StructConversionFunction(object):
+    def __init__(self, struct, direction, conv, unwrap, const):
         self.direction = direction
-        self.array = variable.is_static_array()
-        self.dyn_array = variable.is_dynamic_array()
-        self.operand = variable.struct if variable.is_struct() else variable.handle
-        self.type = variable.type
+        self.operand = struct
+        self.type = struct.name
         self.conv = conv
-        self.unwrap = unwrap
-        self.needs_alloc = direction != Direction.OUTPUT and variable.needs_alloc(conv, unwrap)
+        self.unwrap = unwrap or not self.operand.needs_unwrapping()
+        self.const = const
 
-        self._set_name()
+        name = "convert_{0}_".format(self.type)
+        win_type = "win32" if self.conv else "win64"
+        host_part = "host" if self.unwrap else "unwrapped_host"
+        if self.direction == Direction.INPUT:
+            name += "{0}_to_{1}".format(win_type, host_part)
+        else: # Direction.OUTPUT
+            name += "{0}_to_{1}".format(host_part, win_type)
+        self.name = name
 
     def __eq__(self, other):
         return self.name == other.name
 
-    def _generate_array_conversion_func(self):
-        """ Helper function for generating a conversion function for array operands. """
-
-        body = ""
-
-        if self.conv:
-            body += "#if defined(USE_STRUCT_CONVERSION)\n"
+    def member_needs_copy(self, struct, m):
+        if self.direction == Direction.OUTPUT:
+            if m.name in ["sType", "pNext"]:
+                return False
+            if self.const and not m.is_pointer():
+                return False
+            if m.is_const() and not m.needs_conversion(self.conv, self.unwrap, Direction.OUTPUT, self.const):
+                return False
         else:
-            body += "#if !defined(USE_STRUCT_CONVERSION)\n"
+            if m.name == "pNext":
+                return True
+            if m.name != "sType" and struct.returnedonly and not m.needs_conversion(
+                    self.conv, self.unwrap, Direction.INPUT, self.const):
+                return False
+        return True
 
-        if self.conv and self.operand.needs_conversion():
-            host_type = "{0}_host".format(self.type)
-        else:
-            host_type = self.type
-
-        if self.conv:
-            if self.direction == Direction.OUTPUT:
-                params = ["const {0} *in".format(host_type), "uint32_t count"]
-                return_type = self.type
-            else:
-                params = ["const {0} *in".format(self.type), "uint32_t count"]
-                return_type = host_type
-        else:
-            params = ["const {0} *in".format(self.type), "uint32_t count"]
-            return_type = self.type
-
-        # Generate function prototype.
-        body += "static inline {0} *{1}(".format(return_type, self.name)
-        if self.needs_alloc:
-            body += "struct conversion_context *ctx, "
-        body += ", ".join(p for p in params)
-        body += ")\n{\n"
-
-        body += "    {0} *out;\n".format(return_type)
-
-        body += "    unsigned int i;\n\n"
-        body += "    if (!in || !count) return NULL;\n\n"
-
-        body += "    out = conversion_context_alloc(ctx, count * sizeof(*out));\n"
-
-        body += "    for (i = 0; i < count; i++)\n"
-        body += "    {\n"
-
-        if isinstance(self.operand, VkStruct):
-            for m in self.operand:
-                # TODO: support copying of pNext extension structures!
-                # Luckily though no extension struct at this point needs conversion.
-                body += "        " + m.copy("in[i].", "out[i].", self.direction, self.conv, self.unwrap)
-
-        elif isinstance(self.operand, VkHandle) and self.direction == Direction.INPUT:
-            body += "        out[i] = " + self.operand.driver_handle("in[i]") + ";\n"
-        else:
-            LOGGER.warn("Unhandled conversion operand type")
-            body += "        out[i] = in[i];\n"
-
-        body += "    }\n\n"
-        body += "    return out;\n"
-        body += "}\n"
-
-        body += "#endif /* USE_STRUCT_CONVERSION */\n"
-
-        body += "\n"
-
-        return body
-
-    def _generate_conversion_func(self):
-        """ Helper function for generating a conversion function for non-array operands. """
+    def definition(self):
+        """ Helper function for generating a struct conversion function. """
 
         # It doesn't make sense to generate conversion functions for non-struct variables
         # which aren't in arrays, as this should be handled by the copy() function
@@ -2122,16 +2101,23 @@ class ConversionFunction(object):
         else:
             body += "#if !defined(USE_STRUCT_CONVERSION)\n"
 
+        needs_alloc = self.direction != Direction.OUTPUT and self.operand.needs_alloc(self.conv, self.unwrap)
+        win_type = self.type
+        if self.conv and self.operand.needs_host_type():
+            win_type += "32"
+        if self.direction == Direction.OUTPUT and self.const:
+            win_type = "const " + win_type
+
         if self.conv:
             body += "static inline void {0}(".format(self.name)
 
             if self.direction == Direction.OUTPUT:
-                params = ["const {0}_host *in".format(self.type), "{0} *out".format(self.type)]
+                params = ["const {0} *in".format(self.type), "{0} *out".format(win_type)]
             else:
-                params = ["const {0} *in".format(self.type), "{0}_host *out".format(self.type)]
+                params = ["const {0} *in".format(win_type), "{0} *out".format(self.type)]
 
             # Generate parameter list
-            if self.needs_alloc:
+            if needs_alloc:
                 body += "struct conversion_context *ctx, "
             body += ", ".join(p for p in params)
             body += ")\n"
@@ -2142,183 +2128,230 @@ class ConversionFunction(object):
             params = ["const {0} *in".format(self.type), "{0} *out".format(self.type)]
 
             # Generate parameter list
-            if self.needs_alloc:
+            if needs_alloc:
                 body += "struct conversion_context *ctx, "
             body += ", ".join(p for p in params)
             body += ")\n"
 
-        body += "{\n    if (!in) return;\n\n"
+        needs_extensions = self.operand.needs_extensions_conversion(self.conv, self.direction)
 
-        if self.direction == Direction.INPUT and "pNext" in self.operand and self.operand.returnedonly:
-            # We are dealing with an input_output parameter. For these we only need to copy
-            # pNext and sType as the other fields are filled in by the host. We do potentially
-            # have to iterate over pNext and perform conversions based on switch(sType)!
-            # Luckily though no extension structs at this point need conversion.
-            # TODO: support copying of pNext extension structures!
-            body += "    out->pNext = in->pNext;\n"
-            body += "    out->sType = in->sType;\n"
-        else:
-            for m in self.operand:
-                # TODO: support copying of pNext extension structures!
-                body += "    " + m.copy("in->", "out->", self.direction, self.conv, self.unwrap)
+        body += "{\n"
+        if needs_extensions:
+            body += "    const VkBaseInStructure *in_header;\n"
+            body += "    VkBaseOutStructure *out_header = (void *)out;\n\n"
+
+        body += "    if (!in) return;\n\n"
+
+        for m in self.operand:
+            if not self.member_needs_copy(self.operand, m):
+                continue
+            if m.name == "pNext" and needs_extensions:
+                body += "    out->pNext = NULL;\n"
+                continue
+
+            body += "    " + m.copy("in->", "out->", self.direction, self.conv, self.unwrap)
+
+        if needs_extensions:
+            body += "\n    for (in_header = in->pNext; in_header; in_header = in_header->pNext)\n"
+            body += "    {\n"
+            body += "        switch (in_header->sType)\n"
+            body += "        {\n"
+
+            ident = "            "
+
+            if self.direction == Direction.INPUT and self.type in STRUCT_CHAIN_CONVERSIONS:
+                for i in STRUCT_CHAIN_CONVERSIONS[self.type]:
+                    body += "        case {0}:\n".format(i)
+                body += ident + "break;\n"
+
+            for ext in self.operand.struct_extensions:
+                if not ext.required:
+                    continue
+
+                if self.direction == Direction.OUTPUT and not any([self.member_needs_copy(ext, m) for m in ext]):
+                    continue
+
+                stype = next(x for x in ext.members if x.name == "sType").values
+                win_type = ext.name + "32" if self.conv and ext.needs_host_type() else ext.name
+                if self.direction == Direction.INPUT:
+                    in_type = "const " + win_type
+                    out_type = ext.name
+                else:
+                    in_type = "const " + ext.name
+                    out_type = win_type
+
+                body += "        case {0}:\n".format(stype)
+                body += "        {\n"
+                if self.direction == Direction.INPUT:
+                    body += ident + "{0} *out_ext = conversion_context_alloc(ctx, sizeof(*out_ext));\n".format(out_type)
+                else:
+                    body += ident + "{0} *out_ext = find_next_struct(out_header, {1});\n".format(out_type, stype)
+                if self.direction == Direction.OUTPUT or not ext.returnedonly:
+                    body += ident + "{0} *in_ext = ({0} *)in_header;\n".format(in_type)
+
+                for m in ext:
+                    if m.name == "sType":
+                        body += ident + "out_ext->sType = {0};\n".format(stype)
+                        continue
+                    if not self.member_needs_copy(ext, m):
+                        continue
+                    if m.name == "pNext":
+                        body += ident + "out_ext->pNext = NULL;\n"
+                        continue
+
+                    body += ident + m.copy("in_ext->", "out_ext->", self.direction, self.conv, True)
+
+                if self.direction == Direction.INPUT:
+                    body += ident + "out_header->pNext = (void *)out_ext;\n"
+                body += ident + "out_header = (void *)out_ext;\n"
+                body += ident + "break;\n"
+                body += "        }\n"
+
+            body += "        default:\n"
+            if self.direction == Direction.INPUT:
+                body += ident + "FIXME(\"Unhandled sType %u.\", in_header->sType);\n"
+            body += "            break;\n"
+            body += "        }\n"
+            body += "    }\n"
 
         body += "}\n"
         body += "#endif /* USE_STRUCT_CONVERSION */\n\n"
 
         return body
 
-    def _generate_static_array_conversion_func(self):
-        """ Helper function for generating a conversion function for array operands. """
 
-        body = ""
+class ArrayConversionFunction(object):
+    def __init__(self, array, direction, conv, unwrap):
+        self.array = array
+        self.direction = direction
+        self.type = array.type
+        self.conv = conv
+        self.unwrap = unwrap or not array.needs_unwrapping()
 
-        if self.conv:
-            body += "#if defined(USE_STRUCT_CONVERSION)\n"
-            if self.direction == Direction.OUTPUT:
-                params = ["const {0}_host *in".format(self.type), "{0} *out".format(self.type), "uint32_t count"]
-            else:
-                params = ["const {0} *in".format(self.type), "{0} *out_host".format(self.type), "uint32_t count"]
+        if array.is_static_array() and direction == Direction.INPUT:
+            LOGGER.error("Static array input conversion is not supported")
 
-
-            # Generate function prototype.
-            body += "static inline void {0}(".format(self.name)
-            body += ", ".join(p for p in params)
-            body += ")\n"
-        else:
-            body += "#if !defined(USE_STRUCT_CONVERSION)\n"
-
-            params = ["const {0} *in".format(self.type), "{0} *out".format(self.type), "uint32_t count"]
-
-            # Generate function prototype.
-            body += "static inline void {0}(".format(self.name)
-            body += ", ".join(p for p in params)
-            body += ")\n"
-
-        body += "{\n"
-        body += "    unsigned int i;\n\n"
-        body += "    if (!in) return;\n\n"
-        body += "    for (i = 0; i < count; i++)\n"
-        body += "    {\n"
-
-        if isinstance(self.operand, VkStruct):
-            for m in self.operand:
-                # TODO: support copying of pNext extension structures!
-                body += "        " + m.copy("in[i].", "out[i].", self.direction, self.conv, self.unwrap)
-        elif isinstance(self.operand, VkHandle) and self.direction == Direction.INPUT:
-            body += "        out[i] = " + self.operand.driver_handle("in[i]") + ";\n"
-        else:
-            LOGGER.warn("Unhandled conversion operand type")
-            body += "        out[i] = in[i];\n"
-
-        body += "    }\n"
-        body += "}\n"
-        body += "#endif /* USE_STRUCT_CONVERSION) */\n\n"
-
-        return body
-
-    def _set_name(self):
-        name = "convert_{0}_".format(self.type)
-        if self.array:
-            name += "static_array_"
-        elif self.dyn_array:
-            name += "array_"
-
+        name = "convert_{0}_".format(array.type)
+        if array.pointer_array:
+            name += "pointer_"
+        name += "array_"
         win_type = "win32" if self.conv else "win64"
         host_part = "host" if self.unwrap else "unwrapped_host"
         if self.direction == Direction.INPUT:
             name += "{0}_to_{1}".format(win_type, host_part)
         else: # Direction.OUTPUT
             name += "{0}_to_{1}".format(host_part, win_type)
-
         self.name = name
-
-    def definition(self):
-        if self.array:
-            return self._generate_static_array_conversion_func()
-        elif self.dyn_array:
-            return self._generate_array_conversion_func()
-        else:
-            return self._generate_conversion_func()
-
-class StructChainConversionFunction(object):
-    def __init__(self, direction, struct, ignores):
-        self.direction = direction
-        self.struct = struct
-        self.ignores = ignores
-        self.type = struct.name
-
-        self.name = "convert_{0}_struct_chain".format(self.type)
 
     def __eq__(self, other):
         return self.name == other.name
 
-    def prototype(self, postfix=""):
-        return "VkResult {0}(struct conversion_context *ctx, const void *pNext, {1} *out_struct) {2}".format(self.name, self.type, postfix).strip()
-
     def definition(self):
-        body = self.prototype()
-        body += "\n{\n"
+        """ Helper function for generating a conversion function for array operands. """
 
-        body += "    VkBaseOutStructure *out_header = (VkBaseOutStructure *)out_struct;\n";
-        body += "    const VkBaseInStructure *in_header;\n\n";
+        body = ""
 
-        body += "    out_header->pNext = NULL;\n\n"
+        if self.conv:
+            body += "#if defined(USE_STRUCT_CONVERSION)\n"
+        else:
+            body += "#if !defined(USE_STRUCT_CONVERSION)\n"
 
-        body += "    for (in_header = pNext; in_header; in_header = in_header->pNext)\n"
-        body += "    {\n"
-        body += "        switch (in_header->sType)\n"
-        body += "        {\n"
+        needs_alloc = self.direction != Direction.OUTPUT and self.array.needs_alloc(self.conv, self.unwrap)
 
-        for i in self.ignores:
-            body += "        case {0}:\n".format(i)
-        body += "            break;\n\n"
+        win_type = self.type
+        if self.conv and self.array.needs_host_type():
+            win_type += "32"
+        if self.direction == Direction.OUTPUT and self.array.is_const():
+            win_type = "const " + win_type
+        pointer_part = self.array.pointer if self.array.pointer else "*"
 
-        for e in self.struct.struct_extensions:
-            if not e.required:
-                continue
+        if self.direction == Direction.OUTPUT:
+            params = ["const {0} {1}in".format(self.type, pointer_part),
+                      "{0} {1}out".format(win_type, pointer_part), "uint32_t count"]
+            return_type = None
+        else:
+            params = ["const {0} {1}in".format(win_type, pointer_part), "uint32_t count"]
+            return_type = self.type
 
-            stype = next(x for x in e.members if x.name == "sType")
+        needs_copy = not self.array.is_struct() or self.direction != Direction.INPUT or \
+            not self.array.struct.returnedonly or "pNext" in self.array.struct
 
-            if stype.values in self.ignores:
-                continue
+        # Generate function prototype.
+        if return_type:
+            body += "static inline {0}{1} {2}{3}(".format(
+                "const " if self.array.is_const() else "", return_type, pointer_part, self.name)
+        else:
+            body += "static inline void {0}(".format(self.name)
+        if needs_alloc:
+            body += "struct conversion_context *ctx, "
+        body += ", ".join(p for p in params)
+        body += ")\n{\n"
 
-            body += "        case {0}:\n".format(stype.values)
-            body += "        {\n"
+        if return_type:
+            body += "    {0} {1}out;\n".format(return_type, "**" if self.array.pointer_array else "*")
+        if needs_copy:
+            body += "    unsigned int i;\n\n"
 
-            body += "            const {0} *in = (const {0} *)in_header;\n".format(e.name)
-            body += "            {0} *out;\n\n".format(e.name)
+        if return_type:
+            body += "    if (!in || !count) return NULL;\n\n"
+        else:
+            body += "    if (!in) return;\n\n"
 
-            body += "            if (!(out = conversion_context_alloc(ctx, sizeof(*out)))) return VK_ERROR_OUT_OF_HOST_MEMORY;\n\n"
+        if self.direction == Direction.INPUT:
+            body += "    out = conversion_context_alloc(ctx, count * sizeof(*out));\n"
 
-            for m in e:
-                if m.name == "pNext":
-                    body += "            out->pNext = NULL;\n"
+        if needs_copy:
+            body += "    for (i = 0; i < count; i++)\n"
+            body += "    {\n"
+
+            if self.array.is_struct():
+                struct = self.array.struct
+                win_part = "win32" if self.conv else "win64"
+                host_part = "host" if self.unwrap else "unwrapped_host"
+                if self.direction == Direction.INPUT:
+                    conv_suffix = "{0}_to_{1}".format(win_part, host_part)
                 else:
-                    convert = m.copy("in->", "out->", self.direction, conv=True, unwrap=True)
-                    unwrap = m.copy("in->", "out->", self.direction, conv=False, unwrap=True)
-                    if unwrap == convert:
-                        body += "            " + unwrap
+                    conv_suffix = "{0}_to_{1}".format(host_part, win_part)
+
+                ctx_part = ""
+                if self.direction == Direction.INPUT and struct.needs_alloc(self.conv, self.unwrap):
+                    ctx_part = "ctx, "
+
+                if not self.array.pointer_array:
+                    body += "        convert_{0}_{1}({2}&in[i], &out[i]);\n".format(
+                        struct.name, conv_suffix, ctx_part)
+                else:
+                    body += "        if (in[i])\n"
+                    body += "        {\n"
+                    body += "            out[i] = conversion_context_alloc(ctx, sizeof(*out[i]));\n"
+                    if struct.needs_conversion(self.conv, self.unwrap, self.direction, False):
+                        body += "            convert_{0}_{1}({2}in[i], out[i]);\n".format(
+                            struct.name, conv_suffix, ctx_part)
                     else:
-                        body += "#if defined(USE_STRUCT_CONVERSION)\n"
-                        body += "            " + convert
-                        body += "#else\n"
-                        body += "            " + unwrap
-                        body += "#endif /* USE_STRUCT_CONVERSION */\n"
+                        body += "            *out[i] = *in[i];\n".format(win_type)
+                    body += "        }\n"
+                    body += "        else\n"
+                    body += "            out[i] = NULL;\n"
+            elif self.array.is_handle() and self.direction == Direction.INPUT:
+                if self.array.pointer_array:
+                    LOGGER.error("Unhandled handle pointer arrays")
+                body += "        out[i] = " + self.array.handle.driver_handle("in[i]") + ";\n"
+            else:
+                LOGGER.warning("Unhandled conversion operand type")
+                body += "        out[i] = in[i];\n"
 
-            body += "\n            out_header->pNext = (VkBaseOutStructure *)out;\n"
-            body += "            out_header = out_header->pNext;\n"
-            body += "            break;\n"
-            body += "        }\n\n"
+            body += "    }\n"
 
-        body += "        default:\n"
-        body += "            FIXME(\"Application requested a linked structure of type %u.\\n\", in_header->sType);\n"
+        if return_type:
+            body += "\n    return {0}out;\n".format("(void *)" if self.array.pointer_array else "")
+        body += "}\n"
 
-        body += "        }\n"
-        body += "    }\n\n"
+        body += "#endif /* USE_STRUCT_CONVERSION */\n"
 
-        body += "    return VK_SUCCESS;\n"
-        body += "}\n\n"
+        body += "\n"
+
         return body
+
 
 class VkGenerator(object):
     def __init__(self, registry):
@@ -2326,13 +2359,9 @@ class VkGenerator(object):
 
         # Build a list conversion functions for struct conversion.
         self.conversions = []
-        self.struct_chain_conversions = []
         self.host_structs = []
         for func in self.registry.funcs.values():
-            if not func.is_required():
-                continue
-
-            if not func.needs_conversion() and not func.needs_unwrapping():
+            if not func.needs_exposing():
                 continue
 
             conversions = func.get_conversions()
@@ -2341,25 +2370,22 @@ class VkGenerator(object):
                 if not any(c == conv for c in self.conversions):
                     self.conversions.append(conv)
 
-                if not isinstance(conv.operand, VkStruct):
+                if not isinstance(conv, StructConversionFunction):
+                    continue
+
+                for e in conv.operand.struct_extensions:
+                    if not e.required or not e.needs_host_type():
+                        continue
+                    if not any(s.name == e.name for s in self.host_structs):
+                        self.host_structs.append(e)
+
+                if not conv.operand.needs_host_type():
                     continue
 
                 # Structs can be used in different ways by different conversions
                 # e.g. array vs non-array. Just make sure we pull in each struct once.
                 if not any(s.name == conv.operand.name for s in self.host_structs):
                     self.host_structs.append(conv.operand)
-
-        for struct in self.registry.structs:
-            if struct.name in STRUCT_CHAIN_CONVERSIONS:
-                self.struct_chain_conversions.append(StructChainConversionFunction(Direction.INPUT, struct, STRUCT_CHAIN_CONVERSIONS[struct.name]))
-                # Once we decide to support pNext chains conversion everywhere, move this under get_conversions
-                for e in struct.struct_extensions:
-                    for m in e:
-                        if m.needs_conversion() or m.needs_unwrapping():
-                            conversions = m.get_conversions()
-                            for conv in conversions:
-                                if not any(c == conv for c in self.conversions):
-                                    self.conversions.append(conv)
 
     def _generate_copyright(self, f, spec_file=False):
         f.write("# " if spec_file else "/* ")
@@ -2386,11 +2412,34 @@ class VkGenerator(object):
 
         f.write("WINE_DEFAULT_DEBUG_CHANNEL(vulkan);\n\n")
 
+        f.write("#if defined(USE_STRUCT_CONVERSION)\n\n")
+        for struct in self.host_structs:
+            f.write(struct.definition(conv=True, align=True))
+            f.write("\n")
+        f.write("#endif /* USE_STRUCT_CONVERSION */\n\n")
+
+        f.write("static uint64_t wine_vk_unwrap_handle(uint32_t type, uint64_t handle)\n")
+        f.write("{\n")
+        f.write("    switch(type)\n")
+        f.write("    {\n")
+        for handle in self.registry.handles:
+            if not handle.is_required() or not handle.is_wrapped() or handle.is_alias():
+                continue
+            f.write("    case {}:\n".format(handle.object_type))
+            if handle.is_dispatchable():
+                f.write("        return (uint64_t) (uintptr_t) ")
+                f.write(handle.native_handle("(({}) (uintptr_t) handle)".format(handle.name)))
+            else:
+                f.write("        return (uint64_t) ")
+                f.write(handle.native_handle("handle"))
+            f.write(";\n");
+        f.write("    default:\n")
+        f.write("       return handle;\n")
+        f.write("    }\n")
+        f.write("}\n\n")
+
         # Generate any conversion helper functions.
         for conv in self.conversions:
-            f.write(conv.definition())
-
-        for conv in self.struct_chain_conversions:
             f.write(conv.definition())
 
         # Create thunks for instance and device functions.
@@ -2463,26 +2512,6 @@ class VkGenerator(object):
         f.write(";\n")
         f.write("}\n\n")
 
-        f.write("uint64_t wine_vk_unwrap_handle(VkObjectType type, uint64_t handle)\n")
-        f.write("{\n")
-        f.write("    switch(type)\n")
-        f.write("    {\n")
-        for handle in self.registry.handles:
-            if not handle.is_required() or not handle.is_wrapped() or handle.is_alias():
-                continue
-            f.write("    case {}:\n".format(handle.object_type))
-            if handle.is_dispatchable():
-                f.write("        return (uint64_t) (uintptr_t) ")
-                f.write(handle.native_handle("(({}) (uintptr_t) handle)".format(handle.name)))
-            else:
-                f.write("        return (uint64_t) ")
-                f.write(handle.native_handle("handle"))
-            f.write(";\n");
-        f.write("    default:\n")
-        f.write("       return handle;\n")
-        f.write("    }\n")
-        f.write("}\n\n")
-
         f.write("#if !defined(USE_STRUCT_CONVERSION)\n\n")
 
         f.write("const unixlib_entry_t __wine_unix_call_funcs[] =\n")
@@ -2532,58 +2561,45 @@ class VkGenerator(object):
 
         f.write("#define WINE_VK_VERSION VK_API_VERSION_{0}_{1}\n\n".format(WINE_VK_VERSION[0], WINE_VK_VERSION[1]))
 
-        for struct in self.host_structs:
-            f.write("#if defined(USE_STRUCT_CONVERSION)\n")
-            f.write(struct.definition(align=False, conv=True, postfix="_host"))
-            f.write("#else\n")
-            f.write("typedef {0} {0}_host;\n".format(struct.name))
-            f.write("#endif\n\n")
-        f.write("\n")
-
         # Generate prototypes for device and instance functions requiring a custom implementation.
         f.write("/* Functions for which we have custom implementations outside of the thunks. */\n")
         for vk_func in self.registry.funcs.values():
-            if not vk_func.needs_exposing() or vk_func.thunk_type == ThunkType.PUBLIC:
+            if not vk_func.needs_private_thunk():
                 continue
 
             f.write("{0};\n".format(vk_func.prototype(prefix=prefix, postfix="DECLSPEC_HIDDEN", is_thunk=True)))
         f.write("\n")
 
-        f.write("struct conversion_context;\n")
-        for func in self.struct_chain_conversions:
-            f.write(func.prototype(postfix="DECLSPEC_HIDDEN") + ";\n")
-        f.write("\n")
-
         f.write("/* For use by vkDevice and children */\n")
         f.write("struct vulkan_device_funcs\n{\n")
         for vk_func in self.registry.device_funcs:
-            if not vk_func.is_required():
+            if not vk_func.needs_exposing():
                 continue
 
             if not vk_func.needs_dispatch():
                 LOGGER.debug("skipping {0} in vulkan_device_funcs".format(vk_func.name))
                 continue
 
-            f.write("    {0};\n".format(vk_func.pfn(conv=vk_func.needs_conversion())))
+            f.write("    {0};\n".format(vk_func.pfn()))
         f.write("};\n\n")
 
         f.write("/* For use by vkInstance and children */\n")
         f.write("struct vulkan_instance_funcs\n{\n")
         for vk_func in self.registry.instance_funcs + self.registry.phys_dev_funcs:
-            if not vk_func.is_required():
+            if not vk_func.needs_exposing():
                 continue
 
             if not vk_func.needs_dispatch():
                 LOGGER.debug("skipping {0} in vulkan_instance_funcs".format(vk_func.name))
                 continue
 
-            f.write("    {0};\n".format(vk_func.pfn(conv=vk_func.needs_conversion())))
+            f.write("    {0};\n".format(vk_func.pfn()))
         f.write("};\n\n")
 
         f.write("#define ALL_VK_DEVICE_FUNCS() \\\n")
         first = True
         for vk_func in self.registry.device_funcs:
-            if not vk_func.is_required():
+            if not vk_func.needs_exposing():
                 continue
 
             if not vk_func.needs_dispatch():
@@ -2600,7 +2616,7 @@ class VkGenerator(object):
         f.write("#define ALL_VK_INSTANCE_FUNCS() \\\n")
         first = True
         for vk_func in self.registry.instance_funcs + self.registry.phys_dev_funcs:
-            if not vk_func.is_required():
+            if not vk_func.needs_exposing():
                 continue
 
             if not vk_func.needs_dispatch():

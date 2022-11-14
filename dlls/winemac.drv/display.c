@@ -176,18 +176,12 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
     val = CGDisplayModeGetIOFlags(display_mode);
     if (!set_setting_value(display_hkey, "IOFlags", val))
         goto fail;
-
-#if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
-    if (&CGDisplayModeGetPixelWidth != NULL && &CGDisplayModeGetPixelHeight != NULL)
-    {
-        val = CGDisplayModeGetPixelWidth(display_mode);
-        if (!set_setting_value(display_hkey, "PixelWidth", val))
-            goto fail;
-        val = CGDisplayModeGetPixelHeight(display_mode);
-        if (!set_setting_value(display_hkey, "PixelHeight", val))
-            goto fail;
-    }
-#endif
+    val = CGDisplayModeGetPixelWidth(display_mode);
+    if (!set_setting_value(display_hkey, "PixelWidth", val))
+        goto fail;
+    val = CGDisplayModeGetPixelHeight(display_mode);
+    if (!set_setting_value(display_hkey, "PixelHeight", val))
+        goto fail;
 
     pixel_encoding = CGDisplayModeCopyPixelEncoding(display_mode);
     len = CFStringGetLength(pixel_encoding);
@@ -370,17 +364,8 @@ static BOOL display_mode_matches_descriptor(CGDisplayModeRef mode, const struct 
     if (fabs(desc->refresh - mode_refresh) > 0.1)
         return FALSE;
 
-#if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
-    if (&CGDisplayModeGetPixelWidth != NULL && &CGDisplayModeGetPixelHeight != NULL)
-    {
-        if (CGDisplayModeGetPixelWidth(mode) != desc->pixel_width ||
-            CGDisplayModeGetPixelHeight(mode) != desc->pixel_height)
-            return FALSE;
-    }
-    else
-#endif
-    if (CGDisplayModeGetWidth(mode) != desc->pixel_width ||
-        CGDisplayModeGetHeight(mode) != desc->pixel_height)
+    if (CGDisplayModeGetPixelWidth(mode) != desc->pixel_width ||
+        CGDisplayModeGetPixelHeight(mode) != desc->pixel_height)
         return FALSE;
 
     mode_pixel_encoding = CGDisplayModeCopyPixelEncoding(mode);
@@ -420,7 +405,6 @@ static int get_default_bpp(void)
 }
 
 
-#if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
 static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_original)
 {
     CFDictionaryRef ret;
@@ -542,7 +526,6 @@ static BOOL mode_is_preferred(CGDisplayModeRef new_mode, CGDisplayModeRef old_mo
     /* Otherwise, prefer the mode with the smaller pixel size. */
     return new_width_pixels < old_width_pixels && new_height_pixels < old_height_pixels;
 }
-#endif
 
 
 static CFComparisonResult mode_compare(const void *p1, const void *p2, void *context)
@@ -605,56 +588,48 @@ static CFComparisonResult mode_compare(const void *p1, const void *p2, void *con
 static CFArrayRef copy_display_modes(CGDirectDisplayID display, BOOL include_unsupported)
 {
     CFArrayRef modes = NULL;
+    CFDictionaryRef options;
+    struct display_mode_descriptor* desc;
+    CFMutableDictionaryRef modes_by_size;
+    CFIndex i, count;
+    CGDisplayModeRef* mode_array;
 
-#if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
-    if (&CGDisplayModeGetPixelWidth != NULL && &CGDisplayModeGetPixelHeight != NULL)
+    options = CFDictionaryCreate(NULL, (const void**)&kCGDisplayShowDuplicateLowResolutionModes,
+                                 (const void**)&kCFBooleanTrue, 1, &kCFTypeDictionaryKeyCallBacks,
+                                 &kCFTypeDictionaryValueCallBacks);
+
+    modes = CGDisplayCopyAllDisplayModes(display, options);
+    if (options)
+        CFRelease(options);
+    if (!modes)
+        return NULL;
+
+    desc = create_original_display_mode_descriptor(display);
+
+    modes_by_size = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    count = CFArrayGetCount(modes);
+    for (i = 0; i < count; i++)
     {
-        CFDictionaryRef options;
-        struct display_mode_descriptor* desc;
-        CFMutableDictionaryRef modes_by_size;
-        CFIndex i, count;
-        CGDisplayModeRef* mode_array;
+        CGDisplayModeRef new_mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+        BOOL new_is_original = display_mode_matches_descriptor(new_mode, desc);
+        CFDictionaryRef key = create_mode_dict(new_mode, new_is_original);
+        CGDisplayModeRef old_mode = (CGDisplayModeRef)CFDictionaryGetValue(modes_by_size, key);
 
-        options = CFDictionaryCreate(NULL, (const void**)&kCGDisplayShowDuplicateLowResolutionModes,
-                                     (const void**)&kCFBooleanTrue, 1, &kCFTypeDictionaryKeyCallBacks,
-                                     &kCFTypeDictionaryValueCallBacks);
+        if (mode_is_preferred(new_mode, old_mode, desc, include_unsupported))
+            CFDictionarySetValue(modes_by_size, key, new_mode);
 
-        modes = CGDisplayCopyAllDisplayModes(display, options);
-        if (options)
-            CFRelease(options);
-        if (!modes)
-            return NULL;
-
-        desc = create_original_display_mode_descriptor(display);
-
-        modes_by_size = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        count = CFArrayGetCount(modes);
-        for (i = 0; i < count; i++)
-        {
-            CGDisplayModeRef new_mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-            BOOL new_is_original = display_mode_matches_descriptor(new_mode, desc);
-            CFDictionaryRef key = create_mode_dict(new_mode, new_is_original);
-            CGDisplayModeRef old_mode = (CGDisplayModeRef)CFDictionaryGetValue(modes_by_size, key);
-
-            if (mode_is_preferred(new_mode, old_mode, desc, include_unsupported))
-                CFDictionarySetValue(modes_by_size, key, new_mode);
-
-            CFRelease(key);
-        }
-
-        free_display_mode_descriptor(desc);
-        CFRelease(modes);
-
-        count = CFDictionaryGetCount(modes_by_size);
-        mode_array = malloc(count * sizeof(mode_array[0]));
-        CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void **)mode_array);
-        modes = CFArrayCreate(NULL, (const void **)mode_array, count, &kCFTypeArrayCallBacks);
-        free(mode_array);
-        CFRelease(modes_by_size);
+        CFRelease(key);
     }
-    else
-#endif
-        modes = CGDisplayCopyAllDisplayModes(display, NULL);
+
+    free_display_mode_descriptor(desc);
+    CFRelease(modes);
+
+    count = CFDictionaryGetCount(modes_by_size);
+    mode_array = malloc(count * sizeof(mode_array[0]));
+    CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void **)mode_array);
+    modes = CFArrayCreate(NULL, (const void **)mode_array, count, &kCFTypeArrayCallBacks);
+    free(mode_array);
+    CFRelease(modes_by_size);
 
     if (modes)
     {
@@ -683,24 +658,6 @@ void check_retina_status(void)
         if (new_value != retina_on)
             macdrv_set_cocoa_retina_mode(new_value);
     }
-}
-
-static BOOL get_primary_adapter(WCHAR *name)
-{
-    DISPLAY_DEVICEW dd;
-    DWORD i;
-
-    dd.cb = sizeof(dd);
-    for (i = 0; !NtUserEnumDisplayDevices(NULL, i, &dd, 0); ++i)
-    {
-        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
-        {
-            lstrcpyW(name, dd.DeviceName);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
 }
 
 static BOOL is_detached_mode(const DEVMODEW *mode)
@@ -769,9 +726,8 @@ static CGDisplayModeRef find_best_display_mode(DEVMODEW *devmode, CFArrayRef dis
  *              ChangeDisplaySettings  (MACDRV.@)
  *
  */
-LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid)
+LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd, DWORD flags, LPVOID lpvoid)
 {
-    WCHAR primary_adapter[CCHDEVICENAME];
     LONG ret = DISP_CHANGE_SUCCESSFUL;
     DEVMODEW *mode;
     int bpp;
@@ -781,12 +737,9 @@ LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, HWND hwnd, DWORD flags, L
     struct display_mode_descriptor *desc;
     CGDisplayModeRef best_display_mode;
 
-    TRACE("%p %p 0x%08x %p\n", displays, hwnd, flags, lpvoid);
+    TRACE("%p %s %p 0x%08x %p\n", displays, debugstr_w(primary_name), hwnd, flags, lpvoid);
 
     init_original_display_mode();
-
-    if (!get_primary_adapter(primary_adapter))
-        return DISP_CHANGE_FAILED;
 
     if (macdrv_get_displays(&macdrv_displays, &num_displays))
         return DISP_CHANGE_FAILED;
@@ -804,7 +757,7 @@ LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, HWND hwnd, DWORD flags, L
 
     for (mode = displays; mode->dmSize && !ret; mode = NEXT_DEVMODEW(mode))
     {
-        if (wcsicmp(primary_adapter, mode->dmDeviceName))
+        if (wcsicmp(primary_name, mode->dmDeviceName))
         {
             FIXME("Changing non-primary adapter settings is currently unsupported.\n");
             continue;
@@ -830,9 +783,7 @@ LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, HWND hwnd, DWORD flags, L
                 bpp, mode->dmDisplayFrequency);
             ret = DISP_CHANGE_BADMODE;
         }
-        else if (macdrv_set_display_mode(&macdrv_displays[0], best_display_mode))
-            macdrv_init_display_devices(TRUE);
-        else
+        else if (!macdrv_set_display_mode(&macdrv_displays[0], best_display_mode))
         {
             WARN("Failed to set display mode\n");
             ret = DISP_CHANGE_FAILED;
@@ -917,7 +868,7 @@ static DEVMODEW *display_get_modes(CGDirectDisplayID display_id, int *modes_coun
  *              GetCurrentDisplaySettings  (MACDRV.@)
  *
  */
-BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR devname, LPDEVMODEW devmode)
+BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR devname, BOOL is_primary, LPDEVMODEW devmode)
 {
     struct macdrv_display *displays = NULL;
     int num_displays, display_idx;
@@ -925,7 +876,7 @@ BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR devname, LPDEVMODEW devmode)
     CGDirectDisplayID display_id;
     WCHAR *end;
 
-    TRACE("%s, %p + %hu\n", debugstr_w(devname), devmode, devmode->dmSize);
+    TRACE("%s, %u, %p + %hu\n", debugstr_w(devname), is_primary, devmode, devmode->dmSize);
 
     init_original_display_mode();
 

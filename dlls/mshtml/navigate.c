@@ -1184,8 +1184,10 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
                 (nsIRequest*)&This->nschannel->nsIHttpChannel_iface, This->nscontext,
                 &This->nsstream->nsIInputStream_iface, This->bsc.read-This->nsstream->buf_size,
                 This->nsstream->buf_size);
-        if(NS_FAILED(nsres))
-            ERR("OnDataAvailable failed: %08lx\n", nsres);
+        if(NS_FAILED(nsres)) {
+            WARN("OnDataAvailable failed: %08lx\n", nsres);
+            return map_nsresult(nsres);
+        }
 
         if(This->nsstream->buf_size == sizeof(This->nsstream->buf)) {
             ERR("buffer is full\n");
@@ -2150,7 +2152,7 @@ static HRESULT navigate_fragment(HTMLOuterWindow *window, IUri *uri)
         swprintf(selector, ARRAY_SIZE(selector_formatW)+SysStringLen(frag), selector_formatW, frag);
         nsAString_InitDepend(&selector_str, selector);
         /* NOTE: Gecko doesn't set result to NULL if there is no match, so nselem must be initialized */
-        nsres = nsIDOMHTMLDocument_QuerySelector(window->base.inner_window->doc->nsdoc, &selector_str, &nselem);
+        nsres = nsIDOMDocument_QuerySelector(window->base.inner_window->doc->dom_document, &selector_str, &nselem);
         nsAString_Finish(&selector_str);
         heap_free(selector);
         if(NS_SUCCEEDED(nsres) && nselem) {
@@ -2447,6 +2449,7 @@ HRESULT hlink_frame_navigate(HTMLDocumentObj *doc, LPCWSTR url, nsChannel *nscha
 static HRESULT navigate_uri(HTMLOuterWindow *window, IUri *uri, const WCHAR *display_uri, const request_data_t *request_data,
         DWORD flags)
 {
+    DWORD post_data_len = request_data ? request_data->post_data_len : 0;
     nsWineURI *nsuri;
     HRESULT hres;
 
@@ -2456,7 +2459,6 @@ static HRESULT navigate_uri(HTMLOuterWindow *window, IUri *uri, const WCHAR *dis
         return E_UNEXPECTED;
 
     if(window->browser->doc->webbrowser) {
-        DWORD post_data_len = request_data ? request_data->post_data_len : 0;
         void *post_data = post_data_len ? request_data->post_data : NULL;
         const WCHAR *headers = request_data ? request_data->headers : NULL;
 
@@ -2482,6 +2484,10 @@ static HRESULT navigate_uri(HTMLOuterWindow *window, IUri *uri, const WCHAR *dis
         if(is_main_content_window(window))
             return super_navigate(window, uri, flags, headers, post_data, post_data_len);
     }
+
+    if(!(flags & BINDING_NOFRAG) && window->uri_nofrag && !post_data_len &&
+       compare_uri_ignoring_frag(window->uri_nofrag, uri))
+         return navigate_fragment(window, uri);
 
     if(is_main_content_window(window)) {
         BOOL cancel;

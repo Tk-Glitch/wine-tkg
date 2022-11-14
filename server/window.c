@@ -257,15 +257,18 @@ static unsigned int get_monitor_dpi( struct window *win )
 }
 
 /* link a window at the right place in the siblings list */
-static void link_window( struct window *win, struct window *previous )
+static int link_window( struct window *win, struct window *previous )
 {
+    struct list *old_prev;
+
     if (previous == WINPTR_NOTOPMOST)
     {
-        if (!(win->ex_style & WS_EX_TOPMOST) && win->is_linked) return;  /* nothing to do */
+        if (!(win->ex_style & WS_EX_TOPMOST) && win->is_linked) return 0;  /* nothing to do */
         win->ex_style &= ~WS_EX_TOPMOST;
         previous = WINPTR_TOP;  /* fallback to the HWND_TOP case */
     }
 
+    old_prev = win->is_linked ? win->entry.prev : NULL;
     list_remove( &win->entry );  /* unlink it from the previous location */
 
     if (previous == WINPTR_BOTTOM)
@@ -309,6 +312,7 @@ static void link_window( struct window *win, struct window *previous )
     }
 
     win->is_linked = 1;
+    return old_prev != win->entry.prev;
 }
 
 /* change the parent of a window (or unlink the window if the new parent is NULL) */
@@ -791,6 +795,21 @@ int is_window_transparent( user_handle_t window )
     struct window *win = get_user_object( window, USER_WINDOW );
     if (!win) return 0;
     return (win->ex_style & (WS_EX_LAYERED|WS_EX_TRANSPARENT)) == (WS_EX_LAYERED|WS_EX_TRANSPARENT);
+}
+
+static int is_window_using_parent_dc( struct window *win )
+{
+    return (win->style & (WS_POPUP|WS_CHILD)) == WS_CHILD && (get_class_style( win->class ) & CS_PARENTDC) != 0;
+}
+
+static int is_window_composited( struct window *win )
+{
+    return (win->ex_style & WS_EX_COMPOSITED) != 0 && !is_window_using_parent_dc(win);
+}
+
+static int is_parent_composited( struct window *win )
+{
+    return win->parent && is_window_composited( win->parent );
 }
 
 /* check if point is inside the window, and map to window dpi */
@@ -1716,15 +1735,26 @@ static unsigned int get_window_update_flags( struct window *win, struct window *
 /* expose the areas revealed by a vis region change on the window parent */
 /* returns the region exposed on the window itself (in client coordinates) */
 static struct region *expose_window( struct window *win, const rectangle_t *old_window_rect,
-                                     struct region *old_vis_rgn )
+                                     struct region *old_vis_rgn, int zorder_changed )
 {
     struct region *new_vis_rgn, *exposed_rgn;
+    int is_composited = is_parent_composited( win );
 
     if (!(new_vis_rgn = get_visible_region( win, DCX_WINDOW ))) return NULL;
 
+    if (is_composited && !zorder_changed &&
+        is_rect_equal( old_window_rect, &win->window_rect ) &&
+        is_region_equal( old_vis_rgn, new_vis_rgn ))
+    {
+        free_region( new_vis_rgn );
+        return NULL;
+    }
+
     if ((exposed_rgn = create_empty_region()))
     {
-        if (subtract_region( exposed_rgn, new_vis_rgn, old_vis_rgn ) && !is_region_empty( exposed_rgn ))
+        if ((is_composited ? union_region( exposed_rgn, new_vis_rgn, old_vis_rgn )
+                           : subtract_region( exposed_rgn, new_vis_rgn, old_vis_rgn )) &&
+            !is_region_empty( exposed_rgn ))
         {
             /* make it relative to the new client area */
             offset_region( exposed_rgn, win->window_rect.left - win->client_rect.left,
@@ -1743,9 +1773,8 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
         offset_region( new_vis_rgn, win->window_rect.left - old_window_rect->left,
                        win->window_rect.top - old_window_rect->top  );
 
-        if ((win->parent->style & WS_CLIPCHILDREN) ?
-            subtract_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ) :
-            xor_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
+        if (is_composited ? union_region( new_vis_rgn, old_vis_rgn, new_vis_rgn )
+                          : subtract_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
         {
             if (!is_region_empty( new_vis_rgn ))
             {
@@ -1773,6 +1802,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     rectangle_t rect;
     int client_changed, frame_changed;
     int visible = (win->style & WS_VISIBLE) || (swp_flags & SWP_SHOWWINDOW);
+    int zorder_changed = 0;
 
     if (win->parent && !is_visible( win->parent )) visible = 0;
 
@@ -1784,7 +1814,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     win->visible_rect = *visible_rect;
     win->surface_rect = *surface_rect;
     win->client_rect  = *client_rect;
-    if (!(swp_flags & SWP_NOZORDER) && win->parent) link_window( win, previous );
+    if (!(swp_flags & SWP_NOZORDER) && win->parent) zorder_changed |= link_window( win, previous );
     if (swp_flags & SWP_SHOWWINDOW) win->style |= WS_VISIBLE;
     else if (swp_flags & SWP_HIDEWINDOW) win->style &= ~WS_VISIBLE;
 
@@ -1813,7 +1843,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     /* expose anything revealed by the change */
 
     if (!(swp_flags & SWP_NOREDRAW))
-        exposed_rgn = expose_window( win, &old_window_rect, old_vis_rgn );
+        exposed_rgn = expose_window( win, &old_window_rect, old_vis_rgn, zorder_changed );
 
     if (!(win->style & WS_VISIBLE))
     {
@@ -1944,7 +1974,7 @@ static void set_window_region( struct window *win, struct region *region, int re
     win->win_region = region;
 
     /* expose anything revealed by the change */
-    if (old_vis_rgn && ((exposed_rgn = expose_window( win, &win->window_rect, old_vis_rgn ))))
+    if (old_vis_rgn && ((exposed_rgn = expose_window( win, &win->window_rect, old_vis_rgn, 0 ))))
     {
         redraw_window( win, exposed_rgn, 1, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
         free_region( exposed_rgn );
@@ -1977,7 +2007,7 @@ void free_window_handle( struct window *win )
         win->style &= ~WS_VISIBLE;
         if (vis_rgn)
         {
-            struct region *exposed_rgn = expose_window( win, &win->window_rect, vis_rgn );
+            struct region *exposed_rgn = expose_window( win, &win->window_rect, vis_rgn, 0 );
             if (exposed_rgn) free_region( exposed_rgn );
             free_region( vis_rgn );
         }

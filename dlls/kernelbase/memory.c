@@ -255,6 +255,8 @@ LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFile3( HANDLE handle, HANDLE process, P
     LARGE_INTEGER off;
     void *addr;
 
+    if (!process) process = GetCurrentProcess();
+
     addr = baseaddr;
     off.QuadPart = offset;
     if (!set_ntstatus( NtMapViewOfSectionEx( handle, process, &addr, &off, &size, alloc_type, protection,
@@ -447,6 +449,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH VirtualFree( void *addr, SIZE_T size, DWORD type )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH VirtualFreeEx( HANDLE process, void *addr, SIZE_T size, DWORD type )
 {
+    if (type == MEM_RELEASE && size)
+    {
+        WARN( "Trying to release memory with specified size.\n" );
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
     return set_ntstatus( NtFreeVirtualMemory( process, &addr, &size, type ));
 }
 
@@ -835,7 +843,7 @@ HGLOBAL WINAPI DECLSPEC_HOTPATCH GlobalFree( HLOCAL handle )
  */
 HLOCAL WINAPI DECLSPEC_HOTPATCH LocalAlloc( UINT flags, SIZE_T size )
 {
-    DWORD heap_flags = HEAP_ADD_USER_INFO;
+    DWORD heap_flags = 0x200 | HEAP_ADD_USER_INFO;
     HANDLE heap = GetProcessHeap();
     struct mem_entry *mem;
     HLOCAL handle;
@@ -974,7 +982,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH LocalLock( HLOCAL handle )
  */
 HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT flags )
 {
-    DWORD heap_flags = HEAP_ADD_USER_INFO | HEAP_NO_SERIALIZE;
+    DWORD heap_flags = 0x200 | HEAP_ADD_USER_INFO | HEAP_NO_SERIALIZE;
     HANDLE heap = GetProcessHeap();
     struct mem_entry *mem;
     HLOCAL ret = 0;

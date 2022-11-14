@@ -118,7 +118,6 @@ void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *a
 void     (WINAPI *p__wine_ctrl_routine)(void*);
 SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock = NULL;
 
-static NTSTATUS (CDECL *p__wine_set_unix_funcs)( int version, const struct unix_funcs *funcs );
 static void *p__wine_syscall_dispatcher;
 
 static void * const syscalls[] =
@@ -399,7 +398,7 @@ const char **dll_paths = NULL;
 const char **system_dll_paths = NULL;
 const char *user_name = NULL;
 SECTION_IMAGE_INFORMATION main_image_info = { NULL };
-static HMODULE ntdll_module;
+HMODULE ntdll_module = 0;
 static const IMAGE_EXPORT_DIRECTORY *ntdll_exports;
 
 /* adjust an array of pointers to make them into RVAs */
@@ -1107,13 +1106,12 @@ static void load_ntdll_functions( HMODULE module )
     GET_FUNC( LdrSystemDllInitBlock );
     GET_FUNC( RtlUserThreadStart );
     GET_FUNC( __wine_ctrl_routine );
-    GET_FUNC( __wine_set_unix_funcs );
     GET_FUNC( __wine_syscall_dispatcher );
-#ifdef __i386__
+#ifdef __aarch64__
     {
-        void **p__wine_ldt_copy;
-        GET_FUNC( __wine_ldt_copy );
-        *p__wine_ldt_copy = &__wine_ldt_copy;
+        void **p__wine_current_teb;
+        GET_FUNC( __wine_current_teb );
+        *p__wine_current_teb = NtCurrentTeb;
     }
 #endif
 #undef GET_FUNC
@@ -1413,9 +1411,11 @@ NTSTATUS WINAPI __wine_unix_call( unixlib_handle_t handle, unsigned int code, vo
 /***********************************************************************
  *           load_so_dll
  */
-static NTSTATUS CDECL load_so_dll( UNICODE_STRING *nt_name, void **module )
+static NTSTATUS load_so_dll( void *args )
 {
     static const WCHAR soW[] = {'.','s','o',0};
+    struct load_so_dll_params *params = args;
+    UNICODE_STRING *nt_name = &params->nt_name;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING redir;
     pe_image_info_t info;
@@ -1437,7 +1437,7 @@ static NTSTATUS CDECL load_so_dll( UNICODE_STRING *nt_name, void **module )
     len = nt_name->Length / sizeof(WCHAR);
     if (len > 3 && !wcsicmp( nt_name->Buffer + len - 3, soW )) nt_name->Length -= 3 * sizeof(WCHAR);
 
-    status = dlopen_dll( unix_name, nt_name, module, &info, FALSE );
+    status = dlopen_dll( unix_name, nt_name, params->module, &info, FALSE );
     free( unix_name );
     free( redir.Buffer );
     return status;
@@ -1967,7 +1967,7 @@ static BOOL get_relocbase(caddr_t mapbase, caddr_t *relocbase)
 /*************************************************************************
  *              init_builtin_dll
  */
-static void CDECL init_builtin_dll( void *module )
+static NTSTATUS init_builtin_dll( void *module )
 {
 #ifdef HAVE_DLINFO
     void *handle = NULL;
@@ -1981,10 +1981,10 @@ static void CDECL init_builtin_dll( void *module )
     const Elf32_Dyn *dyn;
 #endif
 
-    if (!(handle = get_builtin_so_handle( module ))) return;
+    if (!(handle = get_builtin_so_handle( module ))) return STATUS_SUCCESS;
     if (dlinfo( handle, RTLD_DI_LINKMAP, &map )) map = NULL;
     release_builtin_module( module );
-    if (!map) return;
+    if (!map) return STATUS_SUCCESS;
 
     for (dyn = map->l_ld; dyn->d_tag; dyn++)
     {
@@ -2012,6 +2012,7 @@ static void CDECL init_builtin_dll( void *module )
         for (i = 0; i < init_arraysz / sizeof(*init_array); i++)
             init_array[i]( main_argc, main_argv, main_envp );
 #endif
+    return STATUS_SUCCESS;
 }
 
 
@@ -2186,17 +2187,30 @@ static ULONG_PTR get_image_address(void)
 
 
 /***********************************************************************
- *           unix_funcs
+ *           __wine_unix_call_funcs
  */
-static struct unix_funcs unix_funcs =
+const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     load_so_dll,
     init_builtin_dll,
     unwind_builtin_dll,
-    RtlGetSystemTimePrecise,
-#ifdef __aarch64__
-    NtCurrentTeb,
-#endif
+    system_time_precise,
+};
+
+
+static NTSTATUS wow64_load_so_dll( void *args ) { return STATUS_INVALID_IMAGE_FORMAT; }
+static NTSTATUS wow64_init_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
+static NTSTATUS wow64_unwind_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
+
+/***********************************************************************
+ *           __wine_unix_call_wow64_funcs
+ */
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+{
+    wow64_load_so_dll,
+    wow64_init_builtin_dll,
+    wow64_unwind_builtin_dll,
+    system_time_precise,
 };
 
 BOOL ac_odyssey;
@@ -2233,12 +2247,10 @@ static void hacks_init(void)
 static void start_main_thread(void)
 {
     SYSTEM_SERVICE_TABLE syscall_table = { (ULONG_PTR *)syscalls, NULL, ARRAY_SIZE(syscalls), syscall_args };
-    NTSTATUS status;
     TEB *teb = virtual_alloc_first_teb();
 
     signal_init_threading();
     signal_alloc_thread( teb );
-    signal_init_thread( teb );
     dbg_init();
     startup_info_size = server_init_process();
     hacks_init();
@@ -2260,12 +2272,6 @@ static void start_main_thread(void)
     if (main_image_info.Machine != current_machine) load_wow64_ntdll( main_image_info.Machine );
     load_apiset_dll();
     ntdll_init_syscalls( 0, &syscall_table, p__wine_syscall_dispatcher );
-    status = p__wine_set_unix_funcs( NTDLL_UNIXLIB_VERSION, &unix_funcs );
-    if (status == STATUS_REVISION_MISMATCH)
-    {
-        ERR( "ntdll library version mismatch\n" );
-        NtTerminateProcess( GetCurrentProcess(), status );
-    }
     server_init_process_done();
 }
 
@@ -2410,6 +2416,9 @@ static void apple_create_wine_thread( void *arg )
 
     pthread_attr_init( &attr );
     pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_JOINABLE );
+    /* Use the same QoS class as the process main thread (user-interactive). */
+    if (&pthread_attr_set_qos_class_np)
+        pthread_attr_set_qos_class_np( &attr, QOS_CLASS_USER_INTERACTIVE, 0 );
     if (pthread_create( &thread, &attr, apple_wine_thread, NULL )) exit(1);
     pthread_attr_destroy( &attr );
 }
@@ -2430,10 +2439,13 @@ static void apple_main_thread(void)
 
     if (!pthread_main_np()) return;
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     /* Multi-processing Services can get confused about the main thread if the
      * first time it's used is on a secondary thread.  Use it here to make sure
      * that doesn't happen. */
     MPTaskIsPreemptive(MPCurrentTaskID());
+#pragma clang diagnostic pop
 
     /* Give ourselves the best chance of having the distributed notification
      * center scheduled on this thread's run loop.  In theory, it's scheduled

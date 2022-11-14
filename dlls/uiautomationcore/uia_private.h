@@ -59,10 +59,13 @@ struct uia_node {
     IWineUiaProvider *prov[PROV_TYPE_COUNT];
     DWORD git_cookie[PROV_TYPE_COUNT];
     int prov_count;
+    int parent_link_idx;
+    int creator_prov_idx;
 
     HWND hwnd;
     BOOL nested_node;
     BOOL disconnected;
+    int creator_prov_type;
     struct list prov_thread_list_entry;
     struct list node_map_list_entry;
     struct uia_provider_thread_map_entry *map;
@@ -79,6 +82,8 @@ struct uia_provider {
 
     IRawElementProviderSimple *elprov;
     BOOL return_nested_node;
+    BOOL parent_check_ran;
+    BOOL has_parent;
 };
 
 static inline struct uia_provider *impl_from_IWineUiaProvider(IWineUiaProvider *iface)

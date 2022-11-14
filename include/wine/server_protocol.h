@@ -477,6 +477,7 @@ enum apc_type
     APC_USER,
     APC_ASYNC_IO,
     APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_ALLOC_EX,
     APC_VIRTUAL_FREE,
     APC_VIRTUAL_QUERY,
     APC_VIRTUAL_PROTECT,
@@ -518,6 +519,16 @@ typedef union
         mem_size_t       zero_bits;
         unsigned int     prot;
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     op_type;
+        client_ptr_t     addr;
+        mem_size_t       size;
+        mem_size_t       limit;
+        mem_size_t       align;
+        unsigned int     prot;
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;
@@ -575,6 +586,7 @@ typedef union
         enum apc_type    type;
         int              __pad;
         client_ptr_t     addr;
+        unsigned int     flags;
     } unmap_view;
     struct
     {
@@ -613,6 +625,13 @@ typedef union
         client_ptr_t     addr;
         mem_size_t       size;
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        client_ptr_t     addr;
+        mem_size_t       size;
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;
@@ -6563,7 +6582,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 758
+#define SERVER_PROTOCOL_VERSION 760
 
 /* ### protocol_version end ### */
 
