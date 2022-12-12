@@ -232,7 +232,6 @@ extern void virtual_set_force_exec( BOOL enable ) DECLSPEC_HIDDEN;
 extern void virtual_set_large_address_space(void) DECLSPEC_HIDDEN;
 extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
                                             SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
-extern void release_builtin_module( void *module ) DECLSPEC_HIDDEN;
 extern void *get_builtin_so_handle( void *module ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_builtin_unixlib( void *module, const char *name ) DECLSPEC_HIDDEN;
 extern NTSTATUS unwind_builtin_dll( void *args ) DECLSPEC_HIDDEN;
@@ -253,6 +252,7 @@ extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int),
 extern SYSTEM_SERVICE_TABLE KeServiceDescriptorTable[4] DECLSPEC_HIDDEN;
 extern void __wine_syscall_dispatcher(void) DECLSPEC_HIDDEN;
 extern void WINAPI DECLSPEC_NORETURN __wine_syscall_dispatcher_return( void *frame, ULONG_PTR retval ) DECLSPEC_HIDDEN;
+extern void __wine_unix_call_dispatcher(void) DECLSPEC_HIDDEN;
 extern NTSTATUS signal_set_full_context( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size ) DECLSPEC_HIDDEN;

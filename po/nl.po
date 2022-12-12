@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2022-09-26 12:00+0200\n"
+"PO-Revision-Date: 2022-12-03 18:45+0100\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -785,7 +785,7 @@ msgstr "Geheel &woord"
 msgid "Match &Case"
 msgstr "Gelijke &hoofd-/kleine letters"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
+#: dlls/comdlg32/comdlg32.rc:325
 msgid "Direction"
 msgstr "Oriëntatie"
 
@@ -3759,31 +3759,92 @@ msgid ""
 "updated here until you restart this applet."
 msgstr ""
 "Na het uit- of inschakelen van een apparaat zullen de aangesloten joysticks "
-"niet vernieuwd worden totdat deze applicatie herstart wordt."
+"niet vernieuwd worden totdat dit programma herstart wordt."
 
 #: dlls/joy.cpl/joy.rc:55
-msgid "Test Joystick"
-msgstr "Joystick testen"
+msgid "DInput"
+msgstr "DInput"
 
 #: dlls/joy.cpl/joy.rc:59
+msgid "Axes"
+msgstr "Assen"
+
+#: dlls/joy.cpl/joy.rc:60
+msgid "POVs"
+msgstr "Gezichtsveld"
+
+#: dlls/joy.cpl/joy.rc:61
 msgid "Buttons"
 msgstr "Knoppen"
 
-#: dlls/joy.cpl/joy.rc:68
-msgid "Test Force Feedback"
-msgstr "Force Feedback Testen"
+#: dlls/joy.cpl/joy.rc:62
+msgid "Force Feedback Effect"
+msgstr "Force Feedback Effect"
 
-#: dlls/joy.cpl/joy.rc:72
-msgid "Available Effects"
-msgstr "Beschikbare effecten"
-
-#: dlls/joy.cpl/joy.rc:74
+#: dlls/joy.cpl/joy.rc:64
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "Druk op een knop op de controller om het gewenste effect te activeren. De "
 "richting van het effect kan veranderd worden met de assen van de controller."
+
+#: dlls/joy.cpl/joy.rc:70
+msgid "XInput"
+msgstr "XInput"
+
+#: dlls/joy.cpl/joy.rc:73
+msgid "User #0"
+msgstr "Gebruiker 0"
+
+#: dlls/joy.cpl/joy.rc:74
+msgid "User #1"
+msgstr "Gebruiker 1"
+
+#: dlls/joy.cpl/joy.rc:75
+msgid "User #2"
+msgstr "Gebruiker 2"
+
+#: dlls/joy.cpl/joy.rc:76
+msgid "User #3"
+msgstr "Gebruiker 3"
+
+#: dlls/joy.cpl/joy.rc:78
+msgid ""
+"No user detected on slot #0, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 0. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:82
+msgid ""
+"No user detected on slot #1, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 1. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:86
+msgid ""
+"No user detected on slot #2, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 2. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:90
+msgid ""
+"No user detected on slot #3, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 3. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:95 dlls/joy.cpl/joy.rc:96 dlls/joy.cpl/joy.rc:97
+#: dlls/joy.cpl/joy.rc:98
+msgid "Rumble"
+msgstr "Trillen"
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"

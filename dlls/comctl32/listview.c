@@ -958,7 +958,7 @@ static BOOL notify_dispinfoT(const LISTVIEW_INFO *infoPtr, UINT code, LPNMLVDISP
             *pdi->item.pszText = 0; /* make sure we don't process garbage */
         }
 
-        buffer = Alloc( (return_ansi ? sizeof(WCHAR) : sizeof(CHAR)) * length);
+        buffer = Alloc( length * (return_ansi ? sizeof(WCHAR) : sizeof(CHAR)) );
         if (!buffer) return FALSE;
 
         if (return_ansi)
@@ -3118,7 +3118,7 @@ static void ranges_assert(RANGES ranges, LPCSTR desc, const char *file, int line
 
 static RANGES ranges_create(int count)
 {
-    RANGES ranges = Alloc(sizeof(struct tagRANGES));
+    RANGES ranges = Alloc(sizeof(*ranges));
     if (!ranges) return NULL;
     ranges->hdpa = DPA_Create(count);
     if (ranges->hdpa) return ranges;
@@ -3131,7 +3131,7 @@ static void ranges_clear(RANGES ranges)
     INT i;
 	
     for(i = 0; i < DPA_GetPtrCount(ranges->hdpa); i++)
-	Free(DPA_GetPtr(ranges->hdpa, i));
+        Free(DPA_GetPtr(ranges->hdpa, i));
     DPA_DeleteAllPtrs(ranges->hdpa);
 }
 
@@ -3153,7 +3153,7 @@ static RANGES ranges_clone(RANGES ranges)
 
     for (i = 0; i < DPA_GetPtrCount(ranges->hdpa); i++)
     {
-        RANGE *newrng = Alloc(sizeof(RANGE));
+        RANGE *newrng = Alloc(sizeof(*newrng));
 	if (!newrng) goto fail;
 	*newrng = *((RANGE*)DPA_GetPtr(ranges->hdpa, i));
         if (!DPA_SetPtr(clone->hdpa, i, newrng))
@@ -3249,7 +3249,7 @@ static BOOL ranges_add(RANGES ranges, RANGE range)
 	TRACE("Adding new range\n");
 
 	/* create the brand new range to insert */	
-        newrgn = Alloc(sizeof(RANGE));
+        newrgn = Alloc(sizeof(*newrgn));
 	if(!newrgn) goto fail;
 	*newrgn = range;
 	
@@ -3362,7 +3362,7 @@ static BOOL ranges_del(RANGES ranges, RANGE range)
 	{
 	    RANGE *newrgn;
 
-	    if (!(newrgn = Alloc(sizeof(RANGE)))) goto fail;
+	    if (!(newrgn = Alloc(sizeof(*newrgn)))) goto fail;
 	    newrgn->lower = chkrgn->lower;
 	    newrgn->upper = range.lower;
 	    chkrgn->lower = range.upper;
@@ -4422,7 +4422,7 @@ static BOOL set_sub_item(const LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, 
 	SUBITEM_INFO *tmpSubItem;
 	INT i;
 
-	lpSubItem = Alloc(sizeof(SUBITEM_INFO));
+	lpSubItem = Alloc(sizeof(*lpSubItem));
 	if (!lpSubItem) return FALSE;
 	/* we could binary search here, if need be...*/
   	for (i = 1; i < DPA_GetPtrCount(hdpaSubItems); i++)
@@ -7788,14 +7788,14 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
 
     if (!is_assignable_item(lpLVItem, infoPtr->dwStyle)) return -1;
 
-    if (!(lpItem = Alloc(sizeof(ITEM_INFO)))) return -1;
+    if (!(lpItem = Alloc(sizeof(*lpItem)))) return -1;
     
     /* insert item in listview control data structure */
     if ( !(hdpaSubItems = DPA_Create(8)) ) goto fail;
     if ( !DPA_SetPtr(hdpaSubItems, 0, lpItem) ) assert (FALSE);
 
     /* link with id struct */
-    if (!(lpID = Alloc(sizeof(ITEM_ID)))) goto fail;
+    if (!(lpID = Alloc(sizeof(*lpID)))) goto fail;
     lpItem->id = lpID;
     lpID->item = hdpaSubItems;
     lpID->id = get_next_itemid(infoPtr);
@@ -8248,7 +8248,7 @@ static INT LISTVIEW_InsertColumnT(LISTVIEW_INFO *infoPtr, INT nColumn,
     if (nNewColumn != nColumn) ERR("nColumn=%d, nNewColumn=%d\n", nColumn, nNewColumn);
    
     /* create our own column info */ 
-    if (!(lpColumnInfo = Alloc(sizeof(COLUMN_INFO)))) goto fail;
+    if (!(lpColumnInfo = Alloc(sizeof(*lpColumnInfo)))) goto fail;
     if (DPA_InsertPtr(infoPtr->hdpaColumns, nNewColumn, lpColumnInfo) == -1) goto fail;
 
     if (lpColumn->mask & LVCF_FMT) lpColumnInfo->fmt = lpColumn->fmt;
@@ -8296,8 +8296,8 @@ fail:
     if (nNewColumn != -1) SendMessageW(infoPtr->hwndHeader, HDM_DELETEITEM, nNewColumn, 0);
     if (lpColumnInfo)
     {
-	DPA_DeletePtr(infoPtr->hdpaColumns, nNewColumn);
-	Free(lpColumnInfo);
+        DPA_DeletePtr(infoPtr->hdpaColumns, nNewColumn);
+        Free(lpColumnInfo);
     }
     return -1;
 }
@@ -9546,7 +9546,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, WPARAM wParam, const CREATESTRUCTW *
   TRACE("(lpcs=%p)\n", lpcs);
 
   /* initialize info pointer */
-  infoPtr = Alloc(sizeof(LISTVIEW_INFO));
+  infoPtr = Alloc(sizeof(*infoPtr));
   if (!infoPtr) return FALSE;
 
   SetWindowLongPtrW(hwnd, 0, (DWORD_PTR)infoPtr);
@@ -10505,7 +10505,6 @@ static LRESULT LISTVIEW_NCDestroy(LISTVIEW_INFO *infoPtr)
 
   SetWindowLongPtrW(infoPtr->hwndSelf, 0, 0);
 
-  /* free listview info pointer*/
   Free(infoPtr);
 
   return 0;

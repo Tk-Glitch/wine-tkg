@@ -90,6 +90,8 @@ sync_test("performance timing", function() {
     ok(performance.timing.domComplete >= performance.timing.domContentLoadedEventEnd, "domComplete < domContentLoadedEventEnd");
     ok(performance.timing.loadEventStart >= performance.timing.domComplete, "loadEventStart < domComplete");
     ok(performance.timing.loadEventEnd >= performance.timing.loadEventStart, "loadEventEnd < loadEventStart");
+    ok(performance.navigation.type === 0, "navigation type = " + performance.navigation.type);
+    ok(performance.navigation.redirectCount === 0, "redirectCount = " + performance.navigation.redirectCount);
 });
 
 sync_test("page transition events", function() {
@@ -2195,6 +2197,64 @@ sync_test("nullDisp", function() {
         ok(false, "expected exception for new nullDisp");
     }catch(e) {
         ok(e.number === 0xa138f - 0x80000000, "new nullDisp threw " + e.number);
+    }
+});
+
+sync_test("invalid selectors", function() {
+    var v = document.documentMode, body = document.body, i;
+    if(v < 8)
+        return;
+
+    var selectors = [
+        "[s!='']",
+        "*,:x",
+        "*,##",
+        ":x",
+        "##",
+        "*,",
+        ","
+    ];
+
+    for(i = 0; i < selectors.length; i++) {
+        try {
+            body.querySelector(selectors[i]);
+            ok(false, "body.querySelector(\"" + selectors[i] + "\" did not throw exception");
+        }catch(e) {
+            if(v < 9)
+                ok(e.number === 0x70057 - 0x80000000, "body.querySelector(\"" + selectors[i] + "\" threw " + e.number);
+            else {
+                todo_wine.
+                ok(e.name === (v < 10 ? undefined : "SyntaxError"), "body.querySelector(\"" + selectors[i] + "\" threw " + e.name);
+            }
+        }
+        try {
+            body.querySelectorAll(selectors[i]);
+            ok(false, "body.querySelectorAll(\"" + selectors[i] + "\" did not throw exception");
+        }catch(e) {
+            if(v < 9)
+                ok(e.number === 0x70057 - 0x80000000, "body.querySelectorAll(\"" + selectors[i] + "\" threw " + e.number);
+            else {
+                todo_wine.
+                ok(e.name === (v < 10 ? undefined : "SyntaxError"), "body.querySelectorAll(\"" + selectors[i] + "\" threw " + e.name);
+            }
+        }
+    }
+
+    if(!body.msMatchesSelector)
+        return;
+
+    for(i = 0; i < selectors.length; i++) {
+        try {
+            body.msMatchesSelector(selectors[i]);
+            ok(false, "body.msMatchesSelector(\"" + selectors[i] + "\" did not throw exception");
+        }catch(e) {
+            if(v < 9)
+                ok(e.number === 0x70057 - 0x80000000, "body.msMatchesSelector(\"" + selectors[i] + "\" threw " + e.number);
+            else {
+                todo_wine.
+                ok(e.name === (v < 10 ? undefined : "SyntaxError"), "body.msMatchesSelector(\"" + selectors[i] + "\" threw " + e.name);
+            }
+        }
     }
 });
 

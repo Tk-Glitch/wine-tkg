@@ -1417,14 +1417,6 @@ typedef enum {
 /* SetupUninstallOEMInf Flags values */
 #define SUOI_FORCEDELETE 0x00000001
 
-LONG     WINAPI AddTagToGroupOrderList(PCWSTR lpGroupName, DWORD dwUnknown2, DWORD dwUnknown3);
-DWORD    WINAPI CaptureAndConvertAnsiArg(PCSTR lpSrc, PWSTR *lpDst);
-DWORD    WINAPI CaptureStringArg(PCWSTR lpSrc, PWSTR *lpDst);
-BOOL     WINAPI DelayedMove(PCWSTR lpExistingFileName, PCWSTR lpNewFileName);
-BOOL     WINAPI DoesUserHavePrivilege(PCWSTR lpPrivilegeName);
-PWSTR    WINAPI DuplicateString(PCWSTR lpSrc);
-BOOL     WINAPI EnablePrivilege(PCWSTR lpPrivilegeName, BOOL bEnable);
-BOOL     WINAPI FileExists(PCWSTR lpFileName, PWIN32_FIND_DATAW lpFileFindData);
 void     WINAPI InstallHinfSectionA( HWND hwnd, HINSTANCE handle, PCSTR cmdline, INT show );
 void     WINAPI InstallHinfSectionW( HWND hwnd, HINSTANCE handle, PCWSTR cmdline, INT show );
 #define         InstallHinfSection WINELIB_NAME_AW(InstallHinfSection)
@@ -1878,11 +1870,6 @@ BOOL     WINAPI SetupUninstallNewlyCopiedInfs(HSPFILEQ, DWORD, PVOID);
 BOOL     WINAPI SetupVerifyInfFileA(PCSTR, PSP_ALTPLATFORM_INFO, PSP_INF_SIGNER_INFO_A);
 BOOL     WINAPI SetupVerifyInfFileW(PCWSTR, PSP_ALTPLATFORM_INFO, PSP_INF_SIGNER_INFO_W);
 #define         SetupVerifyInfFile WINELIB_NAME_AW(SetupVerifyInfFile)
-DWORD    WINAPI StampFileSecurity(PCWSTR, PSECURITY_DESCRIPTOR);
-DWORD    WINAPI TakeOwnershipOfFile(PCWSTR);
-PSTR     WINAPI UnicodeToMultiByte(PCWSTR lpUnicodeStr, UINT uCodePage);
-BOOL     WINAPI UnmapAndCloseFile(HANDLE, HANDLE, PVOID);
-
 
 #ifdef __cplusplus
 }

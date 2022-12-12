@@ -26,9 +26,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 
-static void resource_check_usage(DWORD usage, unsigned int access)
+static void resource_check_usage(uint32_t usage, unsigned int access)
 {
-    static const DWORD handled = WINED3DUSAGE_DYNAMIC
+    static const uint32_t handled = WINED3DUSAGE_DYNAMIC
             | WINED3DUSAGE_STATICDECL
             | WINED3DUSAGE_OVERLAY
             | WINED3DUSAGE_SCRATCH
@@ -51,7 +51,7 @@ static void resource_check_usage(DWORD usage, unsigned int access)
 
 HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *device,
         enum wined3d_resource_type type, const struct wined3d_format *format,
-        enum wined3d_multisample_type multisample_type, unsigned int multisample_quality, unsigned int usage,
+        enum wined3d_multisample_type multisample_type, unsigned int multisample_quality, uint32_t usage,
         unsigned int bind_flags, unsigned int access, unsigned int width, unsigned int height, unsigned int depth,
         unsigned int size, void *parent, const struct wined3d_parent_ops *parent_ops,
         const struct wined3d_resource_ops *resource_ops)
@@ -265,9 +265,9 @@ void resource_unload(struct wined3d_resource *resource)
         ERR("Resource %p is being unloaded while mapped.\n", resource);
 }
 
-DWORD CDECL wined3d_resource_set_priority(struct wined3d_resource *resource, DWORD priority)
+unsigned int CDECL wined3d_resource_set_priority(struct wined3d_resource *resource, unsigned int priority)
 {
-    DWORD prev;
+    unsigned int prev;
 
     if (!(resource->usage & WINED3DUSAGE_MANAGED))
     {
@@ -281,7 +281,7 @@ DWORD CDECL wined3d_resource_set_priority(struct wined3d_resource *resource, DWO
     return prev;
 }
 
-DWORD CDECL wined3d_resource_get_priority(const struct wined3d_resource *resource)
+unsigned int CDECL wined3d_resource_get_priority(const struct wined3d_resource *resource)
 {
     TRACE("resource %p, returning %u.\n", resource, resource->priority);
     return resource->priority;
@@ -313,7 +313,7 @@ void CDECL wined3d_resource_get_desc(const struct wined3d_resource *resource, st
 }
 
 HRESULT CDECL wined3d_resource_map(struct wined3d_resource *resource, unsigned int sub_resource_idx,
-        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
+        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, uint32_t flags)
 {
     TRACE("resource %p, sub_resource_idx %u, map_desc %p, box %s, flags %#x.\n",
             resource, sub_resource_idx, map_desc, debug_box(box), flags);

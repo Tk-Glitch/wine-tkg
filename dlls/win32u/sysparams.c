@@ -3496,7 +3496,7 @@ DWORD get_dialog_base_units(void)
     {
         HDC hdc;
 
-        if ((hdc = NtUserGetDCEx( 0, 0, DCX_CACHE | DCX_WINDOW )))
+        if ((hdc = NtUserGetDC( 0 )))
         {
             cx = get_char_dimensions( hdc, NULL, &cy );
             NtUserReleaseDC( 0, hdc );
@@ -5436,6 +5436,15 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 
     case NtUserCallNoParam_GetProcessDefaultLayout:
         return process_layout;
+
+    case NtUserCallNoParam_GetProgmanWindow:
+        return HandleToUlong( get_progman_window() );
+
+    case NtUserCallNoParam_GetShellWindow:
+        return HandleToUlong( get_shell_window() );
+
+    case NtUserCallNoParam_GetTaskmanWindow:
+        return HandleToUlong( get_taskman_window() );
 
     case NtUserCallNoParam_ReleaseCapture:
         return release_capture();

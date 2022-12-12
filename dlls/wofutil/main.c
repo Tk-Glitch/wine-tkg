@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 Jacek Caban for CodeWeavers
+ * Copyright 2022 Hans Leidekker for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,10 +17,14 @@
  */
 
 #include <stdarg.h>
-
-#define COBJMACROS
-
-#define EXTERN_GUID DEFINE_GUID
-
 #include "windef.h"
-#include "winbase.h"
+#include "wofapi.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(wofutil);
+
+BOOL WINAPI WofShouldCompressBinaries( const WCHAR *volume, ULONG *alg )
+{
+    FIXME( "%s, %p\n", debugstr_w(volume), alg );
+    return FALSE;
+}

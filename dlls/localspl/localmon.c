@@ -65,6 +65,9 @@ static CRITICAL_SECTION xcv_handles_cs = { &xcv_handles_cs_debug, -1, 0, 0, 0, 0
 typedef struct {
     struct list entry;
     DWORD   type;
+    HANDLE  hfile;
+    DWORD   thread_id;
+    INT64   doc_handle;
     WCHAR   nameW[1];
 } port_t;
 
@@ -94,6 +97,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls( hinstDLL );
             localspl_instance = hinstDLL;
+            if (__wine_init_unix_call())
+                return FALSE;
+            UNIX_CALL(process_attach, NULL);
             break;
     }
     return TRUE;
@@ -248,7 +254,7 @@ getports_cleanup:
  * 
  */
 
-static DWORD get_type_from_name(LPCWSTR name)
+static DWORD get_type_from_name(LPCWSTR name, BOOL check_filename)
 {
     HANDLE  hfile;
 
@@ -272,6 +278,9 @@ static DWORD get_type_from_name(LPCWSTR name)
 
     if (!wcsncmp(name, L"LPR:", ARRAY_SIZE(L"LPR:") - 1))
         return PORT_IS_LPR;
+
+    if (!check_filename)
+        return PORT_IS_UNKNOWN;
 
     /* Must be a file or a directory. Does the file exist ? */
     hfile = CreateFileW(name, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -300,9 +309,12 @@ static DWORD get_type_from_local_name(LPCWSTR nameW)
     LPWSTR  myname = NULL;
     DWORD   needed = 0;
     DWORD   numentries = 0;
-    DWORD   id = 0;
+    DWORD   id;
 
-    TRACE("(%s)\n", debugstr_w(myname));
+    TRACE("(%s)\n", debugstr_w(nameW));
+
+    if ((id = get_type_from_name(nameW, FALSE)) >= PORT_IS_WINE)
+        return id;
 
     needed = get_ports_from_reg(1, NULL, 0, &numentries);
     pi = malloc(needed);
@@ -312,17 +324,17 @@ static DWORD get_type_from_local_name(LPCWSTR nameW)
     if (pi && needed && numentries > 0) {
         /* we got a number of valid ports. */
 
-        while ((myname == NULL) && (id < numentries))
+        for (id = 0; id < numentries; id++)
         {
             if (lstrcmpiW(nameW, pi[id].pName) == 0) {
                 TRACE("(%lu) found %s\n", id, debugstr_w(pi[id].pName));
                 myname = pi[id].pName;
+                break;
             }
-            id++;
         }
     }
 
-    id = (myname) ? get_type_from_name(myname) : PORT_IS_UNKNOWN;
+    id = myname ? get_type_from_name(myname, TRUE) : PORT_IS_UNKNOWN;
 
     free(pi);
     return id;
@@ -383,31 +395,6 @@ static BOOL WINAPI localmon_AddPortExW(LPWSTR pName, DWORD level, LPBYTE pBuffer
     if (res != ERROR_SUCCESS) SetLastError(ERROR_INVALID_PARAMETER);
     TRACE("=> %u with %lu\n", (res == ERROR_SUCCESS), GetLastError());
     return (res == ERROR_SUCCESS);
-}
-
-/*****************************************************
- * localmon_ClosePort [exported through MONITOREX]
- *
- * Close a
- *
- * PARAMS
- *  hPort  [i] The Handle to close
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE
- *
- */
-static BOOL WINAPI localmon_ClosePort(HANDLE hPort)
-{
-    port_t * port = hPort;
-
-    TRACE("(%p)\n", port);
-    EnterCriticalSection(&port_handles_cs);
-    list_remove(&port->entry);
-    LeaveCriticalSection(&port_handles_cs);
-    free(port);
-    return TRUE;
 }
 
 /*****************************************************
@@ -501,6 +488,8 @@ static BOOL WINAPI localmon_OpenPortW(LPWSTR pName, PHANDLE phPort)
     if (!port) return FALSE;
 
     port->type = type;
+    port->hfile = INVALID_HANDLE_VALUE;
+    port->doc_handle = 0;
     lstrcpyW(port->nameW, pName);
     *phPort = port;
 
@@ -509,6 +498,145 @@ static BOOL WINAPI localmon_OpenPortW(LPWSTR pName, PHANDLE phPort)
     LeaveCriticalSection(&port_handles_cs);
 
     TRACE("=> %p\n", port);
+    return TRUE;
+}
+
+static BOOL WINAPI localmon_StartDocPort(HANDLE hport, WCHAR *printer_name,
+        DWORD job_id, DWORD level, BYTE *info)
+{
+    DOC_INFO_1W *doc_info = (DOC_INFO_1W *)info;
+    port_t *port = hport;
+
+    TRACE("(%p %s %ld %ld %p)\n", hport, debugstr_w(printer_name),
+            job_id, level, doc_info);
+
+    if (port->type >= PORT_IS_WINE)
+    {
+        struct start_doc_params params;
+
+        if (port->doc_handle)
+            return TRUE;
+
+        port->thread_id = GetCurrentThreadId();
+
+        params.type = port->type;
+        params.port = port->nameW;
+        params.document_title = doc_info ? doc_info->pDocName : NULL;
+        params.doc = &port->doc_handle;
+        return UNIX_CALL(start_doc, &params);
+    }
+
+    if (port->type != PORT_IS_FILE)
+    {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        return FALSE;
+    }
+
+    if (port->hfile != INVALID_HANDLE_VALUE)
+        return TRUE;
+
+    if (!doc_info || !doc_info->pOutputFile)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    port->hfile = CreateFileW(doc_info->pOutputFile, GENERIC_WRITE,
+            FILE_SHARE_READ, NULL, OPEN_ALWAYS, 0, NULL);
+    return port->hfile != INVALID_HANDLE_VALUE;
+}
+
+static BOOL WINAPI localmon_WritePort(HANDLE hport, BYTE *buf, DWORD size,
+        DWORD *written)
+{
+    port_t *port = hport;
+
+    TRACE("(%p %p %lu %p)\n", hport, buf, size, written);
+
+    if (port->type >= PORT_IS_WINE)
+    {
+        struct write_doc_params params;
+        BOOL ret;
+
+        if (!port->doc_handle)
+        {
+            SetLastError(ERROR_INVALID_HANDLE);
+            return FALSE;
+        }
+
+        if (port->type == PORT_IS_CUPS && port->thread_id != GetCurrentThreadId())
+        {
+            FIXME("used from other thread\n");
+            SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+            return FALSE;
+        }
+
+        params.doc = port->doc_handle;
+        params.buf = buf;
+        params.size = size;
+        ret = UNIX_CALL(write_doc, &params);
+        *written = ret ? size : 0;
+        return ret;
+    }
+
+    return WriteFile(port->hfile, buf, size, written, NULL);
+}
+
+static BOOL WINAPI localmon_EndDocPort(HANDLE hport)
+{
+    port_t *port = hport;
+
+    TRACE("(%p)\n", hport);
+
+    if (port->type >= PORT_IS_WINE)
+    {
+        struct end_doc_params params;
+
+        if (!port->doc_handle)
+            return TRUE;
+
+        if (port->type == PORT_IS_CUPS && port->thread_id != GetCurrentThreadId())
+        {
+            FIXME("used from other thread\n");
+            SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+            return FALSE;
+        }
+
+        params.doc = port->doc_handle;
+        port->doc_handle = 0;
+        return UNIX_CALL(end_doc, &params);
+    }
+
+    CloseHandle(port->hfile);
+    port->hfile = INVALID_HANDLE_VALUE;
+    return TRUE;
+}
+
+/*****************************************************
+ * localmon_ClosePort [exported through MONITOREX]
+ *
+ * Close a Port
+ *
+ * PARAMS
+ *  hport  [i] The Handle to close
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ */
+static BOOL WINAPI localmon_ClosePort(HANDLE hport)
+{
+    port_t *port = hport;
+
+    TRACE("(%p)\n", port);
+
+    localmon_EndDocPort(hport);
+
+    EnterCriticalSection(&port_handles_cs);
+    list_remove(&port->entry);
+    LeaveCriticalSection(&port_handles_cs);
+    free(port);
     return TRUE;
 }
 
@@ -657,7 +785,7 @@ static DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE
 
     if (!lstrcmpW(pszDataName, L"PortIsValid")) {
         TRACE("InputData (%ld): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
-        res = get_type_from_name((LPCWSTR) pInputData);
+        res = get_type_from_name((LPCWSTR) pInputData, TRUE);
         TRACE("detected as %lu\n",  res);
         /* names, that we have recognized, are valid */
         if (res) return ERROR_SUCCESS;
@@ -755,10 +883,10 @@ LPMONITOREX WINAPI InitializePrintMonitor(LPWSTR regroot)
             localmon_EnumPortsW,
             localmon_OpenPortW,
             NULL,       /* localmon_OpenPortExW */ 
-            NULL,       /* localmon_StartDocPortW */
-            NULL,       /* localmon_WritePortW */
+            localmon_StartDocPort,
+            localmon_WritePort,
             NULL,       /* localmon_ReadPortW */
-            NULL,       /* localmon_EndDocPortW */
+            localmon_EndDocPort,
             localmon_ClosePort,
             NULL,       /* Use AddPortUI in localui.dll */
             localmon_AddPortExW,

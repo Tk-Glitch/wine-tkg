@@ -174,6 +174,17 @@ enum request_flags
     REQUEST_FLAG_WEBSOCKET_UPGRADE = 0x01,
 };
 
+enum request_response_state
+{
+    REQUEST_RESPONSE_STATE_NONE,
+    REQUEST_RESPONSE_STATE_SENDING_REQUEST,
+    REQUEST_RESPONSE_STATE_READ_RESPONSE_QUEUED,
+    REQUEST_RESPONSE_STATE_REQUEST_SENT,
+    REQUEST_RESPONSE_STATE_READ_RESPONSE_QUEUED_REQUEST_SENT,
+    REQUEST_RESPONSE_RECURSIVE_REQUEST,
+    REQUEST_RESPONSE_STATE_RESPONSE_RECEIVED,
+};
+
 struct request
 {
     struct object_header hdr;
@@ -220,6 +231,9 @@ struct request
     } creds[TARGET_MAX][SCHEME_MAX];
     unsigned int websocket_receive_buffer_size;
     unsigned int websocket_send_buffer_size, websocket_set_send_buffer_size;
+    int read_reply_len;
+    DWORD read_reply_status;
+    enum request_response_state state;
 };
 
 enum socket_state

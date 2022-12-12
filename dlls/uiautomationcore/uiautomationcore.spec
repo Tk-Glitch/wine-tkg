@@ -53,12 +53,12 @@
 @ stub TransformPattern_Move
 @ stub TransformPattern_Resize
 @ stub TransformPattern_Rotate
-@ stub UiaAddEvent
+@ stdcall UiaAddEvent(ptr long ptr long ptr long ptr ptr)
 @ stdcall UiaClientsAreListening()
 #@ stub UiaDisconnectAllProviders
 @ stdcall UiaDisconnectProvider(ptr)
-@ stub UiaEventAddWindow
-@ stub UiaEventRemoveWindow
+@ stdcall UiaEventAddWindow(ptr long)
+@ stdcall UiaEventRemoveWindow(ptr long)
 @ stdcall UiaFind(ptr ptr ptr ptr ptr ptr)
 @ stub UiaGetErrorDescription
 @ stub UiaGetPatternProvider
@@ -92,7 +92,7 @@
 @ stub UiaRaiseStructureChangedEvent
 #@ stub UiaRaiseTextEditTextChangedEvent
 @ stdcall UiaRegisterProviderCallback(ptr)
-@ stub UiaRemoveEvent
+@ stdcall UiaRemoveEvent(ptr)
 @ stdcall UiaReturnRawElementProvider(long long long ptr)
 @ stub UiaSetFocus
 @ stub UiaTextRangeRelease

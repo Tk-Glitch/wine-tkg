@@ -691,7 +691,7 @@ static void shader_glsl_init_uniform_block_bindings(const struct wined3d_gl_info
 /* Context activation is done by the caller. */
 static void shader_glsl_load_samplers_range(const struct wined3d_gl_info *gl_info,
         struct shader_glsl_priv *priv, GLuint program_id, const char *prefix,
-        unsigned int base, unsigned int count, const DWORD *tex_unit_map)
+        unsigned int base, unsigned int count, const unsigned int *tex_unit_map)
 {
     struct wined3d_string_buffer *sampler_name = string_buffer_get(&priv->string_buffers);
     unsigned int i, mapped_unit;
@@ -2989,7 +2989,7 @@ static void shader_glsl_get_register_name(const struct wined3d_shader_register *
             /* pixel shaders >= 3.0 */
             if (version->major >= 3)
             {
-                DWORD idx = shader->u.ps.input_reg_map[reg->idx[0].offset];
+                unsigned int idx = shader->u.ps.input_reg_map[reg->idx[0].offset];
                 unsigned int in_count = vec4_varyings(version->major, gl_info);
 
                 if (reg->idx[0].rel_addr)
@@ -3661,7 +3661,7 @@ static void shader_glsl_get_coord_size(enum wined3d_shader_resource_type resourc
 }
 
 static void shader_glsl_get_sample_function(const struct wined3d_shader_context *ctx,
-        DWORD resource_idx, DWORD sampler_idx, DWORD flags, struct glsl_sample_function *sample_function)
+        DWORD resource_idx, DWORD sampler_idx, uint32_t flags, struct glsl_sample_function *sample_function)
 {
     enum wined3d_shader_resource_type resource_type;
     struct shader_glsl_ctx_priv *priv = ctx->backend_data;
@@ -3715,7 +3715,7 @@ static void shader_glsl_get_sample_function(const struct wined3d_shader_context 
 
     if (flags & WINED3D_GLSL_SAMPLE_LOAD)
     {
-        static const DWORD texel_fetch_flags = WINED3D_GLSL_SAMPLE_LOAD | WINED3D_GLSL_SAMPLE_OFFSET;
+        static const uint32_t texel_fetch_flags = WINED3D_GLSL_SAMPLE_LOAD | WINED3D_GLSL_SAMPLE_OFFSET;
         if (flags & ~texel_fetch_flags)
             ERR("Unexpected flags %#x for texelFetch.\n", flags & ~texel_fetch_flags);
 
@@ -5202,7 +5202,7 @@ static void shader_glsl_loop(const struct wined3d_shader_instruction *ins)
     const struct wined3d_shader *shader = ins->ctx->shader;
     const struct wined3d_shader_lconst *constant;
     struct wined3d_string_buffer *reg_name;
-    const DWORD *control_values = NULL;
+    const unsigned int *control_values = NULL;
 
     if (ins->ctx->reg_maps->shader_version.major < 4)
     {
@@ -5300,7 +5300,7 @@ static void shader_glsl_rep(const struct wined3d_shader_instruction *ins)
     const struct wined3d_shader *shader = ins->ctx->shader;
     const struct wined3d_shader_lconst *constant;
     struct glsl_src_param src0_param;
-    const DWORD *control_values = NULL;
+    const unsigned int *control_values = NULL;
 
     /* Try to hardcode local values to help the GLSL compiler to unroll and optimize the loop */
     if (ins->src[0].reg.type == WINED3DSPR_CONSTINT)
@@ -5496,7 +5496,7 @@ static void shader_glsl_tex(const struct wined3d_shader_instruction *ins)
             ins->ctx->reg_maps->shader_version.minor);
     struct glsl_sample_function sample_function;
     DWORD sample_flags = 0;
-    DWORD resource_idx;
+    unsigned int resource_idx;
     DWORD mask = 0, swizzle;
     const struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
     enum wined3d_shader_resource_type resource_type;
@@ -6614,7 +6614,7 @@ static void shader_glsl_texcoord(const struct wined3d_shader_instruction *ins)
     else
     {
         enum wined3d_shader_src_modifier src_mod = ins->src[0].modifiers;
-        DWORD reg = ins->src[0].reg.idx[0].offset;
+        unsigned int reg = ins->src[0].reg.idx[0].offset;
         char dst_swizzle[6];
 
         shader_glsl_get_swizzle(&ins->src[0], FALSE, write_mask, dst_swizzle);
@@ -6645,7 +6645,7 @@ static void shader_glsl_texcoord(const struct wined3d_shader_instruction *ins)
 static void shader_glsl_texdp3tex(const struct wined3d_shader_instruction *ins)
 {
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
-    DWORD sampler_idx = ins->dst[0].reg.idx[0].offset;
+    unsigned int sampler_idx = ins->dst[0].reg.idx[0].offset;
     struct glsl_sample_function sample_function;
     struct glsl_src_param src0_param;
     UINT mask_size;
@@ -6689,7 +6689,7 @@ static void shader_glsl_texdp3tex(const struct wined3d_shader_instruction *ins)
 static void shader_glsl_texdp3(const struct wined3d_shader_instruction *ins)
 {
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
-    DWORD dstreg = ins->dst[0].reg.idx[0].offset;
+    unsigned int dstreg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
     DWORD dst_mask;
     unsigned int mask_size;
@@ -6731,7 +6731,7 @@ static void shader_glsl_texdepth(const struct wined3d_shader_instruction *ins)
 static void shader_glsl_texm3x2depth(const struct wined3d_shader_instruction *ins)
 {
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
-    DWORD dstreg = ins->dst[0].reg.idx[0].offset;
+    unsigned int dstreg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
 
     shader_glsl_add_src_param(ins, &ins->src[0], src_mask, &src0_param);
@@ -6745,7 +6745,7 @@ static void shader_glsl_texm3x2depth(const struct wined3d_shader_instruction *in
 static void shader_glsl_texm3x2pad(const struct wined3d_shader_instruction *ins)
 {
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_string_buffer *buffer = ins->ctx->buffer;
     struct glsl_src_param src0_param;
 
@@ -6760,7 +6760,7 @@ static void shader_glsl_texm3x3pad(const struct wined3d_shader_instruction *ins)
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
     struct wined3d_string_buffer *buffer = ins->ctx->buffer;
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
 
     shader_glsl_add_src_param(ins, &ins->src[0], src_mask, &src0_param);
@@ -6773,7 +6773,7 @@ static void shader_glsl_texm3x2tex(const struct wined3d_shader_instruction *ins)
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
     struct wined3d_string_buffer *buffer = ins->ctx->buffer;
     struct glsl_sample_function sample_function;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
 
     shader_glsl_add_src_param(ins, &ins->src[0], src_mask, &src0_param);
@@ -6793,7 +6793,7 @@ static void shader_glsl_texm3x3tex(const struct wined3d_shader_instruction *ins)
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
     struct glsl_sample_function sample_function;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
 
     shader_glsl_add_src_param(ins, &ins->src[0], src_mask, &src0_param);
@@ -6815,7 +6815,7 @@ static void shader_glsl_texm3x3(const struct wined3d_shader_instruction *ins)
 {
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
     char dst_mask[6];
 
@@ -6838,7 +6838,7 @@ static void shader_glsl_texm3x3spec(const struct wined3d_shader_instruction *ins
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
     struct glsl_sample_function sample_function;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     char coord_mask[6];
 
     shader_glsl_add_src_param(ins, &ins->src[0], src_mask, &src0_param);
@@ -6869,7 +6869,7 @@ static void shader_glsl_texm3x3vspec(const struct wined3d_shader_instruction *in
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
     DWORD src_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
     struct glsl_sample_function sample_function;
-    DWORD reg = ins->dst[0].reg.idx[0].offset;
+    unsigned int reg = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param;
     char coord_mask[6];
 
@@ -6904,7 +6904,7 @@ static void shader_glsl_texbem(const struct wined3d_shader_instruction *ins)
     const struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
     struct glsl_sample_function sample_function;
     struct glsl_src_param coord_param;
-    DWORD sampler_idx;
+    unsigned int sampler_idx;
     DWORD mask;
     DWORD flags;
     char coord_mask[6];
@@ -6968,7 +6968,7 @@ static void shader_glsl_texbem(const struct wined3d_shader_instruction *ins)
 
 static void shader_glsl_bem(const struct wined3d_shader_instruction *ins)
 {
-    DWORD sampler_idx = ins->dst[0].reg.idx[0].offset;
+    unsigned int sampler_idx = ins->dst[0].reg.idx[0].offset;
     struct glsl_src_param src0_param, src1_param;
 
     shader_glsl_add_src_param(ins, &ins->src[0], WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1, &src0_param);
@@ -7245,7 +7245,7 @@ static void delete_glsl_program_entry(struct shader_glsl_priv *priv, const struc
 }
 
 static void shader_glsl_setup_vs3_output(struct shader_glsl_priv *priv,
-        const struct wined3d_gl_info *gl_info, const DWORD *map,
+        const struct wined3d_gl_info *gl_info, const unsigned int *map,
         const struct wined3d_shader_signature *input_signature,
         const struct wined3d_shader_reg_maps *reg_maps_in,
         const struct wined3d_shader_signature *output_signature,
@@ -7256,7 +7256,8 @@ static void shader_glsl_setup_vs3_output(struct shader_glsl_priv *priv,
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     unsigned int in_count = vec4_varyings(3, gl_info);
     unsigned int max_varyings = needs_legacy_glsl_syntax(gl_info) ? in_count + 2 : in_count;
-    DWORD in_idx, *set = NULL;
+    unsigned int in_idx;
+    DWORD *set = NULL;
     unsigned int i, j;
     char reg_mask[6];
 
@@ -7401,7 +7402,7 @@ static void shader_glsl_generate_clip_or_cull_distances(struct wined3d_string_bu
 }
 
 static void shader_glsl_setup_sm3_rasterizer_input(struct shader_glsl_priv *priv,
-        const struct wined3d_gl_info *gl_info, const DWORD *map,
+        const struct wined3d_gl_info *gl_info, const unsigned int *map,
         const struct wined3d_shader_signature *input_signature,
         const struct wined3d_shader_reg_maps *reg_maps_in, unsigned int input_count,
         const struct wined3d_shader_signature *output_signature,
@@ -7947,7 +7948,7 @@ static void shader_glsl_generate_color_output(struct wined3d_string_buffer *buff
     }
     else
     {
-        DWORD mask = shader->reg_maps.rt_mask;
+        uint32_t mask = shader->reg_maps.rt_mask;
 
         while (mask)
         {
@@ -8198,7 +8199,7 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
         }
         else
         {
-            DWORD mask = reg_maps->rt_mask;
+            uint32_t mask = reg_maps->rt_mask;
 
             while (mask)
             {
@@ -9647,7 +9648,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
 }
 
 static const char *shader_glsl_get_ffp_fragment_op_arg(struct wined3d_string_buffer *buffer,
-        DWORD argnum, unsigned int stage, DWORD arg)
+        unsigned int argnum, unsigned int stage, DWORD arg)
 {
     const char *ret;
 
@@ -9740,7 +9741,7 @@ static const char *shader_glsl_get_ffp_fragment_op_arg(struct wined3d_string_buf
 }
 
 static void shader_glsl_ffp_fragment_op(struct wined3d_string_buffer *buffer, unsigned int stage, BOOL color,
-        BOOL alpha, BOOL tmp_dst, DWORD op, DWORD dw_arg0, DWORD dw_arg1, DWORD dw_arg2)
+        BOOL alpha, BOOL tmp_dst, unsigned int op, DWORD dw_arg0, DWORD dw_arg1, DWORD dw_arg2)
 {
     const char *dstmask, *dstreg, *arg0, *arg1, *arg2;
 
@@ -13905,7 +13906,7 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
         if (FAILED(hr = wined3d_texture_create(device, &desc, 1, 1, 0,
                 NULL, NULL, &wined3d_null_parent_ops, &staging_texture)))
         {
-            ERR("Failed to create staging texture, hr %#x.\n", hr);
+            ERR("Failed to create staging texture, hr %#lx.\n", hr);
             return dst_location;
         }
 
@@ -14020,7 +14021,7 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
 
 static void glsl_blitter_clear(struct wined3d_blitter *blitter, struct wined3d_device *device,
         unsigned int rt_count, const struct wined3d_fb_state *fb, unsigned int rect_count, const RECT *clear_rects,
-        const RECT *draw_rect, DWORD flags, const struct wined3d_color *color, float depth, DWORD stencil)
+        const RECT *draw_rect, uint32_t flags, const struct wined3d_color *color, float depth, unsigned int stencil)
 {
     struct wined3d_blitter *next;
 

@@ -714,7 +714,7 @@ static void read_value(header_t *header, char **cur)
     } while(*end == ' ' || *end == '\t');
 
     len = end - *cur;
-    value = malloc(len + 1);
+    value = CoTaskMemAlloc(len + 1);
     memcpy(value, *cur, len);
     value[len] = '\0';
 
@@ -1089,7 +1089,8 @@ static HRESULT WINAPI MimeBody_GetProp(
     {
         PropVariantClear(pValue);
         pValue->vt = VT_LPSTR;
-        pValue->pszVal = strdup(This->content_pri_type);
+        pValue->pszVal = CoTaskMemAlloc(strlen(This->content_pri_type) + 1);
+        strcpy(pValue->pszVal, This->content_pri_type);
         return S_OK;
     }
 
@@ -3707,7 +3708,7 @@ HRESULT WINAPI MimeOleObjectFromMoniker(BINDF bindf, IMoniker *moniker, IBindCtx
 
     lstrcpyW(mhtml_url, L"mhtml:");
     lstrcatW(mhtml_url, display_name);
-    free(display_name);
+    CoTaskMemFree(display_name);
 
     hres = CreateURLMoniker(NULL, mhtml_url, moniker_new);
     free(mhtml_url);

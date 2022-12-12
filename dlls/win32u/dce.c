@@ -1029,6 +1029,23 @@ INT WINAPI NtUserReleaseDC( HWND hwnd, HDC hdc )
     return release_dc( hwnd, hdc, FALSE );
 }
 
+/***********************************************************************
+ *           NtUserGetDC (win32u.@)
+ */
+HDC WINAPI NtUserGetDC( HWND hwnd )
+{
+    if (!hwnd) return NtUserGetDCEx( 0, 0, DCX_CACHE | DCX_WINDOW );
+    return NtUserGetDCEx( hwnd, 0, DCX_USESTYLE );
+}
+
+/***********************************************************************
+ *           NtUserGetWindowDC (win32u.@)
+ */
+HDC WINAPI NtUserGetWindowDC( HWND hwnd )
+{
+    return NtUserGetDCEx( hwnd, 0, DCX_USESTYLE | DCX_WINDOW );
+}
+
 /**********************************************************************
  *           NtUserWindowFromDC (win32u.@)
  */
@@ -1491,6 +1508,22 @@ BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT fla
 }
 
 /***********************************************************************
+ *           NtUserValidateRect (win32u.@)
+ */
+BOOL WINAPI NtUserValidateRect( HWND hwnd, const RECT *rect )
+{
+    UINT flags = RDW_VALIDATE;
+
+    if (!hwnd)
+    {
+        flags = RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ERASENOW;
+        rect = NULL;
+    }
+
+    return NtUserRedrawWindow( hwnd, rect, 0, flags );
+}
+
+/***********************************************************************
  *           NtUserGetUpdateRgn (win32u.@)
  */
 INT WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
@@ -1827,4 +1860,15 @@ INT WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RECT *rect,
     if (own_rgn && update_rgn) NtGdiDeleteObjectApp( update_rgn );
 
     return retval;
+}
+
+/************************************************************************
+ *           NtUserPrintWindow (win32u.@)
+ */
+BOOL WINAPI NtUserPrintWindow( HWND hwnd, HDC hdc, UINT flags )
+{
+    UINT prf_flags = PRF_CHILDREN | PRF_ERASEBKGND | PRF_OWNED | PRF_CLIENT;
+    if (!(flags & PW_CLIENTONLY)) prf_flags |= PRF_NONCLIENT;
+    send_message( hwnd, WM_PRINT, (WPARAM)hdc, prf_flags );
+    return TRUE;
 }

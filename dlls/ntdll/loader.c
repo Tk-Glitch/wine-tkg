@@ -72,6 +72,7 @@ typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
 typedef void  (CALLBACK *LDRENUMPROC)(LDR_DATA_TABLE_ENTRY *, void *, BOOLEAN *);
 
 void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) = NULL;
+NTSTATUS (WINAPI *__wine_unix_call_dispatcher)( unixlib_handle_t, unsigned int, void * ) = __wine_unix_call;
 
 static DWORD (WINAPI *pCtrlRoutine)(void *);
 
@@ -1613,8 +1614,6 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
 
     if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return STATUS_SUCCESS;
     if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, reason );
-    if (wm->ldr.Flags & LDR_WINE_INTERNAL && reason == DLL_PROCESS_ATTACH)
-        NTDLL_UNIX_CALL( init_builtin_dll, wm->ldr.DllBase );
     if (!entry) return STATUS_SUCCESS;
 
     if (TRACE_ON(relay))
@@ -2320,22 +2319,17 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
  *
  * Build the module data for the initially-loaded ntdll.
  */
-static void build_ntdll_module(void)
+static void build_ntdll_module( HMODULE module )
 {
-    MEMORY_BASIC_INFORMATION meminfo;
     UNICODE_STRING nt_name;
     WINE_MODREF *wm;
 
     RtlInitUnicodeString( &nt_name, L"\\??\\C:\\windows\\system32\\ntdll.dll" );
-    NtQueryVirtualMemory( GetCurrentProcess(), build_ntdll_module, MemoryBasicInformation,
-                          &meminfo, sizeof(meminfo), NULL );
-    wm = alloc_module( meminfo.AllocationBase, &nt_name, TRUE );
+    wm = alloc_module( module, &nt_name, TRUE );
     assert( wm );
     wm->ldr.Flags &= ~LDR_DONT_RESOLVE_REFS;
     node_ntdll = wm->ldr.DdagNode;
-    if (TRACE_ON(relay)) RELAY_SetupDLL( meminfo.AllocationBase );
-    NtQueryVirtualMemory( GetCurrentProcess(), meminfo.AllocationBase, MemoryWineUnixFuncs,
-                          &ntdll_unix_handle, sizeof(ntdll_unix_handle), NULL );
+    if (TRACE_ON(relay)) RELAY_SetupDLL( module );
 
     hidden_exports_init( wm->ldr.FullDllName.Buffer );
 }
@@ -3326,6 +3320,16 @@ NTSTATUS WINAPI __wine_ctrl_routine( void *arg )
     RtlExitUserThread( ret );
 }
 
+
+/***********************************************************************
+ *              __wine_unix_call
+ */
+NTSTATUS WINAPI __wine_unix_call( unixlib_handle_t handle, unsigned int code, void *args )
+{
+    return __wine_unix_call_dispatcher( handle, code, args );
+}
+
+
 /******************************************************************
  *		LdrLoadDll (NTDLL.@)
  */
@@ -3511,7 +3515,7 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
 #elif defined(__arm__)
         case IMAGE_REL_BASED_THUMB_MOV32:
         {
-            DWORD *inst = (DWORD *)((char *)page + offset);
+            UINT *inst = (UINT *)((char *)page + offset);
             WORD lo = ((inst[0] << 1) & 0x0800) + ((inst[0] << 12) & 0xf000) +
                       ((inst[0] >> 20) & 0x0700) + ((inst[0] >> 16) & 0x00ff);
             WORD hi = ((inst[1] << 1) & 0x0800) + ((inst[1] << 12) & 0xf000) +
@@ -4243,10 +4247,16 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
 
     if (!imports_fixup_done)
     {
+        MEMORY_BASIC_INFORMATION meminfo;
         int i;
         ANSI_STRING func_name;
         WINE_MODREF *kernel32;
         PEB *peb = NtCurrentTeb()->Peb;
+
+        NtQueryVirtualMemory( GetCurrentProcess(), LdrInitializeThunk, MemoryBasicInformation,
+                              &meminfo, sizeof(meminfo), NULL );
+        NtQueryVirtualMemory( GetCurrentProcess(), meminfo.AllocationBase, MemoryWineUnixFuncs,
+                              &ntdll_unix_handle, sizeof(ntdll_unix_handle), NULL );
 
         peb->LdrData            = &ldr;
         peb->FastPebLock        = &peb_lock;
@@ -4273,7 +4283,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         wm = build_main_module();
         wm->ldr.LoadCount = -1;
 
-        build_ntdll_module();
+        build_ntdll_module( meminfo.AllocationBase );
 
         if (NtCurrentTeb()->WowTebOffset) init_wow64( context );
 
@@ -4362,7 +4372,6 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         }
         release_address_space();
         if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_PROCESS_ATTACH );
-        if (wm->ldr.Flags & LDR_WINE_INTERNAL) NTDLL_UNIX_CALL( init_builtin_dll, wm->ldr.DllBase );
         if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );
         process_breakpoint();
     }

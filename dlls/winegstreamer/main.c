@@ -21,6 +21,9 @@
 #define WINE_NO_NAMELESS_EXTENSION
 
 #define EXTERN_GUID DEFINE_GUID
+
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "initguid.h"
 #include "gst_private.h"
 #include "winternl.h"
@@ -33,6 +36,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 DEFINE_GUID(GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 DEFINE_GUID(MEDIASUBTYPE_VC1S,MAKEFOURCC('V','C','1','S'),0x0000,0x0010,0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71);
+
+static const GUID MEDIASUBTYPE_MP3 = {0x00000055, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 
 bool array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
 {
@@ -271,16 +276,32 @@ uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream)
     return params.duration;
 }
 
-bool wg_parser_stream_get_language(struct wg_parser_stream *stream, char *buffer, uint32_t size)
+char *wg_parser_stream_get_tag(struct wg_parser_stream *stream, enum wg_parser_tag tag)
 {
-    struct wg_parser_stream_get_language_params params =
+    uint32_t size = 0;
+    struct wg_parser_stream_get_tag_params params =
     {
         .stream = stream,
-        .buffer = buffer,
-        .size = size,
+        .tag = tag,
+        .size = &size,
     };
+    char *buffer;
 
-    return !__wine_unix_call(__wine_unixlib_handle, unix_wg_parser_stream_get_language, &params);
+    if (WINE_UNIX_CALL(unix_wg_parser_stream_get_tag, &params) != STATUS_BUFFER_TOO_SMALL)
+        return NULL;
+    if (!(buffer = malloc(size)))
+    {
+        ERR("No memory.\n");
+        return NULL;
+    }
+    params.buffer = buffer;
+    if (WINE_UNIX_CALL(unix_wg_parser_stream_get_tag, &params))
+    {
+        ERR("wg_parser_stream_get_tag failed unexpectedly.\n");
+        free(buffer);
+        return NULL;
+    }
+    return buffer;
 }
 
 void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
@@ -594,6 +615,37 @@ static const REGFILTER2 reg_mpeg_audio_codec =
     .u.s2.rgPins2 = reg_mpeg_audio_codec_pins,
 };
 
+static const REGPINTYPES reg_mpeg_layer3_decoder_sink_mts[1] =
+{
+    {&MEDIATYPE_Audio, &MEDIASUBTYPE_MP3},
+};
+
+static const REGPINTYPES reg_mpeg_layer3_decoder_source_mts[1] =
+{
+    {&MEDIATYPE_Audio, &MEDIASUBTYPE_PCM},
+};
+
+static const REGFILTERPINS2 reg_mpeg_layer3_decoder_pins[2] =
+{
+    {
+        .nMediaTypes = 1,
+        .lpMediaType = reg_mpeg_layer3_decoder_sink_mts,
+    },
+    {
+        .dwFlags = REG_PINFLAG_B_OUTPUT,
+        .nMediaTypes = 1,
+        .lpMediaType = reg_mpeg_layer3_decoder_source_mts,
+    },
+};
+
+static const REGFILTER2 reg_mpeg_layer3_decoder =
+{
+    .dwVersion = 2,
+    .dwMerit = 0x00810000,
+    .u.s2.cPins2 = 2,
+    .u.s2.rgPins2 = reg_mpeg_layer3_decoder_pins,
+};
+
 static const REGPINTYPES reg_mpeg_splitter_sink_mts[4] =
 {
     {&MEDIATYPE_Stream, &MEDIASUBTYPE_MPEG1Audio},
@@ -798,6 +850,8 @@ HRESULT WINAPI DllRegisterServer(void)
             L"GStreamer splitter filter", NULL, NULL, NULL, &reg_decodebin_parser);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_CMpegAudioCodec,
             L"MPEG Audio Decoder", NULL, NULL, NULL, &reg_mpeg_audio_codec);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_mpeg_layer3_decoder,
+            L"MPEG Layer-3 Decoder", NULL, NULL, NULL, &reg_mpeg_layer3_decoder);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter,
             L"MPEG-I Stream Splitter", NULL, NULL, NULL, &reg_mpeg_splitter);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, L"Wave Parser", NULL, NULL, NULL, &reg_wave_parser);
@@ -837,6 +891,7 @@ HRESULT WINAPI DllUnregisterServer(void)
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_AviSplitter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_decodebin_parser);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_CMpegAudioCodec);
+    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_mpeg_layer3_decoder);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_MPEG1Splitter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_WAVEParser);
 

@@ -59,6 +59,7 @@
 #define NS_ERROR_INVALID_ARG      ((nsresult)0x80070057L) 
 #define NS_ERROR_UNEXPECTED       ((nsresult)0x8000ffffL)
 #define NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR ((nsresult)0x80530007)
+#define NS_ERROR_DOM_SYNTAX_ERR   ((nsresult)0x8053000c)
 
 #define NS_ERROR_MODULE_NETWORK    6
 
@@ -75,6 +76,7 @@
 #define MSHTML_E_INVALID_ACTION   0x800a01bd
 #define MSHTML_E_NODOC            0x800a025c
 
+typedef struct DOMEvent DOMEvent;
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
@@ -508,6 +510,9 @@ typedef struct {
 
     LONG ref;
 
+    ULONG navigation_type;
+    ULONG redirect_count;
+
     ULONGLONG navigation_start_time;
     ULONGLONG unload_event_start_time;
     ULONGLONG unload_event_end_time;
@@ -802,6 +807,7 @@ typedef struct {
     void (*destructor)(HTMLDOMNode*);
     const cpc_entry_t *cpc_entries;
     HRESULT (*clone)(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
+    HRESULT (*dispatch_nsevent_hook)(HTMLDOMNode*,DOMEvent*);
     HRESULT (*handle_event)(HTMLDOMNode*,DWORD,nsIDOMEvent*,BOOL*);
     HRESULT (*get_attr_col)(HTMLDOMNode*,HTMLAttributeCollection**);
     EventTarget *(*get_event_prop_target)(HTMLDOMNode*,int);
@@ -1055,8 +1061,8 @@ HRESULT nsuri_to_url(LPCWSTR,BOOL,BSTR*) DECLSPEC_HIDDEN;
 void call_property_onchanged(ConnectionPointContainer*,DISPID) DECLSPEC_HIDDEN;
 HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*) DECLSPEC_HIDDEN;
 
-void *nsalloc(size_t) __WINE_ALLOC_SIZE(1) DECLSPEC_HIDDEN;
 void nsfree(void*) DECLSPEC_HIDDEN;
+void *nsalloc(size_t) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(nsfree) __WINE_MALLOC DECLSPEC_HIDDEN;
 
 BOOL nsACString_Init(nsACString *str, const char *data) DECLSPEC_HIDDEN;
 void nsACString_InitDepend(nsACString*,const char*) DECLSPEC_HIDDEN;
@@ -1090,10 +1096,11 @@ char *get_nscategory_entry(const char*,const char*) DECLSPEC_HIDDEN;
 
 HRESULT create_pending_window(HTMLOuterWindow*,nsChannelBSC*) DECLSPEC_HIDDEN;
 HRESULT start_binding(HTMLInnerWindow*,BSCallback*,IBindCtx*) DECLSPEC_HIDDEN;
-HRESULT async_start_doc_binding(HTMLOuterWindow*,HTMLInnerWindow*) DECLSPEC_HIDDEN;
+HRESULT async_start_doc_binding(HTMLOuterWindow*,HTMLInnerWindow*,DWORD) DECLSPEC_HIDDEN;
 void abort_window_bindings(HTMLInnerWindow*) DECLSPEC_HIDDEN;
 void set_download_state(HTMLDocumentObj*,int) DECLSPEC_HIDDEN;
 void call_docview_84(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+HRESULT reload_page(HTMLOuterWindow*) DECLSPEC_HIDDEN;
 
 void set_ready_state(HTMLOuterWindow*,READYSTATE) DECLSPEC_HIDDEN;
 HRESULT get_readystate_string(READYSTATE,BSTR*) DECLSPEC_HIDDEN;
@@ -1204,6 +1211,7 @@ HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**) DECLSPEC_HIDDEN;
 void HTMLElement_destructor(HTMLDOMNode*) DECLSPEC_HIDDEN;
 HRESULT HTMLElement_clone(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**) DECLSPEC_HIDDEN;
 HRESULT HTMLElement_get_attr_col(HTMLDOMNode*,HTMLAttributeCollection**) DECLSPEC_HIDDEN;
+HRESULT HTMLElement_dispatch_nsevent_hook(HTMLDOMNode*,DOMEvent*) DECLSPEC_HIDDEN;
 HRESULT HTMLElement_handle_event(HTMLDOMNode*,DWORD,nsIDOMEvent*,BOOL*) DECLSPEC_HIDDEN;
 void HTMLElement_init_dispex_info(dispex_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
 

@@ -31,7 +31,6 @@ enum usb_event_type
     USB_EVENT_ADD_DEVICE,
     USB_EVENT_REMOVE_DEVICE,
     USB_EVENT_TRANSFER_COMPLETE,
-    USB_EVENT_SHUTDOWN,
 };
 
 struct usb_event
@@ -43,17 +42,17 @@ struct usb_event
         struct usb_add_device_event
         {
             struct unix_device *device;
-            UINT16 vendor, product, revision;
-            UINT8 class, subclass, protocol;
+            UINT16 vendor, product, revision, usbver;
+            UINT8 class, subclass, protocol, busnum, portnum;
             bool interface;
-            UINT8 interface_index;
+            INT16 interface_index;
         } added_device;
         struct unix_device *removed_device;
         IRP *completed_irp;
     } u;
 };
 
-struct usb_get_event_params
+struct usb_main_loop_params
 {
     struct usb_event *event;
 };
@@ -62,6 +61,7 @@ struct usb_submit_urb_params
 {
     struct unix_device *device;
     IRP *irp;
+    void *transfer_buffer;
 };
 
 struct usb_cancel_transfer_params
@@ -77,8 +77,8 @@ struct usb_destroy_device_params
 enum unix_funcs
 {
     unix_usb_main_loop,
+    unix_usb_init,
     unix_usb_exit,
-    unix_usb_get_event,
     unix_usb_submit_urb,
     unix_usb_cancel_transfer,
     unix_usb_destroy_device,

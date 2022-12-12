@@ -41,10 +41,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-#define CONTENT_LENGTH "Content-Length"
-#define UTF8_STR "utf-8"
-#define UTF16_STR "utf-16"
-
 struct nsProtocolStream {
     nsIInputStream nsIInputStream_iface;
 
@@ -1152,10 +1148,10 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
         if(first_read) {
             switch(This->bsc.bom) {
             case BOM_UTF8:
-                This->nschannel->charset = strdup(UTF8_STR);
+                This->nschannel->charset = strdup("utf-8");
                 break;
             case BOM_UTF16:
-                This->nschannel->charset = strdup(UTF16_STR);
+                This->nschannel->charset = strdup("utf-16");
             case BOM_NONE:
                 /* FIXME: Get charset from HTTP headers */;
             }
@@ -1361,6 +1357,13 @@ static HRESULT nsChannelBSC_start_binding(BSCallback *bsc)
     nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
 
     if(This->is_doc_channel) {
+        DWORD flags = This->bsc.window->base.outer_window->load_flags;
+
+        if(flags & BINDING_FROMHIST)
+            This->bsc.window->performance_timing->navigation_type = 2;  /* TYPE_BACK_FORWARD */
+        if(flags & BINDING_REFRESH)
+            This->bsc.window->performance_timing->navigation_type = 1;  /* TYPE_RELOAD */
+
         This->bsc.window->base.outer_window->base.inner_window->doc->skip_mutation_notif = FALSE;
         This->bsc.window->performance_timing->navigation_start_time = get_time_stamp();
     }
@@ -1723,8 +1726,11 @@ static HRESULT nsChannelBSC_on_progress(BSCallback *bsc, ULONG progress, ULONG t
         This->nschannel->content_type = strdupWtoA(status_text);
         break;
     case BINDSTATUS_REDIRECTING:
-        if(This->is_doc_channel && !This->bsc.window->performance_timing->redirect_time)
-            This->bsc.window->performance_timing->redirect_time = get_time_stamp();
+        if(This->is_doc_channel) {
+            This->bsc.window->performance_timing->redirect_count++;
+            if(!This->bsc.window->performance_timing->redirect_time)
+                This->bsc.window->performance_timing->redirect_time = get_time_stamp();
+        }
         return handle_redirect(This, status_text);
     case BINDSTATUS_FINDINGRESOURCE:
         if(This->is_doc_channel && !This->bsc.window->performance_timing->dns_lookup_time)
@@ -1926,6 +1932,7 @@ HRESULT create_channelbsc(IMoniker *mon, const WCHAR *headers, BYTE *post_data, 
 
 typedef struct {
     task_t header;
+    DWORD flags;
     HTMLOuterWindow *window;
     HTMLInnerWindow *pending_window;
 } start_doc_binding_task_t;
@@ -1934,7 +1941,7 @@ static void start_doc_binding_proc(task_t *_task)
 {
     start_doc_binding_task_t *task = (start_doc_binding_task_t*)_task;
 
-    set_current_mon(task->window, task->pending_window->bscallback->bsc.mon, BINDING_NAVIGATED);
+    set_current_mon(task->window, task->pending_window->bscallback->bsc.mon, task->flags);
     start_binding(task->pending_window, &task->pending_window->bscallback->bsc, NULL);
 }
 
@@ -1946,7 +1953,7 @@ static void start_doc_binding_task_destr(task_t *_task)
     free(task);
 }
 
-HRESULT async_start_doc_binding(HTMLOuterWindow *window, HTMLInnerWindow *pending_window)
+HRESULT async_start_doc_binding(HTMLOuterWindow *window, HTMLInnerWindow *pending_window, DWORD flags)
 {
     start_doc_binding_task_t *task;
 
@@ -1956,6 +1963,7 @@ HRESULT async_start_doc_binding(HTMLOuterWindow *window, HTMLInnerWindow *pendin
     if(!task)
         return E_OUTOFMEMORY;
 
+    task->flags = flags;
     task->window = window;
     task->pending_window = pending_window;
     IHTMLWindow2_AddRef(&pending_window->base.IHTMLWindow2_iface);
@@ -2531,7 +2539,8 @@ static HRESULT navigate_uri(HTMLOuterWindow *window, IUri *uri, const WCHAR *dis
     if(FAILED(hres))
         return hres;
 
-    hres = load_nsuri(window, nsuri, request_data ? request_data->post_stream : NULL, NULL, LOAD_FLAGS_NONE);
+    hres = load_nsuri(window, nsuri, request_data ? request_data->post_stream : NULL, NULL,
+                      (flags & BINDING_REFRESH) ? LOAD_FLAGS_IS_REFRESH : LOAD_FLAGS_NONE);
     nsISupports_Release((nsISupports*)nsuri);
     return hres;
 }

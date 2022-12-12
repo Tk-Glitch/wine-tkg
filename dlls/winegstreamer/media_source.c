@@ -1483,24 +1483,37 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = malloc(object->stream_count * sizeof(IMFStreamDescriptor *));
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFStreamDescriptor **descriptor = &descriptors[object->stream_count - 1 - i];
-        char language[128];
-        DWORD language_len;
-        WCHAR *languageW;
-
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, descriptor);
-
-        if (wg_parser_stream_get_language(object->streams[i]->wg_stream, language, sizeof(language)))
+        static const struct
         {
-            if ((language_len = MultiByteToWideChar(CP_UTF8, 0, language, -1, NULL, 0)))
+            enum wg_parser_tag tag;
+            const GUID *mf_attr;
+        }
+        tags[] =
+        {
+            {WG_PARSER_TAG_LANGUAGE, &MF_SD_LANGUAGE},
+            {WG_PARSER_TAG_NAME, &MF_SD_STREAM_NAME},
+        };
+        unsigned int j;
+        WCHAR *strW;
+        DWORD len;
+        char *str;
+
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[object->stream_count - 1 - i]);
+
+        for (j = 0; j < ARRAY_SIZE(tags); ++j)
+        {
+            if (!(str = wg_parser_stream_get_tag(object->streams[i]->wg_stream, tags[j].tag)))
+                continue;
+            if (!(len = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0)))
             {
-                languageW = malloc(language_len * sizeof(WCHAR));
-                if (MultiByteToWideChar(CP_UTF8, 0, language, -1, languageW, language_len))
-                {
-                    IMFStreamDescriptor_SetString(*descriptor, &MF_SD_LANGUAGE, languageW);
-                }
-                free(languageW);
+                free(str);
+                continue;
             }
+            strW = malloc(len * sizeof(*strW));
+            if (MultiByteToWideChar(CP_UTF8, 0, str, -1, strW, len))
+                IMFStreamDescriptor_SetString(descriptors[i], tags[j].mf_attr, strW);
+            free(strW);
+            free(str);
         }
     }
 

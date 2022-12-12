@@ -42,6 +42,7 @@ struct wg_format
         WG_MAJOR_TYPE_VIDEO,
         WG_MAJOR_TYPE_VIDEO_CINEPAK,
         WG_MAJOR_TYPE_VIDEO_H264,
+        WG_MAJOR_TYPE_VIDEO_WMV,
     } major_type;
 
     union
@@ -126,6 +127,12 @@ struct wg_format
             uint32_t profile;
             uint32_t level;
         } video_h264;
+        struct
+        {
+            int32_t width, height;
+            uint32_t fps_n, fps_d;
+            uint32_t version;
+        } video_wmv;
     } u;
 };
 
@@ -252,11 +259,19 @@ struct wg_parser_stream_get_duration_params
     UINT64 duration;
 };
 
-struct wg_parser_stream_get_language_params
+enum wg_parser_tag
+{
+    WG_PARSER_TAG_LANGUAGE,
+    WG_PARSER_TAG_NAME,
+    WG_PARSER_TAG_COUNT
+};
+
+struct wg_parser_stream_get_tag_params
 {
     struct wg_parser_stream *stream;
+    enum wg_parser_tag tag;
     char *buffer;
-    UINT32 size;
+    UINT32 *size;
 };
 
 struct wg_parser_stream_seek_params
@@ -319,7 +334,7 @@ enum unix_funcs
     unix_wg_parser_stream_notify_qos,
 
     unix_wg_parser_stream_get_duration,
-    unix_wg_parser_stream_get_language,
+    unix_wg_parser_stream_get_tag,
     unix_wg_parser_stream_seek,
 
     unix_wg_transform_create,

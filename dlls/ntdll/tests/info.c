@@ -251,12 +251,12 @@ static void test_query_basic(void)
         ok( sbi.MmHighestPhysicalPage == sbi64.MmHighestPhysicalPage, "MmHighestPhysicalPage %lu / %lu\n",
             sbi.MmHighestPhysicalPage, sbi64.MmHighestPhysicalPage);
         ok( sbi.AllocationGranularity == (ULONG_PTR)sbi64.AllocationGranularity,
-            "AllocationGranularity %#lx / %#lx\n", sbi.AllocationGranularity,
+            "AllocationGranularity %#Ix / %#Ix\n", sbi.AllocationGranularity,
             (ULONG_PTR)sbi64.AllocationGranularity);
         ok( (ULONG_PTR)sbi.LowestUserAddress == sbi64.LowestUserAddress, "LowestUserAddress %p / %s\n",
             sbi.LowestUserAddress, wine_dbgstr_longlong(sbi64.LowestUserAddress));
         ok( sbi.ActiveProcessorsAffinityMask == sbi64.ActiveProcessorsAffinityMask,
-            "ActiveProcessorsAffinityMask %#lx / %s\n",
+            "ActiveProcessorsAffinityMask %#Ix / %s\n",
             sbi.ActiveProcessorsAffinityMask, wine_dbgstr_longlong(sbi64.ActiveProcessorsAffinityMask));
         ok( sbi.NumberOfProcessors == sbi64.NumberOfProcessors, "NumberOfProcessors %u / %u\n",
             sbi.NumberOfProcessors, sbi64.NumberOfProcessors);
@@ -3288,7 +3288,7 @@ static void test_query_data_alignment(void)
     ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08lx\n", status);
     ok(sizeof(value) == ReturnLength, "Inconsistent length %lu\n", ReturnLength);
 #ifdef __arm__
-    ok(value == 32, "Expected 32, got %u\n", value);
+    ok(value == 32, "Expected 32, got %lu\n", value);
 #else
     ok(value == 64, "Expected 64, got %lu\n", value);
 #endif

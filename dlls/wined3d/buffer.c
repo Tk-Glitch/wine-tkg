@@ -131,7 +131,7 @@ static void wined3d_buffer_invalidate_range(struct wined3d_buffer *buffer, DWORD
         ERR("Buffer %p does not have any up to date location.\n", buffer);
 }
 
-void wined3d_buffer_invalidate_location(struct wined3d_buffer *buffer, DWORD location)
+void wined3d_buffer_invalidate_location(struct wined3d_buffer *buffer, uint32_t location)
 {
     wined3d_buffer_invalidate_range(buffer, location, 0, 0);
 }
@@ -241,7 +241,7 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
 
 static BOOL buffer_process_converted_attribute(struct wined3d_buffer *buffer,
         const enum wined3d_buffer_conversion_type conversion_type,
-        const struct wined3d_stream_info_element *attrib, DWORD *stride_this_run)
+        const struct wined3d_stream_info_element *attrib, UINT *stride_this_run)
 {
     const struct wined3d_format *format = attrib->format;
     BOOL ret = FALSE;
@@ -298,7 +298,7 @@ static BOOL buffer_process_converted_attribute(struct wined3d_buffer *buffer,
 #define WINED3D_BUFFER_FIXUP_XYZRHW     0x02
 
 static BOOL buffer_check_attribute(struct wined3d_buffer *This, const struct wined3d_stream_info *si,
-        const struct wined3d_state *state, UINT attrib_idx, DWORD fixup_flags, DWORD *stride_this_run)
+        const struct wined3d_state *state, UINT attrib_idx, DWORD fixup_flags, UINT *stride_this_run)
 {
     const struct wined3d_stream_info_element *attrib = &si->elements[attrib_idx];
     enum wined3d_format_id format;
@@ -494,7 +494,7 @@ static inline unsigned int fixup_transformed_pos(struct wined3d_vec4 *p)
 
 ULONG CDECL wined3d_buffer_incref(struct wined3d_buffer *buffer)
 {
-    ULONG refcount = InterlockedIncrement(&buffer->resource.ref);
+    unsigned int refcount = InterlockedIncrement(&buffer->resource.ref);
 
     TRACE("%p increasing refcount to %u.\n", buffer, refcount);
 
@@ -575,7 +575,7 @@ static void wined3d_buffer_unload_location(struct wined3d_buffer *buffer,
 }
 
 BOOL wined3d_buffer_load_location(struct wined3d_buffer *buffer,
-        struct wined3d_context *context, DWORD location)
+        struct wined3d_context *context, uint32_t location)
 {
     struct wined3d_bo_address src, dst;
     struct wined3d_range range;
@@ -766,7 +766,7 @@ void wined3d_buffer_cleanup(struct wined3d_buffer *buffer)
 
 ULONG CDECL wined3d_buffer_decref(struct wined3d_buffer *buffer)
 {
-    ULONG refcount = InterlockedDecrement(&buffer->resource.ref);
+    unsigned int refcount = InterlockedDecrement(&buffer->resource.ref);
 
     TRACE("%p decreasing refcount to %u.\n", buffer, refcount);
 
@@ -1287,7 +1287,7 @@ static HRESULT wined3d_buffer_init(struct wined3d_buffer *buffer, struct wined3d
             WINED3D_MULTISAMPLE_NONE, 0, desc->usage, desc->bind_flags, access,
             desc->byte_width, 1, 1, desc->byte_width, parent, parent_ops, &buffer_resource_ops)))
     {
-        WARN("Failed to initialize resource, hr %#x.\n", hr);
+        WARN("Failed to initialize resource, hr %#lx.\n", hr);
         return hr;
     }
     buffer->buffer_ops = buffer_ops;

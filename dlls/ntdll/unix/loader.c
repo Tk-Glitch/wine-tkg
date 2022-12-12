@@ -119,6 +119,7 @@ void     (WINAPI *p__wine_ctrl_routine)(void*);
 SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock = NULL;
 
 static void *p__wine_syscall_dispatcher;
+static void **p__wine_unix_call_dispatcher;
 
 static void * const syscalls[] =
 {
@@ -358,7 +359,6 @@ static void * const syscalls[] =
     NtYieldExecution,
     __wine_dbg_write,
     __wine_needs_override_large_address_aware,
-    __wine_unix_call,
     __wine_unix_spawnvp,
     wine_nt_to_unix_file_name,
     wine_server_call,
@@ -1007,6 +1007,27 @@ static NTSTATUS map_so_dll( const IMAGE_NT_HEADERS *nt_descr, HMODULE module )
         fixup_rva_dwords( (DWORD *)(addr + exports->AddressOfNames), delta, exports->NumberOfNames );
         fixup_rva_ptrs( addr + exports->AddressOfFunctions, addr, exports->NumberOfFunctions );
     }
+
+    /* build the delay import directory */
+
+    dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    if (dir->Size)
+    {
+        IMAGE_DELAYLOAD_DESCRIPTOR *imports = (IMAGE_DELAYLOAD_DESCRIPTOR *)(addr + dir->VirtualAddress);
+
+        while (imports->DllNameRVA)
+        {
+            fixup_rva_dwords( &imports->DllNameRVA, delta, 1 );
+            fixup_rva_dwords( &imports->ModuleHandleRVA, delta, 1 );
+            fixup_rva_dwords( &imports->ImportAddressTableRVA, delta, 1 );
+            fixup_rva_dwords( &imports->ImportNameTableRVA, delta, 1 );
+            fixup_rva_dwords( &imports->BoundImportAddressTableRVA, delta, 1 );
+            fixup_rva_dwords( &imports->UnloadInformationTableRVA, delta, 1 );
+            fixup_rva_names( (UINT_PTR *)(addr + imports->ImportNameTableRVA), delta );
+            imports++;
+        }
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -1077,6 +1098,7 @@ static void load_ntdll_functions( HMODULE module )
     GET_FUNC( RtlUserThreadStart );
     GET_FUNC( __wine_ctrl_routine );
     GET_FUNC( __wine_syscall_dispatcher );
+    GET_FUNC( __wine_unix_call_dispatcher );
 #ifdef __aarch64__
     {
         void **p__wine_current_teb;
@@ -1366,15 +1388,6 @@ NTSTATUS ntdll_init_syscalls( ULONG id, SYSTEM_SERVICE_TABLE *table, void **disp
     memcpy( table->ArgumentTable, info->args, table->ServiceLimit );
     KeServiceDescriptorTable[id] = *table;
     return STATUS_SUCCESS;
-}
-
-
-/***********************************************************************
- *           __wine_unix_call
- */
-NTSTATUS WINAPI __wine_unix_call( unixlib_handle_t handle, unsigned int code, void *args )
-{
-    return ((unixlib_entry_t*)(UINT_PTR)handle)[code]( args );
 }
 
 
@@ -1904,88 +1917,6 @@ NTSTATUS load_start_exe( WCHAR **image, void **module )
 }
 
 
-#ifdef __FreeBSD__
-/* The PT_LOAD segments are sorted in increasing order, and the first
- * starts at the beginning of the ELF file. By parsing the file, we can
- * find that first PT_LOAD segment, from which we can find the base
- * address it wanted, and knowing mapbase where the binary was actually
- * loaded, use them to work out the relocbase offset. */
-static BOOL get_relocbase(caddr_t mapbase, caddr_t *relocbase)
-{
-    Elf_Half i;
-#ifdef _WIN64
-    const Elf64_Ehdr *elf_header = (Elf64_Ehdr*) mapbase;
-#else
-    const Elf32_Ehdr *elf_header = (Elf32_Ehdr*) mapbase;
-#endif
-    const Elf_Phdr *prog_header = (const Elf_Phdr *)(mapbase + elf_header->e_phoff);
-
-    for (i = 0; i < elf_header->e_phnum; i++)
-    {
-         if (prog_header->p_type == PT_LOAD)
-         {
-             caddr_t desired_base = (caddr_t)((prog_header->p_vaddr / prog_header->p_align) * prog_header->p_align);
-             *relocbase = (caddr_t) (mapbase - desired_base);
-             return TRUE;
-         }
-         prog_header++;
-    }
-    return FALSE;
-}
-#endif
-
-/*************************************************************************
- *              init_builtin_dll
- */
-static NTSTATUS init_builtin_dll( void *module )
-{
-#ifdef HAVE_DLINFO
-    void *handle = NULL;
-    struct link_map *map;
-    void (*init_func)(int, char **, char **) = NULL;
-    void (**init_array)(int, char **, char **) = NULL;
-    ULONG_PTR i, init_arraysz = 0;
-#ifdef _WIN64
-    const Elf64_Dyn *dyn;
-#else
-    const Elf32_Dyn *dyn;
-#endif
-
-    if (!(handle = get_builtin_so_handle( module ))) return STATUS_SUCCESS;
-    if (dlinfo( handle, RTLD_DI_LINKMAP, &map )) map = NULL;
-    release_builtin_module( module );
-    if (!map) return STATUS_SUCCESS;
-
-    for (dyn = map->l_ld; dyn->d_tag; dyn++)
-    {
-        caddr_t relocbase = (caddr_t)map->l_addr;
-
-#ifdef __FreeBSD__
-        /* On older FreeBSD versions, l_addr was the absolute load address, now it's the relocation offset. */
-        if (offsetof(struct link_map, l_addr) == 0)
-            if (!get_relocbase(map->l_addr, &relocbase))
-                return STATUS_UNSUCCESSFUL;
-#endif
-        switch (dyn->d_tag)
-        {
-        case 0x60009990: init_array = (void *)(relocbase + dyn->d_un.d_val); break;
-        case 0x60009991: init_arraysz = dyn->d_un.d_val; break;
-        case 0x60009992: init_func = (void *)(relocbase + dyn->d_un.d_val); break;
-        }
-    }
-
-    TRACE( "%p: got init_func %p init_array %p %lu\n", module, init_func, init_array, init_arraysz );
-
-    if (init_func) init_func( main_argc, main_argv, main_envp );
-
-    if (init_array)
-        for (i = 0; i < init_arraysz / sizeof(*init_array); i++)
-            init_array[i]( main_argc, main_argv, main_envp );
-#endif
-    return STATUS_SUCCESS;
-}
-
-
 /***********************************************************************
  *           load_ntdll
  */
@@ -2162,24 +2093,7 @@ static ULONG_PTR get_image_address(void)
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     load_so_dll,
-    init_builtin_dll,
     unwind_builtin_dll,
-    system_time_precise,
-};
-
-
-static NTSTATUS wow64_load_so_dll( void *args ) { return STATUS_INVALID_IMAGE_FORMAT; }
-static NTSTATUS wow64_init_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
-static NTSTATUS wow64_unwind_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
-
-/***********************************************************************
- *           __wine_unix_call_wow64_funcs
- */
-const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
-{
-    wow64_load_so_dll,
-    wow64_init_builtin_dll,
-    wow64_unwind_builtin_dll,
     system_time_precise,
 };
 
@@ -2210,6 +2124,23 @@ static void hacks_init(void)
     if (env_str && !strcmp(env_str, "50130"))
         setenv("WINESTEAMNOEXEC", "1", 0);
 }
+
+#ifdef _WIN64
+
+static NTSTATUS wow64_load_so_dll( void *args ) { return STATUS_INVALID_IMAGE_FORMAT; }
+static NTSTATUS wow64_unwind_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
+
+/***********************************************************************
+ *           __wine_unix_call_wow64_funcs
+ */
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+{
+    wow64_load_so_dll,
+    wow64_unwind_builtin_dll,
+    system_time_precise,
+};
+
+#endif  /* _WIN64 */
 
 /***********************************************************************
  *           start_main_thread
@@ -2242,6 +2173,7 @@ static void start_main_thread(void)
     if (main_image_info.Machine != current_machine) load_wow64_ntdll( main_image_info.Machine );
     load_apiset_dll();
     ntdll_init_syscalls( 0, &syscall_table, p__wine_syscall_dispatcher );
+    *p__wine_unix_call_dispatcher = __wine_unix_call_dispatcher;
     server_init_process_done();
 }
 

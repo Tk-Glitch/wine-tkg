@@ -795,7 +795,7 @@ msgstr "Odgovara samo &cijela riječ"
 msgid "Match &Case"
 msgstr "Odgovara &veličina slova"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
+#: dlls/comdlg32/comdlg32.rc:325
 msgid "Direction"
 msgstr "Smjer"
 
@@ -3784,28 +3784,91 @@ msgstr ""
 "osvježeni ovdje dok ponovno ne pokrenete ovaj applet."
 
 #: dlls/joy.cpl/joy.rc:55
-msgid "Test Joystick"
-msgstr "Isprobaj joystick"
+msgid "DInput"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:59
+msgid "Axes"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:60
+msgid "POVs"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:61
 msgid "Buttons"
 msgstr "Gumbi"
 
-#: dlls/joy.cpl/joy.rc:68
-msgid "Test Force Feedback"
+#: dlls/joy.cpl/joy.rc:62
+#, fuzzy
+#| msgid "Test Force Feedback"
+msgid "Force Feedback Effect"
 msgstr "Isprobaj povratnu vezu sile"
 
-#: dlls/joy.cpl/joy.rc:72
-msgid "Available Effects"
-msgstr "Dostupni efekti"
-
-#: dlls/joy.cpl/joy.rc:74
+#: dlls/joy.cpl/joy.rc:64
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "Pritsnite bilo koji gumb na upravljaču kako bi aktivirali odabaran efekt. "
 "Smjer efetka se može promijeniti pomoću osi upravljača."
+
+#: dlls/joy.cpl/joy.rc:70
+msgid "XInput"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:73
+#, fuzzy
+#| msgid "User"
+msgid "User #0"
+msgstr "Korisničko ime"
+
+#: dlls/joy.cpl/joy.rc:74
+#, fuzzy
+#| msgid "User"
+msgid "User #1"
+msgstr "Korisničko ime"
+
+#: dlls/joy.cpl/joy.rc:75
+#, fuzzy
+#| msgid "User"
+msgid "User #2"
+msgstr "Korisničko ime"
+
+#: dlls/joy.cpl/joy.rc:76
+#, fuzzy
+#| msgid "User"
+msgid "User #3"
+msgstr "Korisničko ime"
+
+#: dlls/joy.cpl/joy.rc:78
+msgid ""
+"No user detected on slot #0, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:82
+msgid ""
+"No user detected on slot #1, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:86
+msgid ""
+"No user detected on slot #2, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:90
+msgid ""
+"No user detected on slot #3, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:95 dlls/joy.cpl/joy.rc:96 dlls/joy.cpl/joy.rc:97
+#: dlls/joy.cpl/joy.rc:98
+msgid "Rumble"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"

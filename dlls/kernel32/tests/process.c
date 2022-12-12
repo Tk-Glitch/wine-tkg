@@ -547,31 +547,12 @@ static WCHAR* getChildStringW(const char* sect, const char* key)
     return ret;
 }
 
-/* FIXME: this may be moved to the wtmain.c file, because it may be needed by
- * others... (windows uses stricmp while Un*x uses strcasecmp...)
- */
-static int wtstrcasecmp(const char* p1, const char* p2)
-{
-    char c1, c2;
-
-    c1 = c2 = '@';
-    while (c1 == c2 && c1)
-    {
-        c1 = *p1++; c2 = *p2++;
-        if (c1 != c2)
-        {
-            c1 = toupper(c1); c2 = toupper(c2);
-        }
-    }
-    return c1 - c2;
-}
-
 static int strCmp(const char* s1, const char* s2, BOOL sensitive)
 {
     if (!s1 && !s2) return 0;
     if (!s2) return -1;
     if (!s1) return 1;
-    return (sensitive) ? strcmp(s1, s2) : wtstrcasecmp(s1, s2);
+    return (sensitive) ? strcmp(s1, s2) : strcasecmp(s1, s2);
 }
 
 static void ok_child_string( int line, const char *sect, const char *key,
@@ -5063,16 +5044,25 @@ static void test_job_list_attribute(HANDLE parent_job)
 static void test_services_exe(void)
 {
     NTSTATUS status;
-    ULONG size, offset;
+    ULONG size, offset, try;
     char *buf;
     SYSTEM_PROCESS_INFORMATION *spi;
     ULONG services_pid = 0, services_session_id = ~0;
 
-    status = NtQuerySystemInformation(SystemProcessInformation, NULL, 0, &size);
-    ok(status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status);
+    /* Check that passing a zero size returns a size suitable for the next call,
+     * taking into account that in rare cases processes may start between the
+     * two NtQuerySystemInformation() calls. So this may require a few tries.
+     */
+    for (try = 0; try < 3; try++)
+    {
+        status = NtQuerySystemInformation(SystemProcessInformation, NULL, 0, &size);
+        ok(status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status);
 
-    buf = malloc(size);
-    status = NtQuerySystemInformation(SystemProcessInformation, buf, size, &size);
+        buf = malloc(size);
+        status = NtQuerySystemInformation(SystemProcessInformation, buf, size, &size);
+        if (status != STATUS_INFO_LENGTH_MISMATCH) break;
+        free(buf);
+    }
     ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 
     spi = (SYSTEM_PROCESS_INFORMATION *)buf;

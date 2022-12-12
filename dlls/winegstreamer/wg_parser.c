@@ -34,6 +34,8 @@
 #include <gst/video/video.h>
 #include <gst/audio/audio.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "winternl.h"
 #include "dshow.h"
 
@@ -107,10 +109,10 @@ struct wg_parser_stream
     GstBuffer *buffer;
     GstMapInfo map_info;
 
-    bool flushing, eos, enabled, has_caps;
+    bool flushing, eos, enabled, has_caps, has_tags, has_buffer;
 
     uint64_t duration;
-    gchar *language_code;
+    gchar *tags[WG_PARSER_TAG_COUNT];
 };
 
 static NTSTATUS wg_parser_get_stream_count(void *args)
@@ -398,12 +400,22 @@ static NTSTATUS wg_parser_stream_get_duration(void *args)
     return S_OK;
 }
 
-static NTSTATUS wg_parser_stream_get_language(void *args)
+static NTSTATUS wg_parser_stream_get_tag(void *args)
 {
-    struct wg_parser_stream_get_language_params *params = args;
-    if (params->stream->language_code)
-        lstrcpynA(params->buffer, params->stream->language_code, params->size);
-    return params->stream->language_code ? S_OK : E_FAIL;
+    struct wg_parser_stream_get_tag_params *params = args;
+    uint32_t len;
+
+    if (params->tag >= WG_PARSER_TAG_COUNT)
+        return STATUS_INVALID_PARAMETER;
+    if (!params->stream->tags[params->tag])
+        return STATUS_NOT_FOUND;
+    if ((len = strlen(params->stream->tags[params->tag]) + 1) > *params->size)
+    {
+        *params->size = len;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    memcpy(params->buffer, params->stream->tags[params->tag], len);
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS wg_parser_stream_seek(void *args)
@@ -583,6 +595,13 @@ static gboolean sink_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
             break;
         }
 
+        case GST_EVENT_TAG:
+            pthread_mutex_lock(&parser->mutex);
+            stream->has_tags = true;
+            pthread_cond_signal(&parser->init_cond);
+            pthread_mutex_unlock(&parser->mutex);
+            break;
+
         default:
             GST_WARNING("Ignoring \"%s\" event.", GST_EVENT_TYPE_NAME(event));
     }
@@ -598,6 +617,12 @@ static GstFlowReturn sink_chain_cb(GstPad *pad, GstObject *parent, GstBuffer *bu
     GST_LOG("stream %p, buffer %p.", stream, buffer);
 
     pthread_mutex_lock(&parser->mutex);
+
+    if (!stream->has_buffer)
+    {
+        stream->has_buffer = true;
+        pthread_cond_signal(&parser->init_cond);
+    }
 
     /* Allow this buffer to be flushed by GStreamer. We are effectively
      * implementing a queue object here. */
@@ -765,6 +790,8 @@ static struct wg_parser_stream *create_stream(struct wg_parser *parser)
 
 static void free_stream(struct wg_parser_stream *stream)
 {
+    unsigned int i;
+
     if (stream->their_src)
     {
         if (stream->post_sink)
@@ -780,9 +807,11 @@ static void free_stream(struct wg_parser_stream *stream)
     pthread_cond_destroy(&stream->event_cond);
     pthread_cond_destroy(&stream->event_empty_cond);
 
-    if (stream->language_code)
-        g_free(stream->language_code);
-
+    for (i = 0; i < ARRAY_SIZE(stream->tags); ++i)
+    {
+        if (stream->tags[i])
+            g_free(stream->tags[i]);
+    }
     free(stream);
 }
 
@@ -1247,20 +1276,50 @@ static gboolean src_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
     return ret;
 }
 
-static gchar *query_language(GstPad *pad)
+static void query_tags(struct wg_parser_stream *stream)
 {
+    const gchar *struct_name;
     GstTagList *tag_list;
     GstEvent *tag_event;
-    gchar *ret = NULL;
+    guint i, tag_count;
+    const GValue *val;
+    GstSample *sample;
+    GstBuffer *buf;
+    gsize size;
 
-    if ((tag_event = gst_pad_get_sticky_event(pad, GST_EVENT_TAG, 0)))
+    if (!(tag_event = gst_pad_get_sticky_event(stream->their_src, GST_EVENT_TAG, 0)))
+        return;
+
+    gst_event_parse_tag(tag_event, &tag_list);
+    gst_tag_list_get_string(tag_list, "language-code", &stream->tags[WG_PARSER_TAG_LANGUAGE]);
+
+    /* Extract stream name from Quick Time demuxer private tag where it puts unrecognized chunks. */
+    tag_count = gst_tag_list_get_tag_size(tag_list, "private-qt-tag");
+    for (i = 0; i < tag_count; ++i)
     {
-        gst_event_parse_tag(tag_event, &tag_list);
-        gst_tag_list_get_string(tag_list, "language-code", &ret);
-        gst_event_unref(tag_event);
+        if (!(val = gst_tag_list_get_value_index(tag_list, "private-qt-tag", i)))
+            continue;
+        if (!GST_VALUE_HOLDS_SAMPLE(val) || !(sample = gst_value_get_sample(val)))
+            continue;
+        struct_name = gst_structure_get_name(gst_sample_get_info(sample));
+        if (!struct_name || strcmp(struct_name, "application/x-gst-qt-name-tag"))
+            continue;
+        if (!(buf = gst_sample_get_buffer(sample)))
+            continue;
+        if ((size = gst_buffer_get_size(buf)) < 8)
+            continue;
+        size -= 8;
+        if (!(stream->tags[WG_PARSER_TAG_NAME] = g_malloc(size + 1)))
+            continue;
+        if (gst_buffer_extract(buf, 8, stream->tags[WG_PARSER_TAG_NAME], size) != size)
+        {
+            g_free(stream->tags[WG_PARSER_TAG_NAME]);
+            stream->tags[WG_PARSER_TAG_NAME] = NULL;
+            continue;
+        }
+        stream->tags[WG_PARSER_TAG_NAME][size] = 0;
     }
-
-    return ret;
+    gst_event_unref(tag_event);
 }
 
 static NTSTATUS wg_parser_connect(void *args)
@@ -1321,7 +1380,8 @@ static NTSTATUS wg_parser_connect(void *args)
         struct wg_parser_stream *stream = parser->streams[i];
         gint64 duration;
 
-        while (!stream->has_caps && !parser->error)
+        /* If we receieved a buffer waiting for tags or caps does not make sense anymore. */
+        while ((!stream->has_caps || !stream->has_tags) && !parser->error && !stream->has_buffer)
             pthread_cond_wait(&parser->init_cond, &parser->mutex);
 
         /* GStreamer doesn't actually provide any guarantees about when duration
@@ -1385,14 +1445,14 @@ static NTSTATUS wg_parser_connect(void *args)
             }
         }
 
+        query_tags(stream);
+
         /* Now that we're fully initialized, enable the stream so that further
          * samples get queued instead of being discarded. We don't actually need
          * the samples (in particular, the frontend should seek before
          * attempting to read anything), but we don't want to waste CPU time
          * trying to decode them. */
         stream->enabled = true;
-
-        stream->language_code = query_language(stream->their_src);
     }
 
     pthread_mutex_unlock(&parser->mutex);
@@ -1709,7 +1769,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     X(wg_parser_stream_notify_qos),
 
     X(wg_parser_stream_get_duration),
-    X(wg_parser_stream_get_language),
+    X(wg_parser_stream_get_tag),
     X(wg_parser_stream_seek),
 
     X(wg_transform_create),

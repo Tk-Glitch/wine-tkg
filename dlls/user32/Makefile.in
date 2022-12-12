@@ -20,7 +20,6 @@ C_SRCS = \
 	dialog.c \
 	edit.c \
 	exticon.c \
-	focus.c \
 	hook.c \
 	icontitle.c \
 	input.c \
@@ -32,7 +31,6 @@ C_SRCS = \
 	misc.c \
 	msgbox.c \
 	nonclient.c \
-	painting.c \
 	property.c \
 	resource.c \
 	scroll.c \
@@ -43,7 +41,6 @@ C_SRCS = \
 	user_main.c \
 	win.c \
 	winhelp.c \
-	winpos.c \
 	winproc.c \
 	winstation.c \
 	wsprintf.c

@@ -84,6 +84,7 @@ static struct {
 
 static BOOL (WINAPI *pGetCurrentInputMessageSource)( INPUT_MESSAGE_SOURCE *source );
 static BOOL (WINAPI *pGetPointerType)(UINT32, POINTER_INPUT_TYPE*);
+static BOOL (WINAPI *pGetPointerInfo)(UINT32, POINTER_INFO*);
 static int (WINAPI *pGetMouseMovePointsEx) (UINT, LPMOUSEMOVEPOINT, LPMOUSEMOVEPOINT, int, DWORD);
 static UINT (WINAPI *pGetRawInputDeviceList) (PRAWINPUTDEVICELIST, PUINT, UINT);
 static UINT (WINAPI *pGetRawInputDeviceInfoW) (HANDLE, UINT, void *, UINT *);
@@ -152,6 +153,7 @@ static void init_function_pointers(void)
 
     GET_PROC(GetCurrentInputMessageSource);
     GET_PROC(GetMouseMovePointsEx);
+    GET_PROC(GetPointerInfo);
     GET_PROC(GetPointerType);
     GET_PROC(GetRawInputDeviceList);
     GET_PROC(GetRawInputDeviceInfoW);
@@ -4705,10 +4707,11 @@ static void test_input_message_source(void)
     UnregisterClassA( cls.lpszClassName, GetModuleHandleA(0) );
 }
 
-static void test_GetPointerType(void)
+static void test_pointer_info(void)
 {
     BOOL ret;
     POINTER_INPUT_TYPE type = -1;
+    POINTER_INFO info;
     UINT id = 0;
 
     SetLastError(0xdeadbeef);
@@ -4728,6 +4731,12 @@ static void test_GetPointerType(void)
     ret = pGetPointerType(id, &type);
     ok(ret, "GetPointerType failed, got type %ld for %u.\n", type, id );
     ok(type == PT_MOUSE, " type %ld\n", type );
+
+    /* GetPointerInfo always fails unless the app receives WM_POINTER messages. */
+    SetLastError(0xdeadbeef);
+    ret = pGetPointerInfo(id, &info);
+    ok(!ret, "succeeded.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "got %lu.\n", GetLastError());
 }
 
 static void test_UnregisterDeviceNotification(void)
@@ -4943,7 +4952,7 @@ START_TEST(input)
     SetCursorPos( pos.x, pos.y );
 
     if(pGetPointerType)
-        test_GetPointerType();
+        test_pointer_info();
     else
         win_skip("GetPointerType is not available\n");
 

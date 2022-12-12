@@ -2355,8 +2355,10 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,urlmon.dll,1
 11,,windowscodecs.dll,1
 11,,winegstreamer.dll,1
+55,,wineps.drv,1
 11,,wineqtdecoder.dll,1
 11,,winevulkan.dll,1
+55,,winprint.dll,1
 11,,wintrust.dll,1
 11,,iexplore.exe,1
 
@@ -2428,6 +2430,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 16427,System\OLE DB,msdaps.dll
 16427,System\OLE DB,msdasql.dll
 16427,System\ADO,msado15.dll
+55,,wineps.drv
 66000,3,wineps.drv
 55,,winprint.dll
 12,,*.sys,-
@@ -2492,6 +2495,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 16427,System\OLE DB,msdaps.dll
 16427,System\OLE DB,msdasql.dll
 16427,System\ADO,msado15.dll
+55,,wineps.drv
 66000,3,wineps.drv
 55,,winprint.dll
 12,,*.sys

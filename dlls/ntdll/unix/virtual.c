@@ -620,7 +620,7 @@ static void add_builtin_module( void *module, void *handle )
 /***********************************************************************
  *           release_builtin_module
  */
-void release_builtin_module( void *module )
+static void release_builtin_module( void *module )
 {
     struct builtin_module *builtin;
 
@@ -667,14 +667,18 @@ void *get_builtin_so_handle( void *module )
  */
 static NTSTATUS get_builtin_unix_funcs( void *module, BOOL wow, const void **funcs )
 {
-    const char *ptr_name = wow ? "__wine_unix_call_wow64_funcs" : "__wine_unix_call_funcs";
+    const char *p, *ptr_name = wow ? "__wine_unix_call_wow64_funcs" : "__wine_unix_call_funcs";
     sigset_t sigset;
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     struct builtin_module *builtin;
 
     if (module == ntdll_module)
     {
+#ifdef _WIN64
         *funcs = wow ? __wine_unix_call_wow64_funcs : __wine_unix_call_funcs;
+#else
+        *funcs = __wine_unix_call_funcs;
+#endif
         return STATUS_SUCCESS;
     }
 
@@ -682,6 +686,16 @@ static NTSTATUS get_builtin_unix_funcs( void *module, BOOL wow, const void **fun
     LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
     {
         if (builtin->module != module) continue;
+        if (builtin->unix_path && (p = strrchr( builtin->unix_path, '/' )) && !strcmp( p, "/ntdll.so" ))
+        {
+#ifdef _WIN64
+            *funcs = wow ? __wine_unix_call_wow64_funcs : __wine_unix_call_funcs;
+#else
+            *funcs = __wine_unix_call_funcs;
+#endif
+            status = STATUS_SUCCESS;
+            break;
+        }
         if (builtin->unix_path && !builtin->unix_handle)
             builtin->unix_handle = dlopen( builtin->unix_path, RTLD_NOW );
         if (builtin->unix_handle)

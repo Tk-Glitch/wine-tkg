@@ -735,6 +735,8 @@ void output_module( DLLSPEC *spec )
         data_dirs[1] = ".L__wine_spec_imports";   /* DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT] */
     if (spec->nb_resources)
         data_dirs[2] = ".L__wine_spec_resources"; /* DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE] */
+    if (has_delay_imports())
+        data_dirs[13] = ".L__wine_spec_delay_imports"; /* DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT] */
 
     output_data_directories( data_dirs );
 
@@ -1446,9 +1448,9 @@ static void fixup_elf32( const char *name, int fd, void *header, size_t header_s
     {
         switch (dyn[i].d_tag)
         {
-        case 25: dyn[i].d_tag = 0x60009990; break;  /* DT_INIT_ARRAY */
-        case 27: dyn[i].d_tag = 0x60009991; break;  /* DT_INIT_ARRAYSZ */
-        case 12: dyn[i].d_tag = 0x60009992; break;  /* DT_INIT */
+        case 25: dyn[i].d_tag = 0x60009994; break;  /* DT_INIT_ARRAY */
+        case 27: dyn[i].d_tag = 0x60009995; break;  /* DT_INIT_ARRAYSZ */
+        case 12: dyn[i].d_tag = 0x60009996; break;  /* DT_INIT */
         }
     }
     lseek( fd, phdr->p_offset, SEEK_SET );

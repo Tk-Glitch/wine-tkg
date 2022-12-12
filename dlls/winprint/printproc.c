@@ -81,7 +81,7 @@ BOOL WINAPI EnumPrintProcessorDatatypesW(WCHAR *server, WCHAR *name, DWORD level
     *no = 0;
     *needed = sizeof(*info) + sizeof(raw);
 
-    if (level != 1 || !datatypes)
+    if (level != 1 || (size && !datatypes))
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
@@ -111,7 +111,7 @@ HANDLE WINAPI OpenPrintProcessor(WCHAR *port, PRINTPROCESSOROPENDATA *open_data)
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
-    if (!wcscmp(open_data->pDatatype, L"RAW"))
+    if (wcscmp(open_data->pDatatype, L"RAW"))
     {
         SetLastError(ERROR_INVALID_DATATYPE);
         return NULL;
@@ -192,4 +192,11 @@ BOOL WINAPI ClosePrintProcessor(HANDLE pp)
     memset(data, 0, sizeof(*data));
     LocalFree(data);
     return TRUE;
+}
+
+HRESULT WINAPI DllRegisterServer(void)
+{
+    AddPrintProcessorW(NULL, (WCHAR *)L"Windows 4.0", (WCHAR *)L"winprint.dll", (WCHAR *)L"winprint");
+    AddPrintProcessorW(NULL, NULL, (WCHAR *)L"winprint.dll", (WCHAR *)L"winprint");
+    return S_OK;
 }

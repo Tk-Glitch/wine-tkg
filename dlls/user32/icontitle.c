@@ -47,7 +47,7 @@ static BOOL ICONTITLE_SetTitlePos( HWND hwnd, HWND owner )
         length = lstrlenW( str );
     }
 
-    if (!(hDC = GetDC( hwnd ))) return FALSE;
+    if (!(hDC = NtUserGetDC( hwnd ))) return FALSE;
 
     hPrevFont = SelectObject( hDC, hIconTitleFont );
 
@@ -176,7 +176,7 @@ LRESULT WINAPI IconTitleWndProc( HWND hWnd, UINT msg,
             else
                 lParam = (owner == GetActiveWindow());
             if( ICONTITLE_Paint( hWnd, owner, (HDC)wParam, (BOOL)lParam ) )
-                ValidateRect( hWnd, NULL );
+                NtUserValidateRect( hWnd, NULL );
             return 1;
     }
     return DefWindowProcW( hWnd, msg, wParam, lParam );

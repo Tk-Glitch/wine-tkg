@@ -781,7 +781,7 @@ msgstr "단어 단위로(&W)"
 msgid "Match &Case"
 msgstr "대/소문자 구분(&C)"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
+#: dlls/comdlg32/comdlg32.rc:325
 msgid "Direction"
 msgstr "방향"
 
@@ -3732,28 +3732,91 @@ msgstr ""
 "스틱을 업데이트하지 않습니다."
 
 #: dlls/joy.cpl/joy.rc:55
-msgid "Test Joystick"
-msgstr "조이스틱 테스트"
+msgid "DInput"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:59
+msgid "Axes"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:60
+msgid "POVs"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:61
 msgid "Buttons"
 msgstr "버튼"
 
-#: dlls/joy.cpl/joy.rc:68
-msgid "Test Force Feedback"
+#: dlls/joy.cpl/joy.rc:62
+#, fuzzy
+#| msgid "Test Force Feedback"
+msgid "Force Feedback Effect"
 msgstr "강제 피드백 테스트"
 
-#: dlls/joy.cpl/joy.rc:72
-msgid "Available Effects"
-msgstr "사용 가능한 효과"
-
-#: dlls/joy.cpl/joy.rc:74
+#: dlls/joy.cpl/joy.rc:64
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "컨트롤러의 아무 버튼이나 눌러 선택한 효과를 활성화합니다. 컨트롤러 축을 이용"
 "하여 효과 방향을 바꿀 수 있습니다."
+
+#: dlls/joy.cpl/joy.rc:70
+msgid "XInput"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:73
+#, fuzzy
+#| msgid "User"
+msgid "User #0"
+msgstr "사용자"
+
+#: dlls/joy.cpl/joy.rc:74
+#, fuzzy
+#| msgid "User"
+msgid "User #1"
+msgstr "사용자"
+
+#: dlls/joy.cpl/joy.rc:75
+#, fuzzy
+#| msgid "User"
+msgid "User #2"
+msgstr "사용자"
+
+#: dlls/joy.cpl/joy.rc:76
+#, fuzzy
+#| msgid "User"
+msgid "User #3"
+msgstr "사용자"
+
+#: dlls/joy.cpl/joy.rc:78
+msgid ""
+"No user detected on slot #0, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:82
+msgid ""
+"No user detected on slot #1, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:86
+msgid ""
+"No user detected on slot #2, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:90
+msgid ""
+"No user detected on slot #3, make sure your gamepad is plugged in, and not "
+"overriden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:95 dlls/joy.cpl/joy.rc:96 dlls/joy.cpl/joy.rc:97
+#: dlls/joy.cpl/joy.rc:98
+msgid "Rumble"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"

@@ -6,13 +6,6 @@
 /* Define to the file extension for executables. */
 #undef EXEEXT
 
-/* Define to 1 if you have the <AL/al.h> header file. */
-#undef HAVE_AL_AL_H
-
-/* Define to 1 if you have the <ApplicationServices/ApplicationServices.h>
-   header file. */
-#undef HAVE_APPLICATIONSERVICES_APPLICATIONSERVICES_H
-
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #undef HAVE_ARPA_INET_H
 
@@ -28,17 +21,11 @@
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
-/* Define to 1 if you have the <Carbon/Carbon.h> header file. */
-#undef HAVE_CARBON_CARBON_H
-
 /* Define to 1 if you have the `clock_gettime' function. */
 #undef HAVE_CLOCK_GETTIME
 
 /* Define to 1 if you have the <CL/cl.h> header file. */
 #undef HAVE_CL_CL_H
-
-/* Define to 1 if you have the <CoreAudio/CoreAudio.h> header file. */
-#undef HAVE_COREAUDIO_COREAUDIO_H
 
 /* Define to 1 if you have the <cups/cups.h> header file. */
 #undef HAVE_CUPS_CUPS_H
@@ -46,9 +33,8 @@
 /* Define to 1 if you have the <cups/ppd.h> header file. */
 #undef HAVE_CUPS_PPD_H
 
-/* Define to 1 if you have the <DiskArbitration/DiskArbitration.h> header
-   file. */
-#undef HAVE_DISKARBITRATION_DISKARBITRATION_H
+/* Define to 1 if you have the `dladdr1' function. */
+#undef HAVE_DLADDR1
 
 /* Define to 1 if you have the `dlinfo' function. */
 #undef HAVE_DLINFO
@@ -130,15 +116,6 @@
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
-
-/* Define to 1 if you have the `IOHIDManagerCreate' function. */
-#undef HAVE_IOHIDMANAGERCREATE
-
-/* Define to 1 if you have the <IOKit/hid/IOHIDLib.h> header file. */
-#undef HAVE_IOKIT_HID_IOHIDLIB_H
-
-/* Define to 1 if you have the <IOKit/IOKitLib.h> header file. */
-#undef HAVE_IOKIT_IOKITLIB_H
 
 /* Define to 1 if you have the `kqueue' function. */
 #undef HAVE_KQUEUE
@@ -247,9 +224,6 @@
 
 /* Define to 1 if you have the <mach-o/loader.h> header file. */
 #undef HAVE_MACH_O_LOADER_H
-
-/* Define to 1 if you have the <Metal/Metal.h> header file. */
-#undef HAVE_METAL_METAL_H
 
 /* Define to 1 if you have the <mntent.h> header file. */
 #undef HAVE_MNTENT_H
@@ -413,9 +387,6 @@
 /* Define to 1 if you have the <SDL.h> header file. */
 #undef HAVE_SDL_H
 
-/* Define to 1 if you have the <Security/Security.h> header file. */
-#undef HAVE_SECURITY_SECURITY_H
-
 /* Define to 1 if you have the `setproctitle' function. */
 #undef HAVE_SETPROCTITLE
 
@@ -553,14 +524,6 @@
 
 /* Define to 1 if you have the `sysinfo' function. */
 #undef HAVE_SYSINFO
-
-/* Define to 1 if you have the
-   <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h> header file. */
-#undef HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H
-
-/* Define to 1 if you have the <SystemConfiguration/SCNetworkConfiguration.h>
-   header file. */
-#undef HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H
 
 /* Define to 1 if you have the <sys/attr.h> header file. */
 #undef HAVE_SYS_ATTR_H

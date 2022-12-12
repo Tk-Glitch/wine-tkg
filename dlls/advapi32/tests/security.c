@@ -8216,7 +8216,7 @@ static void test_pseudo_handle_security(void)
                     "key %p: got error %u\n", keys[i], ret);
         else
             ok(!ret, "key %p: got error %u\n", keys[i], ret);
-        LocalFree(sd_ptr);
+        if (!ret) LocalFree(sd_ptr);
 
         ret = GetSecurityInfo(keys[i], SE_KERNEL_OBJECT,
                 DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &sd_ptr);

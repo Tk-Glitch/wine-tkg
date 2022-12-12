@@ -2598,7 +2598,8 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
                 && format->format != GL_LUMINANCE && format->format != GL_LUMINANCE_ALPHA
                 && (format->f.red_size || format->f.alpha_size))
         {
-            DWORD readback[16 * 16 * 16], color = 0, r_range, a_range;
+            uint32_t readback[16 * 16 * 16], color = 0;
+            unsigned int r_range, a_range;
             BYTE r, a;
             BOOL match = TRUE;
             GLuint rb;
@@ -3308,7 +3309,7 @@ static BOOL check_filter(const struct wined3d_gl_info *gl_info, GLenum internal)
 {
     static const DWORD data[] = {0x00000000, 0xffffffff};
     GLuint tex, fbo, buffer;
-    DWORD readback[16 * 1];
+    uint32_t readback[16 * 1];
     BOOL ret = FALSE;
 
     /* Render a filtered texture and see what happens. This is intended to detect the lack of
@@ -3886,7 +3887,7 @@ BOOL wined3d_caps_gl_ctx_test_viewport_subpixel_bits(struct wined3d_caps_gl_ctx 
     const struct wined3d_gl_info *gl_info = ctx->gl_info;
     static const float offset = -63.0f / 128.0f;
     GLuint texture, fbo;
-    DWORD readback[4];
+    uint32_t readback[4];
     unsigned int i;
 
     gl_info->gl_ops.gl.p_glGenTextures(1, &texture);
@@ -3933,7 +3934,7 @@ bool wined3d_caps_gl_ctx_test_filling_convention(struct wined3d_caps_gl_ctx *ctx
     const struct wined3d_gl_info *gl_info = ctx->gl_info;
     unsigned int x, y, clear = 0, draw = 0;
     GLuint texture, fbo;
-    DWORD readback[8][8];
+    uint32_t readback[8][8];
 
     /* This is a very simple test to find out how GL handles polygon edges:
      * Draw a 1x1 quad exactly through 4 adjacent pixel centers in an 8x8
@@ -4027,7 +4028,7 @@ static float wined3d_adapter_find_polyoffset_scale(struct wined3d_caps_gl_ctx *c
     static const struct wined3d_color blue = {0.0f, 0.0f, 1.0f, 1.0f};
     GLuint fbo, color, depth;
     unsigned int low = 0, high = 32, cur;
-    DWORD readback[256];
+    uint32_t readback[256];
     static const struct wined3d_vec3 geometry[] =
     {
         {-1.0f, -1.0f, -1.0f},
@@ -4863,7 +4864,7 @@ static void debug_append(struct debug_buffer *buffer, const char *str, const cha
     buffer->size -= size;
 }
 
-const char *wined3d_debug_resource_access(DWORD access)
+const char *wined3d_debug_resource_access(uint32_t access)
 {
     struct debug_buffer buffer;
 
@@ -4880,7 +4881,7 @@ const char *wined3d_debug_resource_access(DWORD access)
     return wine_dbg_sprintf("%s", buffer.str);
 }
 
-const char *wined3d_debug_bind_flags(DWORD bind_flags)
+const char *wined3d_debug_bind_flags(uint32_t bind_flags)
 {
     struct debug_buffer buffer;
 
@@ -4929,7 +4930,7 @@ const char *wined3d_debug_view_desc(const struct wined3d_view_desc *d, const str
                 d->u.texture.layer_idx, d->u.texture.layer_count);
 }
 
-const char *debug_d3dusage(DWORD usage)
+const char *debug_d3dusage(uint32_t usage)
 {
     struct debug_buffer buffer;
 
@@ -5362,14 +5363,14 @@ const char *debug_shader_type(enum wined3d_shader_type type)
     }
 }
 
-const char *debug_d3dstate(DWORD state)
+const char *debug_d3dstate(uint32_t state)
 {
     if (STATE_IS_RENDER(state))
         return wine_dbg_sprintf("STATE_RENDER(%s)", debug_d3drenderstate(state - STATE_RENDER(0)));
     if (STATE_IS_TEXTURESTAGE(state))
     {
-        DWORD texture_stage = (state - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
-        DWORD texture_state = state - STATE_TEXTURESTAGE(texture_stage, 0);
+        unsigned int texture_stage = (state - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
+        uint32_t texture_state = state - STATE_TEXTURESTAGE(texture_stage, 0);
         return wine_dbg_sprintf("STATE_TEXTURESTAGE(%#x, %s)",
                 texture_stage, debug_d3dtexturestate(texture_state));
     }
@@ -6959,7 +6960,7 @@ int wined3d_ffp_vertex_program_key_compare(const void *key, const struct wine_rb
     return memcmp(ka, kb, sizeof(*ka));
 }
 
-const char *wined3d_debug_location(DWORD location)
+const char *wined3d_debug_location(uint32_t location)
 {
     struct debug_buffer buffer;
     const char *prefix = "";
@@ -7040,7 +7041,7 @@ void wined3d_release_dc(HWND window, HDC dc)
     if (WindowFromDC(dc) != window)
         WARN("DC %p does not belong to window %p.\n", dc, window);
     else if (!ReleaseDC(window, dc))
-        ERR("Failed to release device context %p, last error %#x.\n", dc, GetLastError());
+        ERR("Failed to release device context %p, last error %#lx.\n", dc, GetLastError());
 }
 
 BOOL wined3d_clip_blit(const RECT *clip_rect, RECT *clipped, RECT *other)

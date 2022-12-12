@@ -33,7 +33,6 @@
 #define NONAMELESSUNION
 #include "dshow.h"
 #include "mfidl.h"
-#include "wmsdk.h"
 #include "wine/debug.h"
 #include "wine/strmbase.h"
 
@@ -96,7 +95,7 @@ void wg_parser_stream_notify_qos(struct wg_parser_stream *stream,
 
 /* Returns the duration in 100-nanosecond units. */
 uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream);
-bool wg_parser_stream_get_language(struct wg_parser_stream *stream, char *buffer, uint32_t size);
+char *wg_parser_stream_get_tag(struct wg_parser_stream *stream, enum wg_parser_tag tag);
 /* start_pos and stop_pos are in 100-nanosecond units. */
 void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
         uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags);
@@ -147,7 +146,5 @@ HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj);
 HRESULT aac_decoder_create(REFIID riid, void **ret);
 HRESULT h264_decoder_create(REFIID riid, void **ret);
 HRESULT video_processor_create(REFIID riid, void **ret);
-
-HRESULT WINAPI winegstreamer_create_wm_sync_reader(IUnknown *outer, void **out);
 
 #endif /* __GST_PRIVATE_INCLUDED__ */

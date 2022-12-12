@@ -110,8 +110,9 @@ static HRESULT WINAPI device_watcher_handler_Invoke( ITypedEventHandler_DeviceWa
     impl->invoked = TRUE;
     impl->args = args;
 
+    IDeviceWatcher_AddRef( sender );
     ref = IDeviceWatcher_Release( sender );
-    ok( ref == 2, "got ref %lu\n", ref );
+    ok( ref == 3, "got ref %lu\n", ref );
 
     SetEvent( impl->event );
 
@@ -138,7 +139,7 @@ static void test_DeviceInformation( void )
 {
     static const WCHAR *device_info_name = L"Windows.Devices.Enumeration.DeviceInformation";
 
-    struct device_watcher_handler stopped_handler, added_handler;
+    static struct device_watcher_handler stopped_handler, added_handler;
     EventRegistrationToken stopped_token, added_token;
     IInspectable *inspectable, *inspectable2;
     IActivationFactory *factory;

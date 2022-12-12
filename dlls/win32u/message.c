@@ -2257,6 +2257,14 @@ DWORD WINAPI NtUserWaitForInputIdle( HANDLE process, DWORD timeout, BOOL wow )
 }
 
 /***********************************************************************
+ *           NtUserWaitMessage (win32u.@)
+ */
+BOOL WINAPI NtUserWaitMessage(void)
+{
+    return NtUserMsgWaitForMultipleObjectsEx( 0, NULL, INFINITE, QS_ALLINPUT, 0 ) != WAIT_FAILED;
+}
+
+/***********************************************************************
  *           NtUserPeekMessage  (win32u.@)
  */
 BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
@@ -3003,7 +3011,7 @@ static LRESULT send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     info.lparam  = lparam;
     info.flags   = SMTO_NORMAL;
     info.timeout = 0;
-    info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.wm_char = WMCHAR_MAP_SENDMESSAGE;
     info.params  = client_params;
 
     process_message( &info, &res, ansi );

@@ -2297,6 +2297,14 @@ HWND WINAPI NtUserChildWindowFromPointEx( HWND parent, LONG x, LONG y, UINT flag
 }
 
 /*******************************************************************
+ *           NtUserRealChildWindowFromPoint (win32u.@)
+ */
+HWND WINAPI NtUserRealChildWindowFromPoint( HWND parent, LONG x, LONG y )
+{
+    return NtUserChildWindowFromPointEx( parent, x, y, CWP_SKIPTRANSPARENT | CWP_SKIPINVISIBLE );
+}
+
+/*******************************************************************
  *           get_work_rect
  *
  * Get the work area that a maximized window can cover, depending on style.
@@ -2485,6 +2493,20 @@ static void make_rect_onscreen( RECT *rect )
         rect->top += info.rcWork.bottom - rect->bottom;
         rect->bottom = info.rcWork.bottom;
     }
+}
+
+/***********************************************************************
+ *           NtUserGetInternalWindowPos (win32u.@)
+ */
+UINT WINAPI NtUserGetInternalWindowPos( HWND hwnd, RECT *rect, POINT *pt )
+{
+    WINDOWPLACEMENT placement;
+
+    placement.length = sizeof(placement);
+    if (!NtUserGetWindowPlacement( hwnd, &placement )) return 0;
+    if (rect) *rect = placement.rcNormalPosition;
+    if (pt) *pt = placement.ptMinPosition;
+    return placement.showCmd;
 }
 
 /* make sure the specified point is visible on screen */
@@ -5024,7 +5046,7 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
                                   UNICODE_STRING *version, UNICODE_STRING *window_name,
                                   DWORD style, INT x, INT y, INT cx, INT cy,
                                   HWND parent, HMENU menu, HINSTANCE instance, void *params,
-                                  DWORD flags, CBT_CREATEWNDW *client_cbtc, DWORD unk, BOOL ansi )
+                                  DWORD flags, HINSTANCE client_instance, DWORD unk, BOOL ansi )
 {
     UINT win_dpi, thread_dpi = get_thread_dpi();
     DPI_AWARENESS_CONTEXT context;
@@ -5038,7 +5060,7 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
     static const WCHAR messageW[] = {'M','e','s','s','a','g','e'};
 
     cs.lpCreateParams = params;
-    cs.hInstance  = instance;
+    cs.hInstance  = client_instance ? client_instance : instance;
     cs.hMenu      = menu;
     cs.hwndParent = parent;
     cs.style      = style;
@@ -5408,6 +5430,12 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
 
     case NtUserCallHwnd_SetForegroundWindow:
         return set_foreground_window( hwnd, FALSE );
+
+    case NtUserCallHwnd_SetProgmanWindow:
+        return HandleToUlong( set_progman_window( hwnd ));
+
+    case NtUserCallHwnd_SetTaskmanWindow:
+        return HandleToUlong( set_taskman_window( hwnd ));
 
     /* temporary exports */
     case NtUserGetFullWindowHandle:

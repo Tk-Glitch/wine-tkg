@@ -219,7 +219,7 @@ static BOOL set_clientsite, container_locked;
 static BOOL readystate_set_loading = FALSE, readystate_set_interactive = FALSE, load_from_stream;
 static BOOL editmode = FALSE, ignore_external_qi;
 static BOOL inplace_deactivated, open_call;
-static BOOL complete, loading_js, loading_hash, is_refresh;
+static BOOL complete, loading_js, loading_hash, is_refresh, is_from_hist;
 static DWORD status_code = HTTP_STATUS_OK;
 static BOOL asynchronous_binding = FALSE;
 static BOOL support_wbapp, allow_new_window, no_travellog;
@@ -529,6 +529,62 @@ static void _test_performance_timing(unsigned line, IUnknown *unk, const WCHAR *
         ok_(__FILE__,line)(V_UI8(&var) == 0, "%s is not 0\n", wine_dbgstr_w(prop));
 }
 
+#define test_navigation_type(a) _test_navigation_type(__LINE__,a)
+static void _test_navigation_type(unsigned line, IUnknown *unk)
+{
+    IHTMLPerformanceNavigation *nav;
+    IHTMLPerformance *perf;
+    DISPPARAMS dp = { 0 };
+    ULONG type, expected;
+    IHTMLWindow2 *window;
+    IHTMLDocument2 *doc;
+    IDispatchEx *dispex;
+    DISPID dispid;
+    HRESULT hres;
+    VARIANT var;
+    BSTR bstr;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDocument2, (void**)&doc);
+    ok_(__FILE__,line)(hres == S_OK, "QueryInterface(IID_IHTMLDocument2) failed: %08lx\n", hres);
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok_(__FILE__,line)(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
+    IHTMLDocument2_Release(doc);
+
+    hres = IHTMLWindow2_QueryInterface(window, &IID_IDispatchEx, (void**)&dispex);
+    ok_(__FILE__,line)(hres == S_OK, "QueryInterface(IID_IDispatchEx) failed: %08lx\n", hres);
+    IHTMLWindow2_Release(window);
+
+    bstr = SysAllocString(L"performance");
+    hres = IDispatchEx_GetDispID(dispex, bstr, fdexNameCaseSensitive, &dispid);
+    ok_(__FILE__,line)(hres == S_OK, "GetDispID(performance) failed: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    V_VT(&var) = VT_EMPTY;
+    hres = IDispatchEx_InvokeEx(dispex, dispid, 0, DISPATCH_PROPERTYGET, &dp, &var, NULL, NULL);
+    ok_(__FILE__,line)(hres == S_OK, "InvokeEx(performance) failed: %08lx\n", hres);
+    ok_(__FILE__,line)(V_VT(&var) == VT_DISPATCH, "V_VT(performance) = %d\n", V_VT(&var));
+    ok_(__FILE__,line)(V_DISPATCH(&var) != NULL, "V_DISPATCH(performance) = NULL\n");
+    IDispatchEx_Release(dispex);
+
+    hres = IDispatch_QueryInterface(V_DISPATCH(&var), &IID_IHTMLPerformance, (void**)&perf);
+    ok_(__FILE__,line)(hres == S_OK, "QueryInterface(IID_IHTMLPerformance) failed: %08lx\n", hres);
+    ok_(__FILE__,line)(perf != NULL, "performance is NULL\n");
+    VariantClear(&var);
+
+    hres = IHTMLPerformance_get_navigation(perf, &nav);
+    ok_(__FILE__,line)(hres == S_OK, "get_navigation failed: %08lx\n", hres);
+    ok_(__FILE__,line)(nav != NULL, "performance.navigation is NULL\n");
+    IHTMLPerformance_Release(perf);
+
+    hres = IHTMLPerformanceNavigation_get_type(nav, &type);
+    ok_(__FILE__,line)(hres == S_OK, "get_type failed: %08lx\n", hres);
+    IHTMLPerformanceNavigation_Release(nav);
+
+    expected = is_refresh || editmode ? 1 : is_from_hist ? 2 : 0;
+    ok_(__FILE__,line)(type == expected, "type = %lu, expected %lu\n", type, expected);
+}
+
 static BSTR get_mime_type_display_name(const WCHAR *content_type)
 {
     WCHAR buffer[128], ext[128], *str, *progid;
@@ -752,8 +808,8 @@ static HRESULT WINAPI Protocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     if(is_mhtml)
         ok(!bindinfo.dwOptions, "bindinfo.dwOptions=%lx\n", bindinfo.dwOptions);
     else
-        ok(bindinfo.dwOptions == 0x80000 || bindinfo.dwOptions == 0x4080000, /* win2k3 */
-           "bindinfo.dwOptions=%lx\n", bindinfo.dwOptions);
+        ok(bindinfo.dwOptions == 0x80000 || bindinfo.dwOptions == 0x4080000 /* win2k3 */ ||
+           bindinfo.dwOptions == 0x20000, "bindinfo.dwOptions=%lx\n", bindinfo.dwOptions);
     ok(bindinfo.dwOptionsFlags == 0, "bindinfo.dwOptionsFlags=%ld\n", bindinfo.dwOptionsFlags);
     /* TODO: test dwCodePage */
     /* TODO: test securityAttributes */
@@ -1119,6 +1175,9 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
             test_readyState(NULL);
         readystate_set_interactive = (load_state != LD_INTERACTIVE);
 
+        if((!is_refresh && !editmode) || called_Exec_ShellDocView_37)
+            test_navigation_type(doc_unk);
+
         /* w10pro64_ja has it set to zero despite readyState being interactive, for whatever reason */
         if(!is_mhtml)
             test_performance_timing(doc_unk, L"domInteractive");
@@ -1142,6 +1201,7 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
     case 3000030:
     case 3000031:
     case 3000032:
+    case 3000033:
         /* TODO */
         return S_OK;
     }
@@ -1631,8 +1691,8 @@ static HRESULT WINAPI Moniker_BindToStorage(IMoniker *iface, IBindCtx *pbc, IMon
     ok(bindinfo.dwBindVerb == 0, "bindinfo.dwBindVerb=%ld\n", bindinfo.dwBindVerb);
     ok(bindinfo.szCustomVerb == 0, "bindinfo.szCustomVerb=%p\n", bindinfo.szCustomVerb);
     ok(bindinfo.cbstgmedData == 0, "bindinfo.cbstgmedData=%ld\n", bindinfo.cbstgmedData);
-    ok(bindinfo.dwOptions == 0x80000 || bindinfo.dwOptions == 0x4080000,
-       "bindinfo.dwOptions=%lx\n", bindinfo.dwOptions);
+    ok(bindinfo.dwOptions == 0x80000 || bindinfo.dwOptions == 0x4080000 ||
+       bindinfo.dwOptions == 0x20000, "bindinfo.dwOptions=%lx\n", bindinfo.dwOptions);
     ok(bindinfo.dwOptionsFlags == 0, "bindinfo.dwOptionsFlags=%ld\n", bindinfo.dwOptionsFlags);
     /* TODO: test dwCodePage */
     /* TODO: test securityAttributes */
@@ -2986,6 +3046,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             ok(nCmdexecopt == 0, "nCmdexecopts=%08lx\n", nCmdexecopt);
             ok(pvaOut == NULL, "pvaOut=%p\n", pvaOut);
             ok(pvaIn == NULL, "pvaIn=%p\n", pvaIn);
+            test_navigation_type(doc_unk);
             test_performance_timing(doc_unk, L"domComplete");
             readystate_set_loading = FALSE;
             readystate_set_interactive = FALSE;
@@ -3660,6 +3721,7 @@ static HRESULT  WINAPI DocObjectService_FireNavigateComplete2(
 {
     CHECK_EXPECT(FireNavigateComplete2);
     test_readyState(NULL);
+    test_navigation_type(doc_unk);
     test_performance_timing(doc_unk, L"domInteractive");
 
     if(loading_hash)
@@ -4507,6 +4569,7 @@ static HRESULT WINAPI WebBrowserPriv_NavigateWithBindCtx(IWebBrowserPriv *iface,
     trace("NavigateWithBindCtx\n");
 
     CHECK_EXPECT(NavigateWithBindCtx);
+    test_navigation_type(doc_unk);
 
     ok(V_VT(uri) == VT_BSTR, "V_VT(uri) = %d\n", V_VT(uri));
     test_NavigateWithBindCtx(V_BSTR(uri), flags, target_frame, post_data, headers, bind_ctx, url_fragment);
@@ -5889,6 +5952,7 @@ static void test_download(DWORD flags)
     else
         b = &called_Exec_HTTPEQUIV_DONE;
     is_refresh = (flags & DWL_REFRESH) != 0;
+    is_from_hist = (flags & DWL_FROM_HISTORY) != 0;
 
     hwnd = FindWindowA("Internet Explorer_Hidden", NULL);
     ok(hwnd != NULL, "Could not find hidden window\n");
@@ -5954,10 +6018,12 @@ static void test_download(DWORD flags)
             SET_EXPECT(CountEntries);
         SET_EXPECT(Exec_HTTPEQUIV_DONE);
     }
-    if(nav_url || support_wbapp) {
+    if(nav_url || support_wbapp || editmode) {
         SET_EXPECT(UpdateUI);
         SET_EXPECT(Exec_UPDATECOMMANDS);
         SET_EXPECT(Exec_SETTITLE);
+    }
+    if(nav_url || support_wbapp) {
         if(flags & DWL_EXPECT_HISTUPDATE)
             SET_EXPECT(Exec_Explorer_38);
         SET_EXPECT(UpdateBackForwardState);
@@ -6062,10 +6128,12 @@ static void test_download(DWORD flags)
         CHECK_CALLED(Exec_HTTPEQUIV_DONE);
     }
     SET_CALLED(SetStatusText);
-    if(nav_url || support_wbapp) { /* avoiding race, FIXME: find better way */
+    if(nav_url || support_wbapp || editmode) { /* avoiding race, FIXME: find better way */
         CLEAR_CALLED(UpdateUI);
         CLEAR_CALLED(Exec_UPDATECOMMANDS);
         CLEAR_CALLED(Exec_SETTITLE);
+    }
+    if(nav_url || support_wbapp) {
         if(flags & DWL_EXPECT_HISTUPDATE) {
             if(flags & DWL_FROM_HISTORY)
                 CHECK_CALLED_BROKEN(Exec_Explorer_38); /* Some old IEs don't call it. */
@@ -6395,6 +6463,24 @@ static void test_refresh(IHTMLDocument2 *doc)
     CHECK_CALLED(Exec_DocHostCommandHandler_2300);
 
     IOleCommandTarget_Release(cmdtrg);
+
+    test_download(DWL_VERBDONE|DWL_HTTP|DWL_ONREADY_LOADING|DWL_REFRESH|DWL_EX_GETHOSTINFO);
+}
+
+static void test_reload(IHTMLDocument2 *doc)
+{
+    IHTMLLocation *location;
+    HRESULT hres;
+
+    trace("Reload...\n");
+
+    location = NULL;
+    hres = IHTMLDocument2_get_location(doc, &location);
+    ok(hres == S_OK, "get_location failed: %08lx\n", hres);
+    ok(location != NULL, "location == NULL\n");
+
+    hres = IHTMLLocation_reload(location, VARIANT_FALSE);
+    IHTMLLocation_Release(location);
 
     test_download(DWL_VERBDONE|DWL_HTTP|DWL_ONREADY_LOADING|DWL_REFRESH|DWL_EX_GETHOSTINFO);
 }
@@ -8216,6 +8302,7 @@ static void test_HTMLDocument_http(BOOL with_wbapp)
         test_put_href(doc, FALSE, L"#test", L"http://test.winehq.org/tests/winehq_snapshot/#test", FALSE, TRUE, 0);
         test_travellog(doc);
         test_refresh(doc);
+        test_reload(doc);
     }
     test_put_href(doc, FALSE, NULL, L"javascript:external%20&&undefined", TRUE, FALSE, 0);
     test_put_href(doc, FALSE, NULL, L"about:blank", FALSE, FALSE, support_wbapp ? DWL_EXPECT_HISTUPDATE : 0);

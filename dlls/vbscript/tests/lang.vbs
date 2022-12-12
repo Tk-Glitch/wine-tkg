@@ -766,6 +766,26 @@ end select
 
 select case 0 : case 1 : case else : end select
 
+' Case without separator
+function SelectCaseTest(x)
+    select case x
+        case 0: SelectCaseTest = 100
+        case 1  SelectCaseTest = 200
+        case 2
+                SelectCaseTest = 300
+        case 3
+        case 4  SelectCaseTest = 400
+        case else SelectCaseTest = 500
+    end select
+end function
+
+call ok(SelectCaseTest(0) = 100, "Unexpected case " & SelectCaseTest(0))
+call ok(SelectCaseTest(1) = 200, "Unexpected case " & SelectCaseTest(1))
+call ok(SelectCaseTest(2) = 300, "Unexpected case " & SelectCaseTest(2))
+call ok(SelectCaseTest(3) = vbEmpty, "Unexpected case " & SelectCaseTest(3))
+call ok(SelectCaseTest(4) = 400, "Unexpected case " & SelectCaseTest(4))
+call ok(SelectCaseTest(5) = 500, "Unexpected case " & SelectCaseTest(5))
+
 if false then
 Sub testsub
     x = true
@@ -1210,10 +1230,16 @@ Call ok(getVT(test) = "VT_DISPATCH", "getVT(test) = " & getVT(test))
 Call ok(Me is Test, "Me is not Test")
 
 Const c1 = 1, c2 = 2, c3 = -3
+Private Const c4 = 4
+Public Const c5 = 5
 Call ok(c1 = 1, "c1 = " & c1)
 Call ok(getVT(c1) = "VT_I2", "getVT(c1) = " & getVT(c1))
 Call ok(c3 = -3, "c3 = " & c3)
 Call ok(getVT(c3) = "VT_I2", "getVT(c3) = " & getVT(c3))
+Call ok(c4 = 4, "c4 = " & c4)
+Call ok(getVT(c4) = "VT_I2", "getVT(c4) = " & getVT(c4))
+Call ok(c5 = 5, "c5 = " & c5)
+Call ok(getVT(c5) = "VT_I2", "getVT(c5) = " & getVT(c5))
 
 Const cb = True, cs = "test", cnull = null
 Call ok(cb, "cb = " & cb)
@@ -1525,12 +1551,48 @@ e = err.number
 on error goto 0
 ok e = 9, "e = " & e ' VBSE_OUT_OF_BOUNDS, can only change rightmost dimension
 
-dim staticarray(4)
-on error resume next
-redim staticarray(3)
-e = err.number
-on error goto 0
-todo_wine_ok e = 10, "e = " & e
+sub TestReDimFixed
+    on error resume next
+
+    dim staticarray(4)
+    err.clear
+    redim staticarray(3)
+    call ok(err.number = 10, "err.number = " & err.number)
+    call ok(isArrayFixed(staticarray), "Expected fixed size array")
+
+    err.clear
+    redim staticarray("abc")
+    call ok(err.number = 10, "err.number = " & err.number)
+
+    dim staticarray2(4)
+    err.clear
+    redim preserve staticarray2(5)
+    call ok(err.number = 10, "err.number = " & err.number)
+    call ok(isArrayFixed(staticarray2), "Expected fixed size array")
+
+    err.clear
+    redim preserve staticarray2("abc")
+    ' Win10+ builds return INVALID_CALL (5)
+    call ok(err.number = 5 or err.number = 13, "err.number = " & err.number)
+end sub
+Call TestRedimFixed
+
+sub TestRedimInputArg
+    on error resume next
+
+    dim x
+
+    x = Array(1)
+    err.clear
+    redim x("abc")
+    call ok(err.number = 13, "err.number = " & err.number)
+
+    err.clear
+    redim preserve x("abc")
+    ' Win10+ builds return INVALID_CALL (5)
+    call ok(err.number = 5 or err.number = 13, "err.number = " & err.number)
+end sub
+Call TestRedimInputArg
 
 sub TestReDimList
     dim x, y

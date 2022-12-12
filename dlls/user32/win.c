@@ -278,7 +278,7 @@ static BOOL is_default_coord( int x )
  */
 HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module, BOOL unicode )
 {
-    UNICODE_STRING class, window_name;
+    UNICODE_STRING class, window_name = {0};
     HWND hwnd, top_child = 0;
     MDICREATESTRUCTW mdi_cs;
     WNDCLASSEXW info;
@@ -399,9 +399,9 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
 
     hwnd = NtUserCreateWindowEx( cs->dwExStyle, &class, NULL, &window_name, cs->style,
                                  cs->x, cs->y, cs->cx, cs->cy, cs->hwndParent, menu, module,
-                                 cs->lpCreateParams, 0, NULL, 0, !unicode );
+                                 cs->lpCreateParams, 0, cs->hInstance, 0, !unicode );
     if (!hwnd && menu && menu != cs->hMenu) NtUserDestroyMenu( menu );
-    if (!unicode) RtlFreeUnicodeString( &window_name );
+    if (!unicode && window_name.Buffer != name_buf) RtlFreeUnicodeString( &window_name );
     return hwnd;
 }
 
@@ -645,6 +645,234 @@ static LONG_PTR set_dialog_proc( HWND hwnd, LONG_PTR newval, BOOL ansi )
 UINT WINAPI GetDpiForWindow( HWND hwnd )
 {
     return NtUserGetDpiForWindow( hwnd );
+}
+
+
+/***********************************************************************
+ *           SwitchToThisWindow (USER32.@)
+ */
+void WINAPI SwitchToThisWindow( HWND hwnd, BOOL alt_tab )
+{
+    if (IsIconic( hwnd )) NtUserShowWindow( hwnd, SW_RESTORE );
+    else BringWindowToTop( hwnd );
+}
+
+
+/***********************************************************************
+ *           GetWindowRect (USER32.@)
+ */
+BOOL WINAPI GetWindowRect( HWND hwnd, RECT *rect )
+{
+    BOOL ret = NtUserGetWindowRect( hwnd, rect );
+    if (ret) TRACE( "hwnd %p %s\n", hwnd, wine_dbgstr_rect(rect) );
+    return ret;
+}
+
+
+/***********************************************************************
+ *           GetWindowRgn (USER32.@)
+ */
+int WINAPI GetWindowRgn( HWND hwnd, HRGN hrgn )
+{
+    return NtUserGetWindowRgnEx( hwnd, hrgn, 0 );
+}
+
+
+/***********************************************************************
+ *           GetWindowRgnBox (USER32.@)
+ */
+int WINAPI GetWindowRgnBox( HWND hwnd, RECT *rect )
+{
+    int ret = ERROR;
+    HRGN hrgn;
+
+    if (!rect)
+        return ERROR;
+
+    if ((hrgn = CreateRectRgn( 0, 0, 0, 0 )))
+    {
+        if ((ret = GetWindowRgn( hwnd, hrgn )) != ERROR )
+            ret = GetRgnBox( hrgn, rect );
+        DeleteObject( hrgn );
+    }
+
+    return ret;
+}
+
+
+/***********************************************************************
+ *           GetClientRect (USER32.@)
+ */
+BOOL WINAPI GetClientRect( HWND hwnd, RECT *rect )
+{
+    return NtUserGetClientRect( hwnd, rect );
+}
+
+
+/*******************************************************************
+ *           WindowFromPoint (USER32.@)
+ */
+HWND WINAPI WindowFromPoint( POINT pt )
+{
+    return NtUserWindowFromPoint( pt.x, pt.y );
+}
+
+
+/*******************************************************************
+ *           ChildWindowFromPoint (USER32.@)
+ */
+HWND WINAPI ChildWindowFromPoint( HWND parent, POINT pt )
+{
+    return NtUserChildWindowFromPointEx( parent, pt.x, pt.y, CWP_ALL );
+}
+
+/*******************************************************************
+ *           RealChildWindowFromPoint (USER32.@)
+ */
+HWND WINAPI RealChildWindowFromPoint( HWND parent, POINT pt )
+{
+    return NtUserRealChildWindowFromPoint( parent, pt.x, pt.y );
+}
+
+/*******************************************************************
+ *           ChildWindowFromPointEx (USER32.@)
+ */
+HWND WINAPI ChildWindowFromPointEx( HWND parent, POINT pt, UINT flags )
+{
+    return NtUserChildWindowFromPointEx( parent, pt.x, pt.y, flags );
+}
+
+
+/*******************************************************************
+ *           MapWindowPoints (USER32.@)
+ */
+INT WINAPI MapWindowPoints( HWND hwnd_from, HWND hwnd_to, POINT *points, UINT count )
+{
+    return NtUserMapWindowPoints( hwnd_from, hwnd_to, points, count );
+}
+
+
+/*******************************************************************
+ *           ClientToScreen (USER32.@)
+ */
+BOOL WINAPI ClientToScreen( HWND hwnd, POINT *pt )
+{
+    return NtUserClientToScreen( hwnd, pt );
+}
+
+
+/*******************************************************************
+ *           ScreenToClient (USER32.@)
+ */
+BOOL WINAPI ScreenToClient( HWND hwnd, POINT *pt )
+{
+    return NtUserScreenToClient( hwnd, pt );
+}
+
+
+/***********************************************************************
+ *           IsIconic (USER32.@)
+ */
+BOOL WINAPI IsIconic( HWND hwnd )
+{
+    return (GetWindowLongW( hwnd, GWL_STYLE ) & WS_MINIMIZE) != 0;
+}
+
+
+/***********************************************************************
+ *           IsZoomed (USER32.@)
+ */
+BOOL WINAPI IsZoomed( HWND hwnd )
+{
+    return (GetWindowLongW( hwnd, GWL_STYLE ) & WS_MAXIMIZE) != 0;
+}
+
+
+/*******************************************************************
+ *           AllowSetForegroundWindow (USER32.@)
+ */
+BOOL WINAPI AllowSetForegroundWindow( DWORD procid )
+{
+    /* FIXME: If Win98/2000 style SetForegroundWindow behavior is
+     * implemented, then fix this function. */
+    return TRUE;
+}
+
+
+/*******************************************************************
+ *           LockSetForegroundWindow (USER32.@)
+ */
+BOOL WINAPI LockSetForegroundWindow( UINT lockcode )
+{
+    /* FIXME: If Win98/2000 style SetForegroundWindow behavior is
+     * implemented, then fix this function. */
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           BringWindowToTop (USER32.@)
+ */
+BOOL WINAPI BringWindowToTop( HWND hwnd )
+{
+    return NtUserSetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE );
+}
+
+
+/***********************************************************************
+ *           AnimateWindow (USER32.@)
+ */
+BOOL WINAPI AnimateWindow( HWND hwnd, DWORD time, DWORD flags )
+{
+    FIXME( "partial stub\n" );
+
+    /* If trying to show/hide and it's already shown/hidden or invalid window,
+     * fail with invalid parameter. */
+    if (!IsWindow( hwnd ) || (!(flags & AW_HIDE)) == IsWindowVisible( hwnd ))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    NtUserShowWindow( hwnd, (flags & AW_HIDE) ? SW_HIDE : ((flags & AW_ACTIVATE) ? SW_SHOW : SW_SHOWNA) );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           BeginDeferWindowPos (USER32.@)
+ */
+HDWP WINAPI BeginDeferWindowPos( INT count )
+{
+    return NtUserBeginDeferWindowPos( count );
+}
+
+
+/***********************************************************************
+ *           DeferWindowPos (USER32.@)
+ */
+HDWP WINAPI DeferWindowPos( HDWP hdwp, HWND hwnd, HWND after, INT x, INT y,
+                            INT cx, INT cy, UINT flags )
+{
+    return NtUserDeferWindowPosAndBand( hdwp, hwnd, after, x, y, cx, cy, flags, 0, 0 );
+}
+
+
+/***********************************************************************
+ *           EndDeferWindowPos (USER32.@)
+ */
+BOOL WINAPI EndDeferWindowPos( HDWP hdwp )
+{
+    return NtUserEndDeferWindowPosEx( hdwp, FALSE );
+}
+
+
+/***********************************************************************
+ *           ArrangeIconicWindows (USER32.@)
+ */
+UINT WINAPI ArrangeIconicWindows( HWND parent )
+{
+    return NtUserArrangeIconicWindows( parent );
 }
 
 
@@ -1426,6 +1654,46 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
 BOOL WINAPI SetProcessDefaultLayout( DWORD layout )
 {
     return NtUserSetProcessDefaultLayout( layout );
+}
+
+
+/***********************************************************************
+ *           UpdateWindow (USER32.@)
+ */
+BOOL WINAPI UpdateWindow( HWND hwnd )
+{
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    return NtUserRedrawWindow( hwnd, NULL, 0, RDW_UPDATENOW | RDW_ALLCHILDREN );
+}
+
+
+/***********************************************************************
+ *           ValidateRgn (USER32.@)
+ */
+BOOL WINAPI ValidateRgn( HWND hwnd, HRGN hrgn )
+{
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    return NtUserRedrawWindow( hwnd, NULL, hrgn, RDW_VALIDATE );
+}
+
+
+/*************************************************************************
+ *           ScrollWindow (USER32.@)
+ */
+BOOL WINAPI ScrollWindow( HWND hwnd, INT dx, INT dy, const RECT *rect, const RECT *clip_rect )
+{
+    UINT flags = SW_INVALIDATE | SW_ERASE | (rect ? 0 : SW_SCROLLCHILDREN) | SW_NODCCACHE;
+    return NtUserScrollWindowEx( hwnd, dx, dy, rect, clip_rect, 0, NULL, flags );
 }
 
 #ifdef _WIN64

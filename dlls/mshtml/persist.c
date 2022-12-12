@@ -413,6 +413,9 @@ HRESULT set_moniker(HTMLOuterWindow *window, IMoniker *mon, IUri *nav_uri, IBind
             }
         }
 
+        if(doc_obj->nscontainer->usermode == EDITMODE)
+            window->load_flags = BINDING_REFRESH;
+
         download_task = malloc(sizeof(download_proc_task_t));
         download_task->doc = doc_obj;
         download_task->set_download = set_download;
@@ -1005,10 +1008,6 @@ static HRESULT WINAPI DocObjPersistFile_Save(IPersistFile *iface, LPCOLESTR pszF
 {
     HTMLDocumentObj *This = HTMLDocumentObj_from_IPersistFile(iface);
 
-    if(!This->doc_node) {
-        FIXME("No doc_node\n");
-        return E_UNEXPECTED;
-    }
     return IPersistFile_Save(&This->doc_node->IPersistFile_iface, pszFileName, fRemember);
 }
 
@@ -1199,10 +1198,6 @@ static HRESULT WINAPI DocObjPersistStreamInit_Save(IPersistStreamInit *iface, IS
 {
     HTMLDocumentObj *This = HTMLDocumentObj_from_IPersistStreamInit(iface);
 
-    if(!This->doc_node) {
-        FIXME("No doc_node\n");
-        return E_UNEXPECTED;
-    }
     return IPersistStreamInit_Save(&This->doc_node->IPersistStreamInit_iface, pStm, fClearDirty);
 }
 

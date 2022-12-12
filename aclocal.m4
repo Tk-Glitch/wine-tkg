@@ -113,10 +113,11 @@ AC_DEFUN([WINE_PACKAGE_FLAGS],
 [AC_REQUIRE([WINE_PATH_PKG_CONFIG])dnl
 AS_VAR_PUSHDEF([ac_cflags],[[$1]_CFLAGS])dnl
 AS_VAR_PUSHDEF([ac_libs],[[$1]_LIBS])dnl
+rm -f conftest.err
 AC_ARG_VAR(ac_cflags, [C compiler flags for $2, overriding pkg-config])dnl
 AS_VAR_IF([ac_cflags],[],
       [AS_VAR_SET_IF([PKG_CONFIG],
-      [ac_cflags=`$PKG_CONFIG --cflags [$2] 2>/dev/null`])])
+      [ac_cflags=`$PKG_CONFIG --cflags [$2] 2>conftest.err`])])
 m4_ifval([$4],[test "$cross_compiling" = yes || ac_cflags=[$]{ac_cflags:-[$4]}])
 AC_ARG_VAR(ac_libs, [Linker flags for $2, overriding pkg-config])dnl
 AS_VAR_IF([ac_libs],[],
@@ -126,6 +127,11 @@ m4_ifval([$5],[test "$cross_compiling" = yes || ac_libs=[$]{ac_libs:-[$5]}])
 m4_ifval([$3],[ac_libs=[$]{ac_libs:-"$3"}])
 AS_ECHO(["$as_me:${as_lineno-$LINENO}: $2 cflags: $ac_cflags"]) >&AS_MESSAGE_LOG_FD
 AS_ECHO(["$as_me:${as_lineno-$LINENO}: $2 libs: $ac_libs"]) >&AS_MESSAGE_LOG_FD
+if test -s conftest.err; then
+     AS_ECHO_N(["$as_me:${as_lineno-$LINENO}: $2 errors: "]) >&AS_MESSAGE_LOG_FD
+     cat conftest.err >&AS_MESSAGE_LOG_FD
+fi
+rm -f conftest.err
 ac_save_CPPFLAGS=$CPPFLAGS
 CPPFLAGS="$CPPFLAGS $ac_cflags"
 $6
@@ -208,7 +214,7 @@ AC_DEFUN([WINE_TRY_PE_CFLAGS],
 AC_CACHE_CHECK([whether $CC supports $1], ac_var,
 [ac_wine_try_cflags_saved=$CFLAGS
 ac_wine_try_cflags_saved_exeext=$ac_exeext
-CFLAGS="$CFLAGS -nostartfiles -nodefaultlibs $1"
+CFLAGS="$CFLAGS -nostdlib -nodefaultlibs $1"
 ac_exeext=".exe"
 AC_LINK_IFELSE([AC_LANG_SOURCE([[int __cdecl mainCRTStartup(void) { return 0; }]])],
                [AS_VAR_SET(ac_var,yes)], [AS_VAR_SET(ac_var,no)])
