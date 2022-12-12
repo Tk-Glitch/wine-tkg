@@ -182,7 +182,7 @@ HWND *build_hwnd_list(void)
 {
     NTSTATUS status;
     HWND *list;
-    UINT count = 128;
+    ULONG count = 128;
 
     for (;;)
     {
@@ -751,7 +751,7 @@ static void set_size_hints( struct x11drv_win_data *data, DWORD style )
 /***********************************************************************
  *              set_mwm_hints
  */
-static void set_mwm_hints( struct x11drv_win_data *data, DWORD style, DWORD ex_style )
+static void set_mwm_hints( struct x11drv_win_data *data, UINT style, UINT ex_style )
 {
     MwmHints mwm_hints;
 
@@ -1029,7 +1029,7 @@ static void update_net_wm_fullscreen_monitors( struct x11drv_win_data *data )
  */
 void update_net_wm_states( struct x11drv_win_data *data )
 {
-    DWORD i, style, ex_style, new_state = 0;
+    UINT i, style, ex_style, new_state = 0;
 
     if (!data->managed) return;
     if (data->whole_window == root_window) return;
@@ -1399,9 +1399,9 @@ static HWND sync_window_position( struct x11drv_win_data *data,
 #endif
 
     TRACE( "win %p/%lx pos %d,%d,%dx%d after %lx changes=%x serial=%lu\n",
-           data->hwnd, data->whole_window, data->whole_rect.left, data->whole_rect.top,
-           data->whole_rect.right - data->whole_rect.left,
-           data->whole_rect.bottom - data->whole_rect.top,
+           data->hwnd, data->whole_window, (int)data->whole_rect.left, (int)data->whole_rect.top,
+           (int)(data->whole_rect.right - data->whole_rect.left),
+           (int)(data->whole_rect.bottom - data->whole_rect.top),
            changes.sibling, mask, data->configure_serial );
 
     return prev_window;
@@ -2123,7 +2123,7 @@ HWND create_foreign_window( Display *display, Window xwin )
     Window *xchildren;
     unsigned int nchildren;
     XWindowAttributes attr;
-    DWORD style = WS_CLIPCHILDREN;
+    UINT style = WS_CLIPCHILDREN;
     UNICODE_STRING class_name;
 
     if (!class_registered)
@@ -2137,7 +2137,7 @@ HWND create_foreign_window( Display *display, Window xwin )
         class.lpszClassName = classW;
         RtlInitUnicodeString( &class_name, classW );
         if (!NtUserRegisterClassExWOW( &class, &class_name, &version, NULL, 0, 0, NULL ) &&
-            GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+            RtlGetLastWin32Error() != ERROR_CLASS_ALREADY_EXISTS)
         {
             ERR( "Could not register foreign window class\n" );
             return FALSE;
@@ -2742,7 +2742,7 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
 {
     struct x11drv_thread_data *thread_data;
     struct x11drv_win_data *data;
-    DWORD new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+    UINT new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
     RECT old_window_rect, old_whole_rect, old_client_rect;
     HWND prev_window = NULL;
     int event_type;
@@ -3270,7 +3270,7 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         taskbar_add_tab( hwnd );
         return 0;
     default:
-        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
+        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp );
         return 0;
     }
 }
@@ -3373,7 +3373,7 @@ LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
         if ((WCHAR)lparam) goto failed;  /* got an explicit char */
         if (NtUserGetWindowLongPtrW( hwnd, GWLP_ID )) goto failed;  /* window has a real menu */
         if (!(NtUserGetWindowLongW( hwnd, GWL_STYLE ) & WS_SYSMENU)) goto failed;  /* no system menu */
-        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", wparam, lparam );
+        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", (long)wparam, lparam );
         release_win_data( data );
         return 0;
 

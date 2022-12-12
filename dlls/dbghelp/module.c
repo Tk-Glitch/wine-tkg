@@ -644,6 +644,71 @@ static WCHAR* append_hex(WCHAR* dst, const BYTE* id, const BYTE* end)
 }
 
 /******************************************************************
+ *		image_locate_build_id_target
+ *
+ * Try to find the .so file containing the debug info out of the build-id note information
+ */
+static BOOL image_locate_build_id_target(struct image_file_map* fmap, const BYTE* id, unsigned idlen)
+{
+    struct image_file_map* fmap_link = NULL;
+    DWORD sz;
+    WCHAR* p;
+    WCHAR* z;
+
+    fmap_link = HeapAlloc(GetProcessHeap(), 0, sizeof(*fmap_link));
+    if (!fmap_link) return FALSE;
+
+    p = malloc(sizeof(L"/usr/lib/debug/.build-id/") +
+               (idlen * 2 + 1) * sizeof(WCHAR) + sizeof(L".debug"));
+    wcscpy(p, L"/usr/lib/debug/.build-id/");
+    z = p + wcslen(p);
+    if (idlen)
+    {
+        z = append_hex(z, id, id + 1);
+        if (idlen > 1)
+        {
+            *z++ = L'/';
+            z = append_hex(z, id + 1, id + idlen);
+        }
+    }
+    wcscpy(z, L".debug");
+    TRACE("checking %s\n", wine_dbgstr_w(p));
+
+    if (image_check_debug_link_gnu_id(p, fmap_link, id, idlen))
+    {
+        free(p);
+        fmap->alternate = fmap_link;
+        return TRUE;
+    }
+
+    sz = GetEnvironmentVariableW(L"WINEHOMEDIR", NULL, 0);
+    if (sz)
+    {
+        p = realloc(p, sz * sizeof(WCHAR) +
+                    sizeof(L"\\.cache\\debuginfod_client\\") +
+                    idlen * 2 * sizeof(WCHAR) + sizeof(L"\\debuginfo") + 500);
+        GetEnvironmentVariableW(L"WINEHOMEDIR", p, sz);
+        z = p + sz - 1;
+        wcscpy(z, L"\\.cache\\debuginfod_client\\");
+        z += wcslen(z);
+        z = append_hex(z, id, id + idlen);
+        wcscpy(z, L"\\debuginfo");
+        TRACE("checking %ls\n", p);
+        if (image_check_debug_link_gnu_id(p, fmap_link, id, idlen))
+        {
+            free(p);
+            fmap->alternate = fmap_link;
+            return TRUE;
+        }
+    }
+
+    TRACE("not found\n");
+    free(p);
+    HeapFree(GetProcessHeap(), 0, fmap_link);
+    return FALSE;
+}
+
+/******************************************************************
  *		image_load_debugaltlink
  *
  * Handle a (potential) .gnu_debugaltlink section and the link to
@@ -674,9 +739,12 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
         unsigned sect_len;
         const BYTE* id;
         /* The content of the section is:
-         * + a \0 terminated string
+         * + a \0 terminated string (filename)
          * + followed by the build-id
-         * We try loading the dwz_alternate, either as absolute path, or relative to the embedded build-id
+         * We try loading the dwz_alternate:
+         * - from the filename: either as absolute path, or relative to the embedded build-id
+         * - from the build-id
+         * In both cases, checking that found .so file matches the requested build-id
          */
         sect_len = image_get_map_size(&debugaltlink_sect);
         id = memchr(data, '\0', sect_len);
@@ -726,8 +794,13 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
                 if (!ret)
                 {
                     HeapFree(GetProcessHeap(), 0, fmap_link);
-                    WARN("Couldn't find a match for .gnu_debugaltlink section %s for %s\n", data, debugstr_w(module->modulename));
-                    fmap_link = NULL;
+                    /* didn't work out with filename, try file lookup based on build-id */
+                    ret = image_locate_build_id_target(fmap, id, idlen);
+                    if (!ret)
+                    {
+                        WARN("Couldn't find a match for .gnu_debugaltlink section %s for %s\n", data, debugstr_w(module->modulename));
+                        fmap_link = NULL;
+                    }
                 }
             }
         }
@@ -735,49 +808,6 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
     image_unmap_section(&debugaltlink_sect);
     if (fmap_link) TRACE("Found match .gnu_debugaltlink section for %s\n", debugstr_w(module->modulename));
     return fmap_link;
-}
-
-/******************************************************************
- *		image_locate_build_id_target
- *
- * Try to find the .so file containing the debug info out of the build-id note information
- */
-static BOOL image_locate_build_id_target(struct image_file_map* fmap, const BYTE* id, unsigned idlen)
-{
-    struct image_file_map* fmap_link = NULL;
-    WCHAR* p;
-    WCHAR* z;
-
-    fmap_link = HeapAlloc(GetProcessHeap(), 0, sizeof(*fmap_link));
-    if (!fmap_link) return FALSE;
-
-    p = malloc(sizeof(L"/usr/lib/debug/.build-id/") +
-               (idlen * 2 + 1) * sizeof(WCHAR) + sizeof(L".debug"));
-    wcscpy(p, L"/usr/lib/debug/.build-id/");
-    z = p + wcslen(p);
-    if (idlen)
-    {
-        z = append_hex(z, id, id + 1);
-        if (idlen > 1)
-        {
-            *z++ = L'/';
-            z = append_hex(z, id + 1, id + idlen);
-        }
-    }
-    memcpy(z, L".debug", sizeof(L".debug"));
-    TRACE("checking %s\n", wine_dbgstr_w(p));
-
-    if (image_check_debug_link_gnu_id(p, fmap_link, id, idlen))
-    {
-        free(p);
-        fmap->alternate = fmap_link;
-        return TRUE;
-    }
-
-    TRACE("not found\n");
-    free(p);
-    HeapFree(GetProcessHeap(), 0, fmap_link);
-    return FALSE;
 }
 
 /******************************************************************

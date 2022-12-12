@@ -911,7 +911,8 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalFree( HLOCAL handle )
     TRACE_(globalmem)( "handle %p\n", handle );
 
     RtlLockHeap( heap );
-    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
     {
         if (HeapFree( heap, HEAP_NO_SERIALIZE, ptr )) ret = 0;
     }
@@ -993,23 +994,32 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
     if (flags & LMEM_ZEROINIT) heap_flags |= HEAP_ZERO_MEMORY;
 
     RtlLockHeap( heap );
-    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
     {
         if (flags & LMEM_MODIFY) ret = handle;
-        else
+        else if (flags & LMEM_DISCARDABLE) SetLastError( ERROR_INVALID_PARAMETER );
+        else if (flags & LMEM_MOVEABLE)
         {
-            if (!(flags & LMEM_MOVEABLE)) heap_flags |= HEAP_REALLOC_IN_PLACE_ONLY;
             ret = HeapReAlloc( heap, heap_flags, ptr, size );
             if (ret) RtlSetUserValueHeap( heap, heap_flags, ret, ret );
             else SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         }
+        else SetLastError( ERROR_NOT_ENOUGH_MEMORY );
     }
     else if ((mem = unsafe_mem_from_HLOCAL( handle )))
     {
-        if (!(flags & LMEM_MODIFY))
+        if (flags & LMEM_MODIFY)
+        {
+            if (flags & LMEM_DISCARDABLE) mem->flags |= MEM_FLAG_DISCARDABLE;
+            ret = handle;
+        }
+        else if (flags & LMEM_DISCARDABLE) SetLastError( ERROR_INVALID_PARAMETER );
+        else
         {
             if (size)
             {
+                if (mem->lock && !(flags & LMEM_MOVEABLE)) heap_flags |= HEAP_REALLOC_IN_PLACE_ONLY;
                 if (!mem->ptr) ptr = HeapAlloc( heap, heap_flags, size );
                 else ptr = HeapReAlloc( heap, heap_flags, mem->ptr, size );
 
@@ -1022,21 +1032,15 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
                     ret = handle;
                 }
             }
-            else
+            else if ((flags & LMEM_MOVEABLE) && !mem->lock)
             {
                 HeapFree( heap, heap_flags, mem->ptr );
                 mem->flags |= MEM_FLAG_DISCARDED;
-                mem->lock = 0;
                 mem->ptr = NULL;
                 ret = handle;
             }
+            else SetLastError( ERROR_INVALID_PARAMETER );
         }
-        else if (flags & LMEM_DISCARDABLE)
-        {
-            mem->flags |= MEM_FLAG_DISCARDABLE;
-            ret = handle;
-        }
-        else SetLastError( ERROR_INVALID_PARAMETER );
     }
     else SetLastError( ERROR_INVALID_HANDLE );
     RtlUnlockHeap( heap );

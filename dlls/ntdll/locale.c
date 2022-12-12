@@ -39,9 +39,13 @@ UINT NlsAnsiCodePage = 0;
 BYTE NlsMbCodePageTag = 0;
 BYTE NlsMbOemCodePageTag = 0;
 
+static LCID user_resource_lcid;
+static LCID user_resource_neutral_lcid;
+static LCID system_lcid;
 static NLSTABLEINFO nls_info = { { CP_UTF8 }, { CP_UTF8 } };
 static struct norm_table *norm_tables[16];
 static const NLS_LOCALE_HEADER *locale_table;
+static const WCHAR *locale_strings;
 
 
 static WCHAR casemap( USHORT *table, WCHAR ch )
@@ -90,11 +94,11 @@ invalid:
 
 void locale_init(void)
 {
+    const NLS_LOCALE_LCID_INDEX *entry;
     USHORT utf8[2] = { 0, CP_UTF8 };
     WCHAR locale[LOCALE_NAME_MAX_LENGTH];
     LARGE_INTEGER unused;
     SIZE_T size;
-    LCID system_lcid;
     UINT ansi_cp = 1252, oem_cp = 437;
     void *ansi_ptr = utf8, *oem_ptr = utf8, *case_ptr;
     NTSTATUS status;
@@ -103,21 +107,35 @@ void locale_init(void)
     status = RtlGetLocaleFileMappingAddress( (void **)&header, &system_lcid, &unused );
     if (status)
     {
-        ERR( "locale init failed %x\n", status );
+        ERR( "locale init failed %lx\n", status );
         return;
     }
     locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
+    locale_strings = (const WCHAR *)((char *)locale_table + locale_table->strings_offset);
 
-    if (system_lcid == LOCALE_CUSTOM_UNSPECIFIED)
+    entry = find_lcid_entry( locale_table, system_lcid );
+    ansi_cp = get_locale_data( locale_table, entry->idx )->idefaultansicodepage;
+    oem_cp = get_locale_data( locale_table, entry->idx )->idefaultcodepage;
+
+    NtQueryDefaultLocale( TRUE, &user_resource_lcid );
+    user_resource_neutral_lcid = PRIMARYLANGID( user_resource_lcid );
+    if (user_resource_lcid == LOCALE_CUSTOM_UNSPECIFIED)
     {
-        ansi_cp = oem_cp = CP_UTF8;
+        const NLS_LOCALE_LCNAME_INDEX *entry;
+        const WCHAR *parent;
+        WCHAR bufferW[LOCALE_NAME_MAX_LENGTH];
+        SIZE_T len;
+
+        if (!RtlQueryEnvironmentVariable( NULL, L"WINEUSERLOCALE", 14, bufferW, ARRAY_SIZE(bufferW), &len )
+            && (entry = find_lcname_entry( locale_table, bufferW )))
+        {
+            user_resource_lcid = get_locale_data( locale_table, entry->idx )->unique_lcid;
+            parent = locale_strings + get_locale_data( locale_table, entry->idx )->sparent;
+            if (*parent && (entry = find_lcname_entry( locale_table, parent + 1 )))
+                user_resource_neutral_lcid = get_locale_data( locale_table, entry->idx )->unique_lcid;
+        }
     }
-    else
-    {
-        const NLS_LOCALE_LCID_INDEX *entry = find_lcid_entry( locale_table, system_lcid );
-        ansi_cp = get_locale_data( locale_table, entry->idx )->idefaultansicodepage;
-        oem_cp = get_locale_data( locale_table, entry->idx )->idefaultcodepage;
-    }
+    TRACE( "resources: %04lx/%04lx/%04lx\n", user_resource_lcid, user_resource_neutral_lcid, system_lcid );
 
     if (!RtlQueryActivationContextApplicationSettings( 0, NULL, L"http://schemas.microsoft.com/SMI/2019/WindowsSettings",
                                                        L"activeCodePage", locale, ARRAY_SIZE(locale), NULL ))
@@ -159,6 +177,15 @@ void locale_init(void)
 }
 
 
+/* return LCIDs to use for resource lookup */
+void get_resource_lcids( LANGID *user, LANGID *user_neutral, LANGID *system )
+{
+    *user = LANGIDFROMLCID( user_resource_lcid );
+    *user_neutral = LANGIDFROMLCID( user_resource_neutral_lcid );
+    *system = LANGIDFROMLCID( system_lcid );
+}
+
+
 static NTSTATUS get_dummy_preferred_ui_language( DWORD flags, LANGID lang, ULONG *count,
                                                  WCHAR *buffer, ULONG *size )
 {
@@ -166,12 +193,15 @@ static NTSTATUS get_dummy_preferred_ui_language( DWORD flags, LANGID lang, ULONG
     NTSTATUS status;
     ULONG len;
 
-    FIXME("(0x%x %p %p %p) returning a dummy value (current locale)\n", flags, count, buffer, size);
+    FIXME("(0x%lx %#x %p %p %p) returning a dummy value (current locale)\n", flags, lang, count, buffer, size);
 
     if (flags & MUI_LANGUAGE_ID) swprintf( name, ARRAY_SIZE(name), L"%04lX", lang );
     else
     {
         UNICODE_STRING str;
+
+        if (lang == LOCALE_CUSTOM_UNSPECIFIED)
+            NtQueryInstallUILanguage( &lang );
 
         str.Buffer = name;
         str.MaximumLength = sizeof(name);
@@ -192,7 +222,7 @@ static NTSTATUS get_dummy_preferred_ui_language( DWORD flags, LANGID lang, ULONG
     }
     *size = len;
     *count = 1;
-    TRACE("returned variable content: %d, \"%s\", %d\n", *count, debugstr_w(buffer), *size);
+    TRACE("returned variable content: %ld, \"%s\", %ld\n", *count, debugstr_w(buffer), *size);
     return STATUS_SUCCESS;
 
 }
@@ -204,7 +234,7 @@ NTSTATUS WINAPI RtlGetProcessPreferredUILanguages( DWORD flags, ULONG *count, WC
 {
     LANGID ui_language;
 
-    FIXME( "%08x, %p, %p %p\n", flags, count, buffer, size );
+    FIXME( "%08lx, %p, %p %p\n", flags, count, buffer, size );
 
     NtQueryDefaultUILanguage( &ui_language );
     return get_dummy_preferred_ui_language( flags, ui_language, count, buffer, size );
@@ -235,7 +265,7 @@ NTSTATUS WINAPI RtlGetThreadPreferredUILanguages( DWORD flags, ULONG *count, WCH
 {
     LANGID ui_language;
 
-    FIXME( "%08x, %p, %p %p\n", flags, count, buffer, size );
+    FIXME( "%08lx, %p, %p %p\n", flags, count, buffer, size );
 
     NtQueryDefaultUILanguage( &ui_language );
     return get_dummy_preferred_ui_language( flags, ui_language, count, buffer, size );
@@ -264,7 +294,7 @@ NTSTATUS WINAPI RtlGetUserPreferredUILanguages( DWORD flags, ULONG unknown, ULON
  */
 NTSTATUS WINAPI RtlSetProcessPreferredUILanguages( DWORD flags, PCZZWSTR buffer, ULONG *count )
 {
-    FIXME( "%u, %p, %p\n", flags, buffer, count );
+    FIXME( "%lu, %p, %p\n", flags, buffer, count );
     return STATUS_SUCCESS;
 }
 
@@ -274,7 +304,7 @@ NTSTATUS WINAPI RtlSetProcessPreferredUILanguages( DWORD flags, PCZZWSTR buffer,
  */
 NTSTATUS WINAPI RtlSetThreadPreferredUILanguages( DWORD flags, PCZZWSTR buffer, ULONG *count )
 {
-    FIXME( "%u, %p, %p\n", flags, buffer, count );
+    FIXME( "%lu, %p, %p\n", flags, buffer, count );
     return STATUS_SUCCESS;
 }
 
@@ -841,7 +871,6 @@ BOOLEAN WINAPI RtlIsValidLocaleName( const WCHAR *name, ULONG flags )
  */
 NTSTATUS WINAPI RtlLcidToLocaleName( LCID lcid, UNICODE_STRING *str, ULONG flags, BOOLEAN alloc )
 {
-    const WCHAR *strings = (const WCHAR *)((char *)locale_table + locale_table->strings_offset);
     const NLS_LOCALE_LCID_INDEX *entry;
     const WCHAR *name;
     ULONG len;
@@ -855,7 +884,7 @@ NTSTATUS WINAPI RtlLcidToLocaleName( LCID lcid, UNICODE_STRING *str, ULONG flags
         break;
     case LOCALE_SYSTEM_DEFAULT:
     case LOCALE_CUSTOM_DEFAULT:
-        NtQueryDefaultLocale( FALSE, &lcid );
+        lcid = system_lcid;
         break;
     case LOCALE_CUSTOM_UI_DEFAULT:
         return STATUS_UNSUCCESSFUL;
@@ -868,7 +897,7 @@ NTSTATUS WINAPI RtlLcidToLocaleName( LCID lcid, UNICODE_STRING *str, ULONG flags
     if (!(flags & 2) && !get_locale_data( locale_table, entry->idx )->inotneutral)
         return STATUS_INVALID_PARAMETER_1;
 
-    name = strings + entry->name;
+    name = locale_strings + entry->name;
     len = *name++;
 
     if (alloc)
@@ -881,7 +910,7 @@ NTSTATUS WINAPI RtlLcidToLocaleName( LCID lcid, UNICODE_STRING *str, ULONG flags
 
     wcscpy( str->Buffer, name );
     str->Length = len * sizeof(WCHAR);
-    TRACE( "%04x -> %s\n", lcid, debugstr_us(str) );
+    TRACE( "%04lx -> %s\n", lcid, debugstr_us(str) );
     return STATUS_SUCCESS;
 }
 
@@ -898,7 +927,7 @@ NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags 
     if (!(flags & 2) && !get_locale_data( locale_table, entry->idx )->inotneutral)
         return STATUS_INVALID_PARAMETER_1;
     *lcid = entry->id;
-    TRACE( "%s -> %04x\n", debugstr_w(name), *lcid );
+    TRACE( "%s -> %04lx\n", debugstr_w(name), *lcid );
     return STATUS_SUCCESS;
 }
 
@@ -1028,7 +1057,7 @@ NTSTATUS WINAPI RtlNormalizeString( ULONG form, const WCHAR *src, INT src_len, W
     const struct norm_table *info;
     NTSTATUS status = STATUS_SUCCESS;
 
-    TRACE( "%x %s %d %p %d\n", form, debugstr_wn(src, src_len), src_len, dst, *dst_len );
+    TRACE( "%lx %s %d %p %d\n", form, debugstr_wn(src, src_len), src_len, dst, *dst_len );
 
     if ((status = load_norm_table( form, &info ))) return status;
 
@@ -1123,7 +1152,7 @@ NTSTATUS WINAPI RtlIdnToAscii( DWORD flags, const WCHAR *src, INT srclen, WCHAR 
     unsigned int ch, buffer[64];
     int i, len, start, end, out_label, out = 0, normlen = ARRAY_SIZE(normstr);
 
-    TRACE( "%x %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
+    TRACE( "%lx %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
 
     if ((status = load_norm_table( 13, &info ))) return status;
 
@@ -1232,7 +1261,7 @@ NTSTATUS WINAPI RtlIdnToNameprepUnicode( DWORD flags, const WCHAR *src, INT srcl
     if (flags & ~(IDN_ALLOW_UNASSIGNED | IDN_USE_STD3_ASCII_RULES)) return STATUS_INVALID_PARAMETER;
     if (!src || srclen < -1) return STATUS_INVALID_PARAMETER;
 
-    TRACE( "%x %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
+    TRACE( "%lx %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
 
     if ((status = load_norm_table( 13, &info ))) return status;
 
@@ -1305,7 +1334,7 @@ NTSTATUS WINAPI RtlIdnToUnicode( DWORD flags, const WCHAR *src, INT srclen, WCHA
     if (!src || srclen < -1) return STATUS_INVALID_PARAMETER;
     if (srclen == -1) srclen = wcslen( src ) + 1;
 
-    TRACE( "%x %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
+    TRACE( "%lx %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
 
     if ((status = load_norm_table( 13, &info ))) return status;
 

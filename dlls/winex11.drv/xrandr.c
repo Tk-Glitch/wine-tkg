@@ -32,9 +32,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
-#ifdef HAVE_XRRGETPROVIDERRESOURCES
-WINE_DECLARE_DEBUG_CHANNEL(winediag);
-#endif
 
 #ifdef SONAME_LIBXRANDR
 
@@ -298,7 +295,8 @@ static LONG xrandr10_set_current_mode( ULONG_PTR id, const DEVMODEW *mode )
     }
 
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
-        WARN("Cannot change screen bit depth from %dbits to %dbits!\n", screen_bpp, mode->dmBitsPerPel);
+        WARN("Cannot change screen bit depth from %dbits to %dbits!\n",
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     root = DefaultRootWindow( gdi_display );
     screen_config = pXRRGetScreenInfo( gdi_display, root );
@@ -368,7 +366,6 @@ static BOOL is_broken_driver(void)
     XRRScreenResources *screen_resources;
     XRROutputInfo *output_info;
     XRRModeInfo *first_mode;
-    INT major, event, error;
     INT output_idx, i, j;
     BOOL only_one_mode;
 
@@ -419,15 +416,6 @@ static BOOL is_broken_driver(void)
 
         if (!only_one_mode)
             continue;
-
-        /* Check if it is NVIDIA proprietary driver */
-        if (XQueryExtension( gdi_display, "NV-CONTROL", &major, &event, &error ))
-        {
-            ERR_(winediag)("Broken NVIDIA RandR detected, falling back to RandR 1.0. "
-                           "Please consider using the Nouveau driver instead.\n");
-            pXRRFreeScreenResources( screen_resources );
-            return TRUE;
-        }
     }
     pXRRFreeScreenResources( screen_resources );
     return FALSE;
@@ -1687,7 +1675,8 @@ static LONG xrandr14_set_current_mode( ULONG_PTR id, const DEVMODEW *mode )
     RRMode rrmode;
 
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
-        WARN("Cannot change screen color depth from %ubits to %ubits!\n", screen_bpp, mode->dmBitsPerPel);
+        WARN("Cannot change screen color depth from %ubits to %ubits!\n",
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     screen_resources = xrandr_get_screen_resources();
     if (!screen_resources)

@@ -27,6 +27,7 @@
 #include "ole2.h"
 #include "shlguid.h"
 #include "shdeprecated.h"
+#include "mscoree.h"
 #include "mshtmdid.h"
 #include "idispids.h"
 
@@ -87,7 +88,7 @@ static ULONG WINAPI EnumUnknown_Release(IEnumUnknown *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
-        heap_free(This);
+        free(This);
 
     return ref;
 }
@@ -1914,7 +1915,7 @@ static HRESULT WINAPI DocObjOleContainer_EnumObjects(IOleContainer *iface, DWORD
 
     TRACE("(%p)->(%lx %p)\n", This, grfFlags, ppenum);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -2404,16 +2405,7 @@ HTMLDOCUMENTOBJ_FWD_TO_NODE_1(HTMLDocument2, put_onbeforeupdate, VARIANT)
 HTMLDOCUMENTOBJ_FWD_TO_NODE_1(HTMLDocument2, get_onbeforeupdate, VARIANT*)
 HTMLDOCUMENTOBJ_FWD_TO_NODE_1(HTMLDocument2, put_onerrorupdate, VARIANT)
 HTMLDOCUMENTOBJ_FWD_TO_NODE_1(HTMLDocument2, get_onerrorupdate, VARIANT*)
-
-static HRESULT WINAPI DocObjHTMLDocument2_toString(IHTMLDocument2 *iface, BSTR *String)
-{
-    HTMLDocumentObj *This = impl_from_IHTMLDocument2(iface);
-
-    TRACE("(%p)->(%p)\n", This, String);
-
-    return dispex_to_string(&This->dispex, String);
-}
-
+HTMLDOCUMENTOBJ_FWD_TO_NODE_1(HTMLDocument2, toString, BSTR*)
 HTMLDOCUMENTOBJ_FWD_TO_NODE_3(HTMLDocument2, createStyleSheet, BSTR,LONG,IHTMLStyleSheet**)
 
 static const IHTMLDocument2Vtbl DocObjHTMLDocument2Vtbl = {
@@ -3258,6 +3250,52 @@ static const IDocumentRangeVtbl DocObjDocumentRangeVtbl = {
     DocObjDocumentRange_createRange
 };
 
+/**********************************************************
+ * IEventTarget implementation
+ */
+static inline HTMLDocumentObj *impl_from_IEventTarget(IEventTarget *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLDocumentObj, IEventTarget_iface);
+}
+
+HTMLDOCUMENTOBJ_IDISPATCH_METHODS(EventTarget)
+
+static HRESULT WINAPI DocObjEventTarget_addEventListener(IEventTarget *iface, BSTR type, IDispatch *listener,
+        VARIANT_BOOL capture)
+{
+    HTMLDocumentObj *This = impl_from_IEventTarget(iface);
+
+    return IEventTarget_addEventListener(&This->doc_node->node.event_target.IEventTarget_iface, type, listener, capture);
+}
+
+static HRESULT WINAPI DocObjEventTarget_removeEventListener(IEventTarget *iface, BSTR type, IDispatch *listener,
+        VARIANT_BOOL capture)
+{
+    HTMLDocumentObj *This = impl_from_IEventTarget(iface);
+
+    return IEventTarget_removeEventListener(&This->doc_node->node.event_target.IEventTarget_iface, type, listener, capture);
+}
+
+static HRESULT WINAPI DocObjEventTarget_dispatchEvent(IEventTarget *iface, IDOMEvent *event_iface, VARIANT_BOOL *result)
+{
+    HTMLDocumentObj *This = impl_from_IEventTarget(iface);
+
+    return IEventTarget_dispatchEvent(&This->doc_node->node.event_target.IEventTarget_iface, event_iface, result);
+}
+
+static const IEventTargetVtbl DocObjEventTargetVtbl = {
+    DocObjEventTarget_QueryInterface,
+    DocObjEventTarget_AddRef,
+    DocObjEventTarget_Release,
+    DocObjEventTarget_GetTypeInfoCount,
+    DocObjEventTarget_GetTypeInfo,
+    DocObjEventTarget_GetIDsOfNames,
+    DocObjEventTarget_Invoke,
+    DocObjEventTarget_addEventListener,
+    DocObjEventTarget_removeEventListener,
+    DocObjEventTarget_dispatchEvent
+};
+
 static inline HTMLDocumentObj *impl_from_IUnknown(IUnknown *iface)
 {
     return CONTAINING_RECORD(iface, HTMLDocumentObj, IUnknown_inner);
@@ -3359,6 +3397,14 @@ static HRESULT WINAPI HTMLDocumentObj_QueryInterface(IUnknown *iface, REFIID rii
         *ppv = &This->ITargetContainer_iface;
     }else if(IsEqualGUID(&IID_IConnectionPointContainer, riid)) {
         *ppv = &This->cp_container.IConnectionPointContainer_iface;
+    }else if(IsEqualGUID(&IID_IEventTarget, riid)) {
+        /* IEventTarget is conditionally exposed. This breaks COM rules when
+           it changes its compat mode, but it is how native works (see tests). */
+        if(!This->doc_node || dispex_compat_mode(&This->doc_node->node.event_target.dispex) < COMPAT_MODE_IE9) {
+            *ppv = NULL;
+            return E_NOINTERFACE;
+        }
+        *ppv = &This->IEventTarget_iface;
     }else if(IsEqualGUID(&CLSID_CMarkup, riid)) {
         FIXME("(%p)->(CLSID_CMarkup %p)\n", This, ppv);
         *ppv = NULL;
@@ -3379,8 +3425,12 @@ static HRESULT WINAPI HTMLDocumentObj_QueryInterface(IUnknown *iface, REFIID rii
         TRACE("(%p)->(IID_IStdMarshalInfo %p) returning NULL\n", This, ppv);
         *ppv = NULL;
         return E_NOINTERFACE;
-    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
-        return *ppv ? S_OK : E_NOINTERFACE;
+    }else if(IsEqualGUID(&IID_IDispatchJS, riid) ||
+             IsEqualGUID(&IID_UndocumentedScriptIface, riid) ||
+             IsEqualGUID(&IID_IMarshal, riid) ||
+             IsEqualGUID(&IID_IManagedObject, riid)) {
+        *ppv = NULL;
+        return E_NOINTERFACE;
     }else {
         FIXME("Unimplemented interface %s\n", debugstr_mshtml_guid(riid));
         *ppv = NULL;
@@ -3437,15 +3487,14 @@ static ULONG WINAPI HTMLDocumentObj_Release(IUnknown *iface)
 
         if(This->hwnd)
             DestroyWindow(This->hwnd);
-        heap_free(This->mime);
+        free(This->mime);
 
         remove_target_tasks(This->task_magic);
         ConnectionPointContainer_Destroy(&This->cp_container);
-        release_dispex(&This->dispex);
 
         if(This->nscontainer)
             detach_gecko_browser(This->nscontainer);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -3459,123 +3508,46 @@ static const IUnknownVtbl HTMLDocumentObjVtbl = {
 
 /**********************************************************
  * IDispatchEx implementation
+ *
+ * Forwarding this breaks Dispatch rules by potentially retrieving
+ * a different DISPID for the same name, if the node was changed
+ * while using the same doc obj, but it is how native works.
  */
 static inline HTMLDocumentObj *impl_from_IDispatchEx(IDispatchEx *iface)
 {
     return CONTAINING_RECORD(iface, HTMLDocumentObj, IDispatchEx_iface);
 }
 
-static HRESULT WINAPI DocObjDispatchEx_QueryInterface(IDispatchEx *iface, REFIID riid, void **ppv)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppv);
-}
-
-static ULONG WINAPI DocObjDispatchEx_AddRef(IDispatchEx *iface)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IUnknown_AddRef(This->outer_unk);
-}
-
-static ULONG WINAPI DocObjDispatchEx_Release(IDispatchEx *iface)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IUnknown_Release(This->outer_unk);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetTypeInfoCount(IDispatchEx *iface, UINT *pctinfo)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LCID lcid,
-        ITypeInfo **ppTInfo)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetIDsOfNames(IDispatchEx *iface, REFIID riid, LPOLESTR *rgszNames,
-        UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames, lcid, rgDispId);
-}
+HTMLDOCUMENTOBJ_IUNKNOWN_METHODS(DispatchEx)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_1(DispatchEx, GetTypeInfoCount, UINT*)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_3(DispatchEx, GetTypeInfo, UINT,LCID,ITypeInfo**)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_5(DispatchEx, GetIDsOfNames, REFIID,LPOLESTR*,UINT,LCID,DISPID*)
 
 static HRESULT WINAPI DocObjDispatchEx_Invoke(IDispatchEx *iface, DISPID dispIdMember, REFIID riid, LCID lcid,
         WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
     HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_InvokeEx(&This->IDispatchEx_iface, dispIdMember, lcid, wFlags, pDispParams,
+
+    return IDispatchEx_InvokeEx(&This->doc_node->IDispatchEx_iface, dispIdMember, lcid, wFlags, pDispParams,
             pVarResult, pExcepInfo, NULL);
 }
 
-static HRESULT WINAPI DocObjDispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetDispID(&This->dispex.IDispatchEx_iface, bstrName, grfdex, pid);
-}
+HTMLDOCUMENTOBJ_FWD_TO_NODE_3(DispatchEx, GetDispID, BSTR,DWORD,DISPID*)
 
 static HRESULT WINAPI DocObjDispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
     HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
 
-    if(This->window) {
-        switch(id) {
-        case DISPID_READYSTATE:
-            TRACE("DISPID_READYSTATE\n");
-
-            if(!(wFlags & DISPATCH_PROPERTYGET))
-                return E_INVALIDARG;
-
-            V_VT(pvarRes) = VT_I4;
-            V_I4(pvarRes) = This->window->readystate;
-            return S_OK;
-        default:
-            break;
-        }
-    }
-
-    return IDispatchEx_InvokeEx(&This->dispex.IDispatchEx_iface, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller);
+    return IDispatchEx_InvokeEx(&This->doc_node->IDispatchEx_iface, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller);
 }
 
-static HRESULT WINAPI DocObjDispatchEx_DeleteMemberByName(IDispatchEx *iface, BSTR bstrName, DWORD grfdex)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_DeleteMemberByName(&This->dispex.IDispatchEx_iface, bstrName, grfdex);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_DeleteMemberByDispID(IDispatchEx *iface, DISPID id)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_DeleteMemberByDispID(&This->dispex.IDispatchEx_iface, id);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetMemberProperties(IDispatchEx *iface, DISPID id, DWORD grfdexFetch, DWORD *pgrfdex)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetMemberProperties(&This->dispex.IDispatchEx_iface, id, grfdexFetch, pgrfdex);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetMemberName(IDispatchEx *iface, DISPID id, BSTR *pbstrName)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetMemberName(&This->dispex.IDispatchEx_iface, id, pbstrName);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetNextDispID(IDispatchEx *iface, DWORD grfdex, DISPID id, DISPID *pid)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetNextDispID(&This->dispex.IDispatchEx_iface, grfdex, id, pid);
-}
-
-static HRESULT WINAPI DocObjDispatchEx_GetNameSpaceParent(IDispatchEx *iface, IUnknown **ppunk)
-{
-    HTMLDocumentObj *This = impl_from_IDispatchEx(iface);
-    return IDispatchEx_GetNameSpaceParent(&This->dispex.IDispatchEx_iface, ppunk);
-}
+HTMLDOCUMENTOBJ_FWD_TO_NODE_2(DispatchEx, DeleteMemberByName, BSTR,DWORD)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_1(DispatchEx, DeleteMemberByDispID, DISPID)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_3(DispatchEx, GetMemberProperties, DISPID,DWORD,DWORD*)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_2(DispatchEx, GetMemberName, DISPID,BSTR*)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_3(DispatchEx, GetNextDispID, DWORD,DISPID,DISPID*)
+HTMLDOCUMENTOBJ_FWD_TO_NODE_1(DispatchEx, GetNameSpaceParent, IUnknown**)
 
 static const IDispatchExVtbl DocObjDispatchExVtbl = {
     DocObjDispatchEx_QueryInterface,
@@ -3681,43 +3653,6 @@ static const cpc_entry_t HTMLDocumentObj_cpc[] = {
     {NULL}
 };
 
-static HRESULT HTMLDocumentObj_location_hook(DispatchEx *dispex, WORD flags, DISPPARAMS *dp, VARIANT *res,
-        EXCEPINFO *ei, IServiceProvider *caller)
-{
-    HTMLDocumentObj *This = CONTAINING_RECORD(dispex, HTMLDocumentObj, dispex);
-
-    if(!(flags & DISPATCH_PROPERTYPUT) || !This->window)
-        return S_FALSE;
-
-    return IDispatchEx_InvokeEx(&This->window->base.IDispatchEx_iface, DISPID_IHTMLWINDOW2_LOCATION,
-                                0, flags, dp, res, ei, caller);
-}
-
-static const tid_t HTMLDocumentObj_iface_tids[] = {
-    IHTMLDocument3_tid,
-    IHTMLDocument4_tid,
-    IHTMLDocument5_tid,
-    0
-};
-
-static void HTMLDocumentObj_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
-{
-    static const dispex_hook_t document2_hooks[] = {
-        {DISPID_IHTMLDOCUMENT2_URL,      NULL, L"URL"},
-        {DISPID_IHTMLDOCUMENT2_LOCATION, HTMLDocumentObj_location_hook},
-        {DISPID_UNKNOWN}
-    };
-    dispex_info_add_interface(info, IHTMLDocument2_tid, document2_hooks);
-}
-
-static dispex_static_data_t HTMLDocumentObj_dispex = {
-    L"HTMLDocumentObj",
-    NULL,
-    DispHTMLDocument_tid,
-    HTMLDocumentObj_iface_tids,
-    HTMLDocumentObj_init_dispex_info
-};
-
 static HRESULT create_document_object(BOOL is_mhtml, IUnknown *outer, REFIID riid, void **ppv)
 {
     HTMLDocumentObj *doc;
@@ -3732,7 +3667,7 @@ static HRESULT create_document_object(BOOL is_mhtml, IUnknown *outer, REFIID rii
     if(!get_security_manager())
         return E_OUTOFMEMORY;
 
-    doc = heap_alloc_zero(sizeof(HTMLDocumentObj));
+    doc = calloc(1, sizeof(HTMLDocumentObj));
     if(!doc)
         return E_OUTOFMEMORY;
 
@@ -3754,10 +3689,10 @@ static HRESULT create_document_object(BOOL is_mhtml, IUnknown *outer, REFIID rii
     doc->IMarkupContainer_iface.lpVtbl = &DocObjMarkupContainerVtbl;
     doc->IDisplayServices_iface.lpVtbl = &DocObjDisplayServicesVtbl;
     doc->IDocumentRange_iface.lpVtbl = &DocObjDocumentRangeVtbl;
+    doc->IEventTarget_iface.lpVtbl = &DocObjEventTargetVtbl;
 
     doc->outer_unk = outer ? outer : &doc->IUnknown_inner;
 
-    init_dispatch(&doc->dispex, (IUnknown*)&doc->ICustomDoc_iface, &HTMLDocumentObj_dispex, COMPAT_MODE_QUIRKS);
     ConnectionPointContainer_Init(&doc->cp_container, &doc->IUnknown_inner, HTMLDocumentObj_cpc);
     HTMLDocumentObj_Persist_Init(doc);
     HTMLDocumentObj_Service_Init(doc);

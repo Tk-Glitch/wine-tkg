@@ -406,7 +406,7 @@ static HANDLE get_display_device_init_mutex( void )
     HANDLE mutex;
 
     snprintf( buffer, ARRAY_SIZE(buffer), "\\Sessions\\%u\\BaseNamedObjects\\display_device_init",
-              NtCurrentTeb()->Peb->SessionId );
+              (int)NtCurrentTeb()->Peb->SessionId );
     name.Length = name.MaximumLength = asciiz_to_unicode( bufferW, buffer );
 
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
@@ -438,7 +438,7 @@ static void adapter_release( struct adapter *adapter )
 
 C_ASSERT(sizeof(DEVMODEW) - offsetof(DEVMODEW, dmFields) == 0x94);
 
-static BOOL write_adapter_mode( HKEY adapter_key, DWORD index, const DEVMODEW *mode )
+static BOOL write_adapter_mode( HKEY adapter_key, UINT index, const DEVMODEW *mode )
 {
     WCHAR bufferW[MAX_PATH] = {0};
     char buffer[MAX_PATH];
@@ -448,7 +448,7 @@ static BOOL write_adapter_mode( HKEY adapter_key, DWORD index, const DEVMODEW *m
     return set_reg_value( adapter_key, bufferW, REG_BINARY, &mode->dmFields, sizeof(*mode) - offsetof(DEVMODEW, dmFields) );
 }
 
-static BOOL read_adapter_mode( HKEY adapter_key, DWORD index, DEVMODEW *mode )
+static BOOL read_adapter_mode( HKEY adapter_key, UINT index, DEVMODEW *mode )
 {
     char value_buf[offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(*mode)])];
     KEY_VALUE_PARTIAL_INFORMATION *value = (void *)value_buf;
@@ -712,7 +712,7 @@ static BOOL read_display_adapter_settings( unsigned int index, struct adapter *i
     return TRUE;
 }
 
-static BOOL read_monitor_settings( struct adapter *adapter, DWORD index, struct monitor *monitor )
+static BOOL read_monitor_settings( struct adapter *adapter, UINT index, struct monitor *monitor )
 {
     char buffer[4096];
     KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
@@ -1202,14 +1202,14 @@ static void add_gpu( const struct gdi_gpu *gpu, void *param )
         if (query_reg_value( subkey, NULL, value, sizeof(buffer) ) != sizeof(LUID))
         {
             NtAllocateLocallyUniqueId( &ctx->gpu_luid );
-            TRACE("allocated luid %08x%08x\n", ctx->gpu_luid.HighPart, ctx->gpu_luid.LowPart );
+            TRACE("allocated luid %08x%08x\n", (int)ctx->gpu_luid.HighPart, (int)ctx->gpu_luid.LowPart );
             set_reg_value( subkey, NULL, 0xffff0000 | DEVPROP_TYPE_UINT64,
                            &ctx->gpu_luid, sizeof(ctx->gpu_luid) );
         }
         else
         {
             memcpy( &ctx->gpu_luid, value->Data, sizeof(ctx->gpu_luid) );
-            TRACE("got luid %08x%08x\n", ctx->gpu_luid.HighPart, ctx->gpu_luid.LowPart );
+            TRACE("got luid %08x%08x\n", (int)ctx->gpu_luid.HighPart, (int)ctx->gpu_luid.LowPart );
         }
         NtClose( subkey );
     }
@@ -1998,7 +1998,7 @@ LONG WINAPI NtUserGetDisplayConfigBufferSizes( UINT32 flags, UINT32 *num_path_in
 }
 
 /* display_lock mutex must be held */
-static struct display_device *find_monitor_device( struct display_device *adapter, DWORD index )
+static struct display_device *find_monitor_device( struct display_device *adapter, UINT index )
 {
     struct monitor *monitor;
 
@@ -2011,7 +2011,7 @@ static struct display_device *find_monitor_device( struct display_device *adapte
 }
 
 /* display_lock mutex must be held */
-static struct display_device *find_adapter_device_by_id( DWORD index )
+static struct display_device *find_adapter_device_by_id( UINT index )
 {
     struct adapter *adapter;
 
@@ -2064,7 +2064,7 @@ NTSTATUS WINAPI NtUserEnumDisplayDevices( UNICODE_STRING *device, DWORD index,
 {
     struct display_device *found = NULL;
 
-    TRACE( "%s %u %p %#x\n", debugstr_us( device ), index, info, flags );
+    TRACE( "%s %u %p %#x\n", debugstr_us( device ), (int)index, info, (int)flags );
 
     if (!info || !info->cb) return STATUS_UNSUCCESSFUL;
 
@@ -2144,19 +2144,19 @@ static void trace_devmode( const DEVMODEW *devmode )
 {
     TRACE( "dmFields=%s ", _DM_fields(devmode->dmFields) );
     if (devmode->dmFields & DM_BITSPERPEL)
-        TRACE( "dmBitsPerPel=%u ", devmode->dmBitsPerPel );
+        TRACE( "dmBitsPerPel=%u ", (int)devmode->dmBitsPerPel );
     if (devmode->dmFields & DM_PELSWIDTH)
-        TRACE( "dmPelsWidth=%u ", devmode->dmPelsWidth );
+        TRACE( "dmPelsWidth=%u ", (int)devmode->dmPelsWidth );
     if (devmode->dmFields & DM_PELSHEIGHT)
-        TRACE( "dmPelsHeight=%u ", devmode->dmPelsHeight );
+        TRACE( "dmPelsHeight=%u ", (int)devmode->dmPelsHeight );
     if (devmode->dmFields & DM_DISPLAYFREQUENCY)
-        TRACE( "dmDisplayFrequency=%u ", devmode->dmDisplayFrequency );
+        TRACE( "dmDisplayFrequency=%u ", (int)devmode->dmDisplayFrequency );
     if (devmode->dmFields & DM_POSITION)
-        TRACE( "dmPosition=(%d,%d) ", devmode->dmPosition.x, devmode->dmPosition.y );
+        TRACE( "dmPosition=(%d,%d) ", (int)devmode->dmPosition.x, (int)devmode->dmPosition.y );
     if (devmode->dmFields & DM_DISPLAYFLAGS)
-        TRACE( "dmDisplayFlags=%#x ", devmode->dmDisplayFlags );
+        TRACE( "dmDisplayFlags=%#x ", (int)devmode->dmDisplayFlags );
     if (devmode->dmFields & DM_DISPLAYORIENTATION)
-        TRACE( "dmDisplayOrientation=%u ", devmode->dmDisplayOrientation );
+        TRACE( "dmDisplayOrientation=%u ", (int)devmode->dmDisplayOrientation );
     TRACE("\n");
 }
 
@@ -2229,7 +2229,7 @@ static BOOL adapter_get_full_mode( const struct adapter *adapter, const DEVMODEW
 
     if ((full_mode->dmFields & (DM_PELSWIDTH | DM_PELSHEIGHT)) != (DM_PELSWIDTH | DM_PELSHEIGHT))
     {
-        WARN( "devmode doesn't specify the resolution: %#x\n", full_mode->dmFields );
+        WARN( "devmode doesn't specify the resolution: %#x\n", (int)full_mode->dmFields );
         return FALSE;
     }
 
@@ -2551,10 +2551,10 @@ LONG WINAPI NtUserChangeDisplaySettings( UNICODE_STRING *devname, DEVMODEW *devm
                                          DWORD flags, void *lparam )
 {
     DEVMODEW full_mode = {.dmSize = sizeof(DEVMODEW)};
-    LONG ret = DISP_CHANGE_SUCCESSFUL;
+    int ret = DISP_CHANGE_SUCCESSFUL;
     struct adapter *adapter;
 
-    TRACE( "%s %p %p %#x %p\n", debugstr_us(devname), devmode, hwnd, flags, lparam );
+    TRACE( "%s %p %p %#x %p\n", debugstr_us(devname), devmode, hwnd, (int)flags, lparam );
     TRACE( "flags=%s\n", _CDS_flags(flags) );
 
     if ((!devname || !devname->Length) && !devmode) return apply_display_settings( NULL, NULL, hwnd, flags, lparam );
@@ -2571,7 +2571,7 @@ LONG WINAPI NtUserChangeDisplaySettings( UNICODE_STRING *devname, DEVMODEW *devm
     return ret;
 }
 
-static BOOL adapter_enum_display_settings( const struct adapter *adapter, DWORD index, DEVMODEW *devmode, DWORD flags )
+static BOOL adapter_enum_display_settings( const struct adapter *adapter, UINT index, DEVMODEW *devmode, UINT flags )
 {
     DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};
     const DEVMODEW *adapter_mode;
@@ -2613,7 +2613,8 @@ BOOL WINAPI NtUserEnumDisplaySettings( UNICODE_STRING *device, DWORD index, DEVM
     struct adapter *adapter;
     BOOL ret;
 
-    TRACE( "device %s, index %#x, devmode %p, flags %#x\n", debugstr_us(device), index, devmode, flags );
+    TRACE( "device %s, index %#x, devmode %p, flags %#x\n",
+           debugstr_us(device), (int)index, devmode, (int)flags );
 
     if (!(adapter = find_adapter( device ))) return FALSE;
 
@@ -2630,8 +2631,9 @@ BOOL WINAPI NtUserEnumDisplaySettings( UNICODE_STRING *device, DWORD index, DEVM
 
     if (!ret) WARN( "Failed to query %s display settings.\n", debugstr_us(device) );
     else TRACE( "position %dx%d, resolution %ux%u, frequency %u, depth %u, orientation %#x.\n",
-                devmode->dmPosition.x, devmode->dmPosition.y, devmode->dmPelsWidth, devmode->dmPelsHeight,
-                devmode->dmDisplayFrequency, devmode->dmBitsPerPel, devmode->dmDisplayOrientation );
+                (int)devmode->dmPosition.x, (int)devmode->dmPosition.y, (int)devmode->dmPelsWidth,
+                (int)devmode->dmPelsHeight, (int)devmode->dmDisplayFrequency,
+                (int)devmode->dmBitsPerPel, (int)devmode->dmDisplayOrientation );
     return ret;
 }
 
@@ -2766,7 +2768,7 @@ BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
             info->rcMonitor = map_dpi_rect( info->rcMonitor, dpi_from, dpi_to );
             info->rcWork = map_dpi_rect( info->rcWork, dpi_from, dpi_to );
         }
-        TRACE( "flags %04x, monitor %s, work %s\n", info->dwFlags,
+        TRACE( "flags %04x, monitor %s, work %s\n", (int)info->dwFlags,
                wine_dbgstr_rect(&info->rcMonitor), wine_dbgstr_rect(&info->rcWork));
         return TRUE;
     }
@@ -2777,7 +2779,7 @@ BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
     return FALSE;
 }
 
-HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi )
+HMONITOR monitor_from_rect( const RECT *rect, UINT flags, UINT dpi )
 {
     HMONITOR primary = 0, nearest = 0, ret = 0;
     UINT max_area = 0, min_distance = ~0u;
@@ -2843,7 +2845,7 @@ HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi )
     return ret;
 }
 
-HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi )
+HMONITOR monitor_from_point( POINT pt, UINT flags, UINT dpi )
 {
     RECT rect;
     SetRect( &rect, pt.x, pt.y, pt.x + 1, pt.y + 1 );
@@ -2851,7 +2853,7 @@ HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi )
 }
 
 /* see MonitorFromWindow */
-HMONITOR monitor_from_window( HWND hwnd, DWORD flags, UINT dpi )
+HMONITOR monitor_from_window( HWND hwnd, UINT flags, UINT dpi )
 {
     RECT rect;
     WINDOWPLACEMENT wp;
@@ -3447,7 +3449,7 @@ static void get_real_fontname( LOGFONTW *lf, WCHAR fullname[LF_FACESIZE] )
         lstrcpyW( fullname, lf->lfFaceName );
 }
 
-LONG get_char_dimensions( HDC hdc, TEXTMETRICW *metric, LONG *height )
+LONG get_char_dimensions( HDC hdc, TEXTMETRICW *metric, int *height )
 {
     SIZE sz;
     static const WCHAR abcdW[] =
@@ -3488,7 +3490,7 @@ static void get_text_metr_size( HDC hdc, LOGFONTW *lf, TEXTMETRICW *metric, UINT
 
 DWORD get_dialog_base_units(void)
 {
-    static LONG cx, cy;
+    static int cx, cy;
 
     if (!cx)
     {
@@ -5337,7 +5339,7 @@ BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *va
 }
 
 
-static DPI_AWARENESS dpi_awareness;
+static LONG dpi_awareness;
 
 /***********************************************************************
  *	     NtUserSetProcessDpiAwarenessContext    (win32u.@)
@@ -5448,7 +5450,7 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
         return 0;
 
     default:
-        FIXME( "invalid code %u\n", code );
+        FIXME( "invalid code %u\n", (int)code );
         return 0;
     }
 }
@@ -5535,7 +5537,7 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         return get_entry( &entry_DESKPATTERN, 256, (WCHAR *)arg );
 
     default:
-        FIXME( "invalid code %u\n", code );
+        FIXME( "invalid code %u\n", (int)code );
         return 0;
     }
 }
@@ -5576,7 +5578,7 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
         return (UINT_PTR)alloc_winproc( (WNDPROC)arg1, arg2 );
 
     default:
-        FIXME( "invalid code %u\n", code );
+        FIXME( "invalid code %u\n", (int)code );
         return 0;
     }
 }

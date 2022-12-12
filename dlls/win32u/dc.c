@@ -510,7 +510,7 @@ static BOOL DC_DeleteObject( HGDIOBJ handle )
     if (!(dc = get_dc_ptr( handle ))) return FALSE;
     if (dc->refcount != 1)
     {
-        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
+        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, (int)dc->refcount );
         release_dc_ptr( dc );
         return FALSE;
     }
@@ -1159,7 +1159,7 @@ BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
         break;
 
     default:
-        FIXME("Unknown code %x\n", which);
+        FIXME("Unknown code %x\n", (int)which);
         ret = FALSE;
     }
 
@@ -1451,7 +1451,7 @@ UINT WINAPI NtGdiSetBoundsRect( HDC hdc, const RECT *rect, UINT flags )
  */
 DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
 {
-    DWORD old_layout = GDI_ERROR;
+    UINT old_layout = GDI_ERROR;
     DC *dc;
 
     if ((dc = get_dc_ptr( hdc )))
@@ -1466,7 +1466,7 @@ DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
         release_dc_ptr( dc );
     }
 
-    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, layout);
+    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, (int)layout);
 
     return old_layout;
 }
@@ -1491,7 +1491,7 @@ BOOL CDECL __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCH
 /***********************************************************************
  *      __wine_get_wgl_driver  (win32u.@)
  */
-struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version )
+struct opengl_funcs *__wine_get_wgl_driver( HDC hdc, UINT version )
 {
     BOOL is_display, is_memdc;
     DC *dc;

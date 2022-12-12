@@ -1132,7 +1132,7 @@ static WORD EVENT_event_to_vkey( XIC xic, XKeyEvent *e)
 /***********************************************************************
  *           X11DRV_send_keyboard_input
  */
-static void X11DRV_send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD flags, DWORD time )
+static void X11DRV_send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, UINT flags, UINT time )
 {
     RAWINPUT rawinput;
     INPUT input;
@@ -1315,7 +1315,7 @@ static void adjust_lock_state( BYTE *keystate, HWND hwnd, WORD vkey, WORD scan, 
     }
 }
 
-static void update_lock_state( HWND hwnd, WORD vkey, UINT state, DWORD time )
+static void update_lock_state( HWND hwnd, WORD vkey, UINT state, UINT time )
 {
     BYTE keystate[256];
 
@@ -2285,7 +2285,7 @@ INT X11DRV_GetKeyNameText( LONG lParam, LPWSTR lpBuffer, INT nSize )
   /* Finally issue WARN for unknown keys   */
 
   pthread_mutex_unlock( &kbd_mutex );
-  WARN("(%08x,%p,%d): unsupported key, vkey=%04X, ansi=%04x\n",lParam,lpBuffer,nSize,vkey,ansi);
+  WARN("(%08x,%p,%d): unsupported key, vkey=%04X, ansi=%04x\n",(int)lParam,lpBuffer,nSize,vkey,ansi);
   *lpBuffer = 0;
   return 0;
 }

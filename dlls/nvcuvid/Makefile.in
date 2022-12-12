@@ -1,5 +1,0 @@
-MODULE    = nvcuvid.dll
-EXTRADLLFLAGS = -mcygwin
-
-C_SRCS = \
-	nvcuvid.c

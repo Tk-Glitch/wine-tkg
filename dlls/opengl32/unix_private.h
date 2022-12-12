@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -45,9 +46,19 @@ extern struct opengl_funcs null_opengl_funcs DECLSPEC_HIDDEN;
 static inline struct opengl_funcs *get_dc_funcs( HDC hdc )
 {
     struct opengl_funcs *funcs = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
-    if (!funcs) SetLastError( ERROR_INVALID_HANDLE );
+    if (!funcs) RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
     else if (funcs == (void *)-1) funcs = &null_opengl_funcs;
     return funcs;
+}
+
+static inline void *copy_wow64_ptr32s( UINT_PTR address, ULONG count )
+{
+    ULONG *ptrs = (ULONG *)address;
+    void **tmp;
+
+    if (!ptrs || !(tmp = calloc( count, sizeof(*tmp) ))) return NULL;
+    while (count--) tmp[count] = ULongToPtr(ptrs[count]);
+    return tmp;
 }
 
 #endif /* __WINE_OPENGL32_UNIX_PRIVATE_H */

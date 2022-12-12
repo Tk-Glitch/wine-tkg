@@ -1466,16 +1466,6 @@ static HRESULT reader_parse_comment(xmlreader *reader)
     return S_OK;
 }
 
-/* [2] Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF] */
-static inline BOOL is_char(WCHAR ch)
-{
-    return (ch == '\t') || (ch == '\r') || (ch == '\n') ||
-           (ch >= 0x20 && ch <= 0xd7ff) ||
-           (ch >= 0xd800 && ch <= 0xdbff) || /* high surrogate */
-           (ch >= 0xdc00 && ch <= 0xdfff) || /* low surrogate */
-           (ch >= 0xe000 && ch <= 0xfffd);
-}
-
 /* [13] PubidChar ::= #x20 | #xD | #xA | [a-zA-Z0-9] | [-'()+,./:=?;!*#@$_%] */
 BOOL is_pubchar(WCHAR ch)
 {
@@ -2651,9 +2641,7 @@ static HRESULT reader_parse_nextnode(xmlreader *reader)
 
 static HRESULT WINAPI xmlreader_QueryInterface(IXmlReader *iface, REFIID riid, void** ppvObject)
 {
-    xmlreader *This = impl_from_IXmlReader(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), ppvObject);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IXmlReader))
@@ -2742,7 +2730,7 @@ static HRESULT WINAPI xmlreader_SetInput(IXmlReader* iface, IUnknown *input)
     IXmlReaderInput *readerinput;
     HRESULT hr;
 
-    TRACE("(%p)->(%p)\n", This, input);
+    TRACE("%p, %p.\n", iface, input);
 
     if (This->input)
     {
@@ -2799,7 +2787,7 @@ static HRESULT WINAPI xmlreader_GetProperty(IXmlReader* iface, UINT property, LO
 {
     xmlreader *This = impl_from_IXmlReader(iface);
 
-    TRACE("(%p)->(%s %p)\n", This, debugstr_reader_prop(property), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_reader_prop(property), value);
 
     if (!value) return E_INVALIDARG;
 
@@ -2878,7 +2866,7 @@ static HRESULT WINAPI xmlreader_Read(IXmlReader* iface, XmlNodeType *nodetype)
     XmlNodeType type;
     HRESULT hr;
 
-    TRACE("(%p)->(%p)\n", This, nodetype);
+    TRACE("%p, %p.\n", iface, nodetype);
 
     if (!nodetype)
         nodetype = &type;
@@ -2915,7 +2903,7 @@ static HRESULT WINAPI xmlreader_GetNodeType(IXmlReader* iface, XmlNodeType *node
 {
     xmlreader *This = impl_from_IXmlReader(iface);
 
-    TRACE("(%p)->(%p)\n", This, node_type);
+    TRACE("%p, %p.\n", iface, node_type);
 
     if (!node_type)
         return E_INVALIDARG;
@@ -2949,7 +2937,7 @@ static HRESULT WINAPI xmlreader_MoveToFirstAttribute(IXmlReader* iface)
 {
     xmlreader *This = impl_from_IXmlReader(iface);
 
-    TRACE("(%p)\n", This);
+    TRACE("%p.\n", iface);
 
     return reader_move_to_first_attribute(This);
 }
@@ -2959,7 +2947,7 @@ static HRESULT WINAPI xmlreader_MoveToNextAttribute(IXmlReader* iface)
     xmlreader *This = impl_from_IXmlReader(iface);
     const struct list *next;
 
-    TRACE("(%p)\n", This);
+    TRACE("%p.\n", iface);
 
     if (!This->attr_count) return S_FALSE;
 
@@ -3040,7 +3028,7 @@ static HRESULT WINAPI xmlreader_MoveToAttributeByName(IXmlReader* iface,
     UINT target_name_len, target_uri_len;
     struct attribute *attr;
 
-    TRACE("(%p)->(%s %s)\n", This, debugstr_w(local_name), debugstr_w(namespace_uri));
+    TRACE("%p, %s, %s.\n", iface, debugstr_w(local_name), debugstr_w(namespace_uri));
 
     if (!local_name)
         return E_INVALIDARG;
@@ -3077,7 +3065,7 @@ static HRESULT WINAPI xmlreader_MoveToElement(IXmlReader* iface)
 {
     xmlreader *This = impl_from_IXmlReader(iface);
 
-    TRACE("(%p)\n", This);
+    TRACE("%p.\n", iface);
 
     if (!This->attr_count) return S_FALSE;
 
@@ -3111,7 +3099,7 @@ static HRESULT WINAPI xmlreader_GetQualifiedName(IXmlReader* iface, LPCWSTR *nam
     struct element *element;
     UINT length;
 
-    TRACE("(%p)->(%p %p)\n", This, name, len);
+    TRACE("%p, %p, %p.\n", iface, name, len);
 
     if (!len)
         len = &length;
@@ -3180,7 +3168,7 @@ static HRESULT WINAPI xmlreader_GetNamespaceUri(IXmlReader* iface, const WCHAR *
     struct ns *ns;
     UINT length;
 
-    TRACE("(%p %p %p)\n", iface, uri, len);
+    TRACE("%p, %p, %p.\n", iface, uri, len);
 
     if (!len)
         len = &length;
@@ -3234,7 +3222,7 @@ static HRESULT WINAPI xmlreader_GetLocalName(IXmlReader* iface, LPCWSTR *name, U
     struct element *element;
     UINT length;
 
-    TRACE("(%p)->(%p %p)\n", This, name, len);
+    TRACE("%p, %p, %p.\n", iface, name, len);
 
     if (!len)
         len = &length;
@@ -3272,7 +3260,7 @@ static HRESULT WINAPI xmlreader_GetPrefix(IXmlReader* iface, const WCHAR **ret, 
     XmlNodeType nodetype;
     UINT length;
 
-    TRACE("(%p)->(%p %p)\n", This, ret, len);
+    TRACE("%p, %p, %p.\n", iface, ret, len);
 
     if (!len)
         len = &length;
@@ -3359,7 +3347,7 @@ static HRESULT WINAPI xmlreader_GetValue(IXmlReader* iface, const WCHAR **value,
     const strval *val = &reader->strvalues[StringValue_Value];
     UINT off;
 
-    TRACE("(%p)->(%p %p)\n", reader, value, len);
+    TRACE("%p, %p, %p.\n", iface, value, len);
 
     *value = NULL;
 
@@ -3393,7 +3381,7 @@ static HRESULT WINAPI xmlreader_ReadValueChunk(IXmlReader* iface, WCHAR *buffer,
     const strval *val;
     UINT len = 0;
 
-    TRACE("(%p)->(%p %u %p)\n", reader, buffer, chunk_size, read);
+    TRACE("%p, %p, %u, %p.\n", iface, buffer, chunk_size, read);
 
     val = reader_get_value(reader, FALSE);
 
@@ -3418,20 +3406,22 @@ static HRESULT WINAPI xmlreader_GetBaseUri(IXmlReader* iface,
                                            LPCWSTR *baseUri,
                                            UINT *baseUri_length)
 {
-    FIXME("(%p %p %p): stub\n", iface, baseUri, baseUri_length);
+    FIXME("%p, %p, %p: stub\n", iface, baseUri, baseUri_length);
     return E_NOTIMPL;
 }
 
 static BOOL WINAPI xmlreader_IsDefault(IXmlReader* iface)
 {
-    FIXME("(%p): stub\n", iface);
+    FIXME("%p: stub\n", iface);
     return FALSE;
 }
 
 static BOOL WINAPI xmlreader_IsEmptyElement(IXmlReader* iface)
 {
     xmlreader *This = impl_from_IXmlReader(iface);
-    TRACE("(%p)\n", This);
+
+    TRACE("%p.\n", iface);
+
     /* Empty elements are not placed in stack, it's stored as a global reader flag that makes sense
        when current node is start tag of an element */
     return (reader_get_nodetype(This) == XmlNodeType_Element) ? This->is_empty_element : FALSE;
@@ -3442,7 +3432,7 @@ static HRESULT WINAPI xmlreader_GetLineNumber(IXmlReader* iface, UINT *line_numb
     xmlreader *This = impl_from_IXmlReader(iface);
     const struct element *element;
 
-    TRACE("(%p %p)\n", This, line_number);
+    TRACE("%p, %p.\n", iface, line_number);
 
     if (!line_number)
         return E_INVALIDARG;
@@ -3474,7 +3464,7 @@ static HRESULT WINAPI xmlreader_GetLinePosition(IXmlReader* iface, UINT *line_po
     xmlreader *This = impl_from_IXmlReader(iface);
     const struct element *element;
 
-    TRACE("(%p %p)\n", This, line_position);
+    TRACE("%p, %p.\n", iface, line_position);
 
     if (!line_position)
         return E_INVALIDARG;
@@ -3505,7 +3495,7 @@ static HRESULT WINAPI xmlreader_GetAttributeCount(IXmlReader* iface, UINT *count
 {
     xmlreader *This = impl_from_IXmlReader(iface);
 
-    TRACE("(%p)->(%p)\n", This, count);
+    TRACE("%p, %p.\n", iface, count);
 
     if (!count) return E_INVALIDARG;
 
@@ -3516,7 +3506,9 @@ static HRESULT WINAPI xmlreader_GetAttributeCount(IXmlReader* iface, UINT *count
 static HRESULT WINAPI xmlreader_GetDepth(IXmlReader* iface, UINT *depth)
 {
     xmlreader *This = impl_from_IXmlReader(iface);
-    TRACE("(%p)->(%p)\n", This, depth);
+
+    TRACE("%p, %p.\n", iface, depth);
+
     *depth = This->depth;
     return S_OK;
 }
@@ -3524,7 +3516,9 @@ static HRESULT WINAPI xmlreader_GetDepth(IXmlReader* iface, UINT *depth)
 static BOOL WINAPI xmlreader_IsEOF(IXmlReader* iface)
 {
     xmlreader *This = impl_from_IXmlReader(iface);
-    TRACE("(%p)\n", iface);
+
+    TRACE("%p.\n", iface);
+
     return This->state == XmlReadState_EndOfFile;
 }
 
@@ -3561,9 +3555,7 @@ static const struct IXmlReaderVtbl xmlreader_vtbl =
 /** IXmlReaderInput **/
 static HRESULT WINAPI xmlreaderinput_QueryInterface(IXmlReaderInput *iface, REFIID riid, void** ppvObject)
 {
-    xmlreaderinput *This = impl_from_IXmlReaderInput(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), ppvObject);
 
     if (IsEqualGUID(riid, &IID_IXmlReaderInput) ||
         IsEqualGUID(riid, &IID_IUnknown))
@@ -3624,7 +3616,7 @@ HRESULT WINAPI CreateXmlReader(REFIID riid, void **obj, IMalloc *imalloc)
     HRESULT hr;
     int i;
 
-    TRACE("(%s, %p, %p)\n", wine_dbgstr_guid(riid), obj, imalloc);
+    TRACE("%s, %p, %p.\n", wine_dbgstr_guid(riid), obj, imalloc);
 
     if (!(reader = m_alloc(imalloc, sizeof(*reader))))
         return E_OUTOFMEMORY;

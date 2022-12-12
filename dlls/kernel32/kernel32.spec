@@ -285,6 +285,7 @@
 @ stdcall -import CreateFileA(str long long ptr long long long)
 @ stdcall CreateFileMappingA(long ptr long long long str)
 # @ stub CreateFileMappingNumaA
+@ stdcall CreateFileMappingFromApp(long ptr long int64 wstr) kernelbase.CreateFileMappingFromApp
 @ stdcall -import CreateFileMappingNumaW(long ptr long long long wstr long)
 @ stdcall -import CreateFileMappingW(long ptr long long long wstr)
 @ stdcall -import CreateFileW(wstr long long ptr long long long)
@@ -697,6 +698,7 @@
 @ stdcall -import GetFullPathNameW(wstr long ptr ptr)
 @ stdcall GetGeoInfoA(long long ptr long long)
 @ stdcall -import GetGeoInfoW(long long ptr long long)
+@ stdcall -import GetGeoInfoEx(ptr long ptr long)
 @ stdcall GetHandleContext(long)
 @ stdcall -import GetHandleInformation(long ptr)
 @ stub -i386 GetLSCallbackTarget
@@ -1096,6 +1098,7 @@
 @ stdcall -import MapViewOfFile(long long long long long)
 @ stdcall -import MapViewOfFileEx(long long long long long ptr)
 @ stdcall -import MapViewOfFileExNuma(long long long long long ptr long)
+@ stdcall MapViewOfFileFromApp(long long int64 long) kernelbase.MapViewOfFileFromApp
 @ stdcall Module32First(long ptr)
 @ stdcall Module32FirstW(long ptr)
 @ stdcall Module32Next(long ptr)
@@ -1449,6 +1452,7 @@
 @ stdcall -import SetProcessAffinityUpdateMode(long long)
 @ stdcall -import SetProcessDefaultCpuSets(ptr ptr long)
 @ stdcall SetProcessDEPPolicy(long)
+@ stdcall -import SetProcessInformation(long long ptr long)
 @ stdcall -import SetProcessMitigationPolicy(long ptr long)
 @ stdcall -import SetProcessPreferredUILanguages(long ptr ptr)
 @ stdcall -import SetProcessPriorityBoost(long long)

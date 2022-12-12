@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - lun. 14 nov. 2022 01:02:54 CET :
+# Last wine-tkg-staging-fsync-git configuration - lun. 12 déc. 2022 17:10:29 CET :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.21.r0.g053ee2d23d8
-Using wine-staging patchset (version 7.21.r0.gd935a41e)
+Wine (plain) version: 7.22.r0.g20d86f34a06
+Using wine-staging patchset (version 7.22.r0.gd8881486)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -24,10 +24,10 @@ fsync_futex_waitv.patch -- ( Replace all fsync interfaces with futex_waitv )
 
 childwindow-proton.patch -- ( Applied child window for vk patch )
 OPWR-proton.patch -- ( Applied other process window Vulkan rendering patchset )
-LAA-unix-staging.patch -- ( Applied large address aware override support )
+LAA-unix-staging-ee147d9.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
-proton-tkg-additions.patch -- ( Using additional Proton-tkg patches )
+proton-tkg-staging-2f41d85.patch -- ( Using Steam-specific Proton-tkg patches (staging-2f41d85) 2/2 )
+proton-tkg-additions-6be2138.patch -- ( Using additional Proton-tkg patches )
 proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
@@ -35,7 +35,7 @@ proton-win10-default.patch -- ( Enforce win10 as default wine version )
 proton_battleye.patch -- ( Add support for Proton's Battleye runtime )
 proton-eac_bridge.patch -- ( Add support for Proton's EAC bridge )
 
-Applied hotfix remove_hooks_that_time_out.mypatch
+Applied hotfix remove_hooks_that_time_out2.mypatch
 Applied hotfix winex11.drv_Add_a_GPU_for_each_Vulkan_device_that_was_not_tied_to_an_XRandR_provider.mypatch
 Applied hotfix winex11.drv_Ignore_ClipCursor_if_desktop_window_is_foreground.mypatch
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
@@ -44,6 +44,7 @@ Applied hotfix 0001-proton-bcrypt_rdr2_fixes5.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix a608ef1.mypatch
 Applied hotfix 1148-staging.mypatch
+Applied hotfix opencl-fixup-9207927.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch

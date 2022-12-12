@@ -31,6 +31,7 @@
 #include "wine/debug.h"
 
 #include "mshtml_private.h"
+#include "htmlevent.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -48,6 +49,9 @@ static void paint_document(HTMLDocumentObj *This)
     PAINTSTRUCT ps;
     RECT rect;
     HDC hdc;
+
+    if(This->window && This->window->base.inner_window && !This->window->base.inner_window->performance_timing->first_paint_time)
+        This->window->base.inner_window->performance_timing->first_paint_time = get_time_stamp();
 
     GetClientRect(This->hwnd, &rect);
 
@@ -350,7 +354,7 @@ static LRESULT WINAPI tooltips_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
 static void create_tooltips_window(HTMLDocumentObj *This)
 {
-    tooltip_data *data = heap_alloc(sizeof(*data));
+    tooltip_data *data = malloc(sizeof(*data));
 
     This->tooltips_hwnd = CreateWindowExW(0, TOOLTIPS_CLASSW, NULL, TTS_NOPREFIX | WS_POPUP,
             CW_USEDEFAULT, CW_USEDEFAULT, 10, 10, This->hwnd, NULL, hInst, NULL);
@@ -405,6 +409,47 @@ HRESULT call_set_active_object(IOleInPlaceUIWindow *window, IOleInPlaceActiveObj
         LoadStringW(hInst, IDS_HTMLDOCUMENT, html_documentW, ARRAY_SIZE(html_documentW));
 
     return IOleInPlaceUIWindow_SetActiveObject(window, act_obj, act_obj ? html_documentW : NULL);
+}
+
+static void send_unload_events_impl(HTMLInnerWindow *window)
+{
+    HTMLOuterWindow *child;
+    DOMEvent *event;
+    HRESULT hres;
+
+    if(!window)
+        return;
+
+    if(window->doc && !window->doc->unload_sent) {
+        window->doc->unload_sent = TRUE;
+
+        /* Native sends pagehide events prior to unload on the same window
+           before it moves on to the next window, so they're interleaved. */
+        if(window->doc->document_mode >= COMPAT_MODE_IE11) {
+            hres = create_document_event(window->doc, EVENTID_PAGEHIDE, &event);
+            if(SUCCEEDED(hres)) {
+                dispatch_event(&window->event_target, event);
+                IDOMEvent_Release(&event->IDOMEvent_iface);
+            }
+        }
+
+        hres = create_document_event(window->doc, EVENTID_UNLOAD, &event);
+        if(SUCCEEDED(hres)) {
+            dispatch_event(&window->event_target, event);
+            IDOMEvent_Release(&event->IDOMEvent_iface);
+        }
+    }
+
+    LIST_FOR_EACH_ENTRY(child, &window->children, HTMLOuterWindow, sibling_entry)
+        send_unload_events_impl(child->base.inner_window);
+}
+
+static void send_unload_events(HTMLDocumentObj *doc)
+{
+    if(!doc->doc_node || !doc->window || !doc->doc_node->content_ready)
+        return;
+
+    send_unload_events_impl(doc->window->base.inner_window);
 }
 
 /**********************************************************
@@ -670,6 +715,7 @@ static HRESULT WINAPI OleDocumentView_CloseView(IOleDocumentView *iface, DWORD d
     if(dwReserved)
         WARN("dwReserved = %ld\n", dwReserved);
 
+    send_unload_events(This);
     IOleDocumentView_Show(iface, FALSE);
     return S_OK;
 }

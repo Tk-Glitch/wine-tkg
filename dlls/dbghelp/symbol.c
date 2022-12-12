@@ -150,11 +150,10 @@ static BOOL symt_grow_sorttab(struct module* module, unsigned sz)
     return TRUE;
 }
 
-static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
+static void symt_add_module_addr(struct module* module, struct symt_ht* ht)
 {
     ULONG64             addr;
 
-    hash_table_add(&module->ht_symbols, &ht->hash_elt);
     /* Don't store in sorttab a symbol without address, they are of
      * no use here (e.g. constant values)
      */
@@ -164,6 +163,12 @@ static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
         module->addr_sorttab[module->num_symbols++] = ht;
         module->sortlist_valid = FALSE;
     }
+}
+
+static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
+{
+    hash_table_add(&module->ht_symbols, &ht->hash_elt);
+    symt_add_module_addr(module, ht);
 }
 
 static WCHAR* file_regex(const char* srcfile)
@@ -488,6 +493,8 @@ struct symt_data* symt_add_func_local(struct module* module,
     else
         p = vector_add(&func->vchildren, &module->pool);
     *p = &locsym->symt;
+    if (dt == DataIsStaticLocal)
+        symt_add_module_addr(module, (struct symt_ht*)locsym);
     return locsym;
 }
 
@@ -1256,27 +1263,6 @@ struct symt_function* symt_find_inlined_site(struct module* module, DWORD64 addr
                 if (depth-- == 0) return curr;
     }
     return NULL;
-}
-
-DWORD symt_get_inlinesite_depth(HANDLE hProcess, DWORD64 addr)
-{
-    struct module_pair pair;
-    DWORD depth = 0;
-
-    if (module_init_pair(&pair, hProcess, addr))
-    {
-        struct symt_ht* symt = symt_find_symbol_at(pair.effective, addr);
-        if (symt_check_tag(&symt->symt, SymTagFunction))
-        {
-            struct symt_function* inlined = symt_find_lowest_inlined((struct symt_function*)symt, addr);
-            if (inlined)
-            {
-                for ( ; &inlined->symt != &symt->symt; inlined = (struct symt_function*)symt_get_upper_inlined(inlined))
-                    ++depth;
-            }
-        }
-    }
-    return depth;
 }
 
 /******************************************************************
@@ -2785,6 +2771,85 @@ BOOL WINAPI SymGetLineFromInlineContextW(HANDLE hProcess, DWORD64 addr, ULONG in
 
     if (!get_line_from_inline_context(hProcess, addr, inline_ctx, mod_addr, disp, &intl)) return FALSE;
     return internal_line_copy_toW64(&intl, line);
+}
+
+/******************************************************************
+ *		SymAddrIncludeInlineTrace (DBGHELP.@)
+ *
+ * MSDN doesn't state that the maximum depth (of embedded inline sites) at <addr>
+ * is actually returned. (It just says non zero means that there are some inline site(s)).
+ * But this is what native actually returns.
+ */
+DWORD WINAPI SymAddrIncludeInlineTrace(HANDLE hProcess, DWORD64 addr)
+{
+    struct module_pair pair;
+    DWORD depth = 0;
+
+    TRACE("(%p, %#I64x)\n", hProcess, addr);
+
+    if (module_init_pair(&pair, hProcess, addr))
+    {
+        struct symt_ht* symt = symt_find_symbol_at(pair.effective, addr);
+        if (symt_check_tag(&symt->symt, SymTagFunction))
+        {
+            struct symt_function* inlined = symt_find_lowest_inlined((struct symt_function*)symt, addr);
+            if (inlined)
+            {
+                for ( ; &inlined->symt != &symt->symt; inlined = (struct symt_function*)symt_get_upper_inlined(inlined))
+                    ++depth;
+            }
+        }
+    }
+    return depth;
+}
+
+/******************************************************************
+ *		SymQueryInlineTrace (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymQueryInlineTrace(HANDLE hProcess, DWORD64 StartAddress, DWORD StartContext,
+                                DWORD64 StartRetAddress, DWORD64 CurAddress,
+                                LPDWORD CurContext, LPDWORD CurFrameIndex)
+{
+    struct module_pair  pair;
+    struct symt_ht*     sym_curr;
+    struct symt_ht*     sym_start;
+    struct symt_ht*     sym_startret;
+    DWORD               depth;
+
+    TRACE("(%p, %#I64x, 0x%lx, %#I64x, %I64x, %p, %p)\n",
+          hProcess, StartAddress, StartContext, StartRetAddress, CurAddress, CurContext, CurFrameIndex);
+
+    if (!module_init_pair(&pair, hProcess, CurAddress)) return FALSE;
+    if (!(sym_curr = symt_find_symbol_at(pair.effective, CurAddress))) return FALSE;
+    if (!symt_check_tag(&sym_curr->symt, SymTagFunction)) return FALSE;
+
+    sym_start = symt_find_symbol_at(pair.effective, StartAddress);
+    sym_startret = symt_find_symbol_at(pair.effective, StartRetAddress);
+    if (sym_start != sym_curr && sym_startret != sym_curr)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (sym_start != sym_curr || StartContext)
+    {
+        FIXME("(%p, %#I64x, 0x%lx, %#I64x, %I64x, %p, %p): semi-stub\n",
+              hProcess, StartAddress, StartContext, StartRetAddress, CurAddress, CurContext, CurFrameIndex);
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+
+    depth = SymAddrIncludeInlineTrace(hProcess, CurAddress);
+    if (depth)
+    {
+        *CurContext = IFC_MODE_INLINE; /* deepest inline site */
+        *CurFrameIndex = depth;
+    }
+    else
+    {
+        *CurContext = IFC_MODE_REGULAR;
+        *CurFrameIndex = 0;
+    }
+    return TRUE;
 }
 
 /******************************************************************

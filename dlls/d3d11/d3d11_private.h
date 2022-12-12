@@ -545,7 +545,6 @@ struct d3d11_device_context
     ID3D11DeviceContext1 ID3D11DeviceContext1_iface;
     ID3D11Multithread ID3D11Multithread_iface;
     ID3DUserDefinedAnnotation ID3DUserDefinedAnnotation_iface;
-    IWineD3DDeviceContext IWineD3DDeviceContext_iface;
     LONG refcount;
 
     D3D11_DEVICE_CONTEXT_TYPE type;
@@ -562,7 +561,6 @@ struct d3d_device
     ID3D11Device2 ID3D11Device2_iface;
     ID3D10Device1 ID3D10Device1_iface;
     ID3D10Multithread ID3D10Multithread_iface;
-    IWineD3DDeviceContext IWineD3DDeviceContext_iface;
     IWineDXGIDeviceParent IWineDXGIDeviceParent_iface;
     IUnknown *outer_unk;
     LONG refcount;

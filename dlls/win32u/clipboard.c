@@ -56,7 +56,7 @@ static struct list formats_to_free = LIST_INIT( formats_to_free );
 static const char *debugstr_format( UINT id )
 {
     WCHAR buffer[256];
-    DWORD le = GetLastError();
+    DWORD le = RtlGetLastWin32Error();
     BOOL r = NtUserGetClipboardFormatName( id, buffer, ARRAYSIZE(buffer) );
     RtlSetLastWin32Error(le);
 
@@ -475,7 +475,7 @@ HWND WINAPI NtUserGetOpenClipboardWindow(void)
  */
 DWORD WINAPI NtUserGetClipboardSequenceNumber(void)
 {
-    DWORD seqno = 0;
+    unsigned int seqno = 0;
 
     SERVER_START_REQ( get_clipboard_info )
     {
@@ -570,6 +570,7 @@ void release_clipboard_owner( HWND hwnd )
 NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE data, struct set_clipboard_params *params )
 {
     struct cached_format *cache = NULL, *prev = NULL;
+    LCID lcid;
     void *ptr = NULL;
     data_size_t size = 0;
     NTSTATUS status = STATUS_SUCCESS;
@@ -603,13 +604,14 @@ NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE data, struct set_cli
             make_gdi_object_system( cache->handle, TRUE );
         }
     }
+    NtQueryDefaultLocale( TRUE, &lcid );
 
     pthread_mutex_lock( &clipboard_mutex );
 
     SERVER_START_REQ( set_clipboard_data )
     {
         req->format = format;
-        NtQueryDefaultLocale( TRUE, &req->lcid );
+        req->lcid = lcid;
         wine_server_add_data( req, ptr, size );
         if (!(status = wine_server_call( req )))
         {
@@ -639,7 +641,7 @@ done:
 HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *params )
 {
     struct cached_format *cache = NULL;
-    NTSTATUS status;
+    unsigned int status;
     UINT from, data_seqno;
     size_t size;
     HWND owner;

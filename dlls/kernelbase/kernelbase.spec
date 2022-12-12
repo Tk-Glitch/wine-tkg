@@ -561,6 +561,7 @@
 # @ stub GetGPOListInternalA
 # @ stub GetGPOListInternalW
 @ stdcall GetGeoInfoW(long long ptr long long)
+@ stdcall GetGeoInfoEx(ptr long ptr long)
 @ stdcall GetHandleInformation(long ptr)
 # @ stub GetHivePath
 # @ stub GetIntegratedDisplaySize
@@ -1495,7 +1496,7 @@
 @ stdcall SetProcessAffinityUpdateMode(long long)
 @ stdcall SetProcessDefaultCpuSets(ptr ptr long)
 @ stdcall SetProcessGroupAffinity(long ptr ptr)
-# @ stub SetProcessInformation
+@ stdcall SetProcessInformation(long long ptr long)
 @ stdcall SetProcessMitigationPolicy(long ptr long)
 @ stdcall SetProcessPreferredUILanguages(long ptr ptr)
 @ stdcall SetProcessPriorityBoost(long long)

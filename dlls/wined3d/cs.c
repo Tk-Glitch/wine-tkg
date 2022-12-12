@@ -112,7 +112,6 @@ enum wined3d_cs_op
     WINED3D_CS_OP_SET_RENDER_STATE,
     WINED3D_CS_OP_SET_TEXTURE_STATE,
     WINED3D_CS_OP_SET_SAMPLER_STATE,
-    WINED3D_CS_OP_SET_DEPTH_BOUNDS,
     WINED3D_CS_OP_SET_TRANSFORM,
     WINED3D_CS_OP_SET_CLIP_PLANE,
     WINED3D_CS_OP_SET_COLOR_KEY,
@@ -364,12 +363,6 @@ struct wined3d_cs_set_sampler_state
     DWORD value;
 };
 
-struct wined3d_cs_set_depth_bounds
-{
-    enum wined3d_cs_op opcode;
-    struct wined3d_depth_bounds_state depth_bounds;
-};
-
 struct wined3d_cs_set_transform
 {
     enum wined3d_cs_op opcode;
@@ -602,7 +595,6 @@ static const char *debug_cs_op(enum wined3d_cs_op op)
         WINED3D_TO_STR(WINED3D_CS_OP_SET_RENDER_STATE);
         WINED3D_TO_STR(WINED3D_CS_OP_SET_TEXTURE_STATE);
         WINED3D_TO_STR(WINED3D_CS_OP_SET_SAMPLER_STATE);
-        WINED3D_TO_STR(WINED3D_CS_OP_SET_DEPTH_BOUNDS);
         WINED3D_TO_STR(WINED3D_CS_OP_SET_TRANSFORM);
         WINED3D_TO_STR(WINED3D_CS_OP_SET_CLIP_PLANE);
         WINED3D_TO_STR(WINED3D_CS_OP_SET_COLOR_KEY);
@@ -1823,28 +1815,6 @@ void wined3d_device_context_emit_set_sampler_state(struct wined3d_device_context
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
 
-static void wined3d_cs_exec_set_depth_bounds(struct wined3d_cs *cs, const void *data)
-{
-    const struct wined3d_cs_set_depth_bounds *op = data;
-
-    cs->state.depth_bounds = op->depth_bounds;
-    device_invalidate_state(cs->c.device, STATE_DEPTH_BOUNDS);
-}
-
-void wined3d_device_context_emit_set_depth_bounds(struct wined3d_device_context *context,
-        BOOL enable, float min, float max)
-{
-    struct wined3d_cs_set_depth_bounds *op;
-
-    op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
-    op->opcode = WINED3D_CS_OP_SET_DEPTH_BOUNDS;
-    op->depth_bounds.enable = enable;
-    op->depth_bounds.min = min;
-    op->depth_bounds.max = max;
-
-    wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
-}
-
 static void wined3d_cs_exec_set_transform(struct wined3d_cs *cs, const void *data)
 {
     const struct wined3d_cs_set_transform *op = data;
@@ -2880,7 +2850,6 @@ static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void
     /* WINED3D_CS_OP_SET_RENDER_STATE            */ wined3d_cs_exec_set_render_state,
     /* WINED3D_CS_OP_SET_TEXTURE_STATE           */ wined3d_cs_exec_set_texture_state,
     /* WINED3D_CS_OP_SET_SAMPLER_STATE           */ wined3d_cs_exec_set_sampler_state,
-    /* WINED3D_CS_OP_SET_DEPTH_BOUNDS            */ wined3d_cs_exec_set_depth_bounds,
     /* WINED3D_CS_OP_SET_TRANSFORM               */ wined3d_cs_exec_set_transform,
     /* WINED3D_CS_OP_SET_CLIP_PLANE              */ wined3d_cs_exec_set_clip_plane,
     /* WINED3D_CS_OP_SET_COLOR_KEY               */ wined3d_cs_exec_set_color_key,

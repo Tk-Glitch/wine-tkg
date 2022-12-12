@@ -703,8 +703,8 @@ static BOOL codeview_type_is_forward(const union codeview_type* cvtype)
     case LF_UNION_V2:     property = cvtype->union_v2.property;        break;
     case LF_UNION_V3:     property = cvtype->union_v3.property;        break;
     case LF_ENUM_V1:      property = cvtype->enumeration_v1.property;  break;
-    case LF_ENUM_V2:      property = cvtype->enumeration_v1.property;  break;
-    case LF_ENUM_V3:      property = cvtype->enumeration_v1.property;  break;
+    case LF_ENUM_V2:      property = cvtype->enumeration_v2.property;  break;
+    case LF_ENUM_V3:      property = cvtype->enumeration_v3.property;  break;
     default:
         return FALSE;
     }
@@ -2199,8 +2199,9 @@ static struct symt_function* codeview_create_inline_site(const struct msc_debug_
             inlined->ranges[index++].high = top_func->ranges[0].low + offset;
             break;
         case BA_OP_ChangeCodeLength:
-            /* this op doesn't seem widely used... */
-            inline_site_update_last_range(inlined, index, inlined->ranges[index - 1].low + cvba.arg1);
+            /* this op isn't widely used by MSVC, but clang uses it a lot... */
+            offset += cvba.arg1;
+            inline_site_update_last_range(inlined, index, top_func->ranges[0].low + offset);
             break;
         case BA_OP_ChangeFile:
             chksms = CV_RECORD_GAP(hdr_files, cvba.arg1);
@@ -2244,9 +2245,28 @@ static struct symt_function* codeview_create_inline_site(const struct msc_debug_
     return inlined;
 }
 
+static struct symt_compiland* codeview_new_compiland(const struct msc_debug_info* msc_dbg, const char* objname)
+{
+    unsigned int    src_idx = source_new(msc_dbg->module, NULL, objname);
+    unsigned int    i;
+
+    /* In some cases MSVC generates several compiland entries with same pathname in PDB file.
+     * (for example: for an import library, one compiland entry per imported function is generated).
+     * But native dbghelp (in this case) merges in a single compiland instance.
+     */
+    for (i = 0; i < msc_dbg->module->top->vchildren.num_elts; i++)
+    {
+        struct symt_compiland** p = vector_at(&msc_dbg->module->top->vchildren, i);
+        if (symt_check_tag(&(*p)->symt, SymTagCompiland) && (*p)->source == src_idx)
+            return *p;
+    }
+    return symt_new_compiland(msc_dbg->module, src_idx);
+}
+
 static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                            const BYTE* root, unsigned offset, unsigned size,
-                           const struct cv_module_snarf* cvmod)
+                           const struct cv_module_snarf* cvmod,
+                           const char* objname)
 {
     struct symt_function*               top_func = NULL;
     struct symt_function*               curr_func = NULL;
@@ -2256,6 +2276,9 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
     struct symt_compiland*              compiland = NULL;
     struct location                     loc;
 
+    /* overwrite compiland name from outter context (if any) */
+    if (objname)
+        compiland = codeview_new_compiland(msc_dbg, objname);
     /*
      * Loop over the different types of records and whenever we
      * find something we are interested in, record it and move on.
@@ -2516,16 +2539,14 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
 
         case S_OBJNAME:
             TRACE("S-ObjName-V3 %s\n", sym->objname_v3.name);
-            compiland = symt_new_compiland(msc_dbg->module,
-                                           source_new(msc_dbg->module, NULL,
-                                                      sym->objname_v3.name));
+            if (!compiland)
+                compiland = codeview_new_compiland(msc_dbg, sym->objname_v3.name);
             break;
 
         case S_OBJNAME_ST:
             TRACE("S-ObjName-V1 %s\n", terminate_string(&sym->objname_v1.p_name));
-            compiland = symt_new_compiland(msc_dbg->module,
-                                           source_new(msc_dbg->module, NULL,
-                                                      terminate_string(&sym->objname_v1.p_name)));
+            if (!compiland)
+                compiland = codeview_new_compiland(msc_dbg, terminate_string(&sym->objname_v1.p_name));
             break;
 
         case S_LABEL32_ST:
@@ -3774,11 +3795,12 @@ static BOOL pdb_process_internal(const struct process* pcs,
             pdb_convert_symbol_file(&symbols, &sfile, &size, file);
 
             modimage = pdb_read_file(pdb_file, sfile.file);
+            file_name = (const char*)file + size;
             if (modimage)
             {
                 struct cv_module_snarf cvmod = {ipi_ok ? &ipi_ctp : NULL, (const void*)(modimage + sfile.symbol_size), sfile.lineno2_size,
                     files_image};
-                codeview_snarf(msc_dbg, modimage, sizeof(DWORD), sfile.symbol_size, &cvmod);
+                codeview_snarf(msc_dbg, modimage, sizeof(DWORD), sfile.symbol_size, &cvmod, file_name);
 
                 if (sfile.lineno_size && sfile.lineno2_size)
                     FIXME("Both line info present... only supporting second\n");
@@ -3790,8 +3812,8 @@ static BOOL pdb_process_internal(const struct process* pcs,
 
                 pdb_free(modimage);
             }
-            file_name = (const char*)file + size;
             file_name += strlen(file_name) + 1;
+            /* now at lib_name */
             file = (BYTE*)((DWORD_PTR)(file_name + strlen(file_name) + 1 + 3) & ~3);
         }
         /* Load the global variables and constants (if not yet loaded) and public information */
@@ -4283,7 +4305,7 @@ static BOOL codeview_process_info(const struct process* pcs,
 
             if (ent->SubSection == sstAlignSym)
             {
-                codeview_snarf(msc_dbg, msc_dbg->root + ent->lfo, sizeof(DWORD), ent->cb, NULL);
+                codeview_snarf(msc_dbg, msc_dbg->root + ent->lfo, sizeof(DWORD), ent->cb, NULL, NULL);
 
                 /*
                  * Check the next and previous entry.  If either is a

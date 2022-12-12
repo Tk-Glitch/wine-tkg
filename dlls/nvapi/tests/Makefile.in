@@ -1,5 +1,0 @@
-TESTDLL   = nvapi.dll
-IMPORTS   = user32 shlwapi d3d9
-
-C_SRCS = \
-	nvapi.c

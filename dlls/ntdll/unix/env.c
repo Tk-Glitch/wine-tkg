@@ -85,7 +85,7 @@ const WCHAR system_dir[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','
 
 static CPTABLEINFO unix_cp = { CP_UTF8, 4, '?', 0xfffd, '?', '?' };
 
-static char *get_nls_file_path( ULONG type, ULONG id )
+static char *get_nls_file_path( UINT type, UINT id )
 {
     const char *dir = build_dir ? build_dir : data_dir;
     const char *name = NULL;
@@ -169,7 +169,7 @@ static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDL
     return status;
 }
 
-static NTSTATUS get_nls_section_name( ULONG type, ULONG id, WCHAR name[32] )
+static NTSTATUS get_nls_section_name( UINT type, UINT id, WCHAR name[32] )
 {
     char buffer[32];
 
@@ -354,6 +354,7 @@ static BOOL is_dynamic_env_var( const char *var )
             STARTS_WITH( var, "WINEHOMEDIR=" ) ||
             STARTS_WITH( var, "WINEBUILDDIR=" ) ||
             STARTS_WITH( var, "WINECONFIGDIR=" ) ||
+            STARTS_WITH( var, "WINELOADER=" ) ||
             STARTS_WITH( var, "WINEDLLDIR" ) ||
             STARTS_WITH( var, "WINEUNIXCP=" ) ||
             STARTS_WITH( var, "WINEUSERLOCALE=" ) ||
@@ -859,7 +860,7 @@ static void init_locale(void)
     if ((header = read_nls_file( "locale.nls" )))
     {
         locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
-        if ((locale =  get_win_locale( locale_table, system_locale )))
+        if ((locale =  get_win_locale( locale_table, system_locale )) && locale->idefaultlanguage != LOCALE_CUSTOM_UNSPECIFIED)
             system_lcid = locale->idefaultlanguage;
         if ((locale =  get_win_locale( locale_table, user_locale )))
             user_lcid = locale->idefaultlanguage;
@@ -1068,7 +1069,8 @@ static void add_system_dll_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size )
 static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
 {
     const char *overrides = getenv( "WINEDLLOVERRIDES" );
-    DWORD i;
+    const char *wineloader = getenv( "WINELOADER" );
+    unsigned int i;
     char str[22];
 
     add_path_var( env, pos, size, "WINEDATADIR", data_dir );
@@ -1083,6 +1085,7 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
     sprintf( str, "WINEDLLDIR%u", i );
     append_envW( env, pos, size, str, NULL );
     add_system_dll_path_var( env, pos, size );
+    append_envA( env, pos, size, "WINELOADER", wineloader );
     append_envA( env, pos, size, "WINEUSERNAME", user_name );
     append_envA( env, pos, size, "WINEDLLOVERRIDES", overrides );
     if (unix_cp.CodePage != CP_UTF8)
@@ -1560,7 +1563,7 @@ static WCHAR *build_command_line( WCHAR **wargv )
     *p = 0;
     if (p - ret >= 32767)
     {
-        ERR( "command line too long (%u)\n", (DWORD)(p - ret) );
+        ERR( "command line too long (%zu)\n", p - ret );
         NtTerminateProcess( GetCurrentProcess(), 1 );
     }
     return ret;
@@ -1586,7 +1589,7 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     LARGE_INTEGER timeout;
-    NTSTATUS status;
+    unsigned int status;
     int count = 1;
 
     init_unicode_string( &nameW, eventW );
@@ -1860,6 +1863,7 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
         NtCurrentTeb()->Tib.ExceptionList = (void *)((char *)NtCurrentTeb() + teb_offset);
         wow_peb = (PEB32 *)((char *)peb + page_size);
         set_thread_id( NtCurrentTeb(),  GetCurrentProcessId(), GetCurrentThreadId() );
+        ERR( "starting %s in experimental wow64 mode\n", debugstr_us(&params->ImagePathName) );
     }
 #endif
 
@@ -1981,7 +1985,7 @@ void init_startup_info(void)
 {
     WCHAR *src, *dst, *env, *image;
     void *module = NULL;
-    NTSTATUS status;
+    unsigned int status;
     SIZE_T size, info_size, env_size, env_pos;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     startup_info_t *info;
@@ -2376,6 +2380,14 @@ ULONG WINAPI RtlNtStatusToDosError( NTSTATUS status )
         return LOWORD( status );
 
     return map_status( status );
+}
+
+/**********************************************************************
+ *      RtlGetLastWin32Error  (ntdll.so)
+ */
+DWORD WINAPI RtlGetLastWin32Error(void)
+{
+    return NtCurrentTeb()->LastErrorValue;
 }
 
 /**********************************************************************

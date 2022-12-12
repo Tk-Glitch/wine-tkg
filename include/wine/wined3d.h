@@ -1322,7 +1322,8 @@ enum wined3d_memory_segment_group
 #define WINED3D_NO_PRIMITIVE_RESTART                            0x00000800
 #define WINED3D_LEGACY_CUBEMAP_FILTERING                        0x00001000
 #define WINED3D_NORMALIZED_DEPTH_BIAS                           0x00002000
-#define WINED3D_LEGACY_SHADER_CONSTANTS                         0x00004000
+#define WINED3D_NO_DRAW_INDIRECT                                0x00004000
+#define WINED3D_LEGACY_SHADER_CONSTANTS                         0x00008000
 
 #define WINED3D_RESZ_CODE                                       0x7fa05000
 
@@ -2498,8 +2499,6 @@ void __cdecl wined3d_device_context_set_blend_state(struct wined3d_device_contex
 void __cdecl wined3d_device_context_set_constant_buffers(struct wined3d_device_context *context,
         enum wined3d_shader_type type, unsigned int start_idx, unsigned int count,
         const struct wined3d_constant_buffer_state *buffers);
-void __cdecl wined3d_device_context_set_depth_bounds(struct wined3d_device_context *context,
-        BOOL enable, float min, float max);
 void __cdecl wined3d_device_context_set_depth_stencil_state(struct wined3d_device_context *context,
         struct wined3d_depth_stencil_state *depth_stencil_state, unsigned int stencil_ref);
 HRESULT __cdecl wined3d_device_context_set_depth_stencil_view(struct wined3d_device_context *context,
@@ -2791,6 +2790,10 @@ HRESULT __cdecl wined3d_stateblock_set_vs_consts_f(struct wined3d_stateblock *st
 HRESULT __cdecl wined3d_stateblock_set_vs_consts_i(struct wined3d_stateblock *stateblock,
         unsigned int start_idx, unsigned int count, const struct wined3d_ivec4 *constants);
 
+HRESULT __cdecl wined3d_streaming_buffer_map(struct wined3d_device *device,
+        struct wined3d_streaming_buffer *buffer, unsigned int size, unsigned int stride,
+        unsigned int *ret_pos, void **ret_data);
+void __cdecl wined3d_streaming_buffer_unmap(struct wined3d_streaming_buffer *buffer);
 HRESULT __cdecl wined3d_streaming_buffer_upload(struct wined3d_device *device, struct wined3d_streaming_buffer *buffer,
         const void *data, unsigned int size, unsigned int stride, unsigned int *pos);
 

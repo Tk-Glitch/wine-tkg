@@ -410,6 +410,8 @@ static void wine_vk_device_free(struct wine_device *device)
     free(device);
 }
 
+#ifdef _WIN64
+
 NTSTATUS init_vulkan(void *args)
 {
     vk_funcs = __wine_get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
@@ -421,6 +423,23 @@ NTSTATUS init_vulkan(void *args)
 
 
     *(void **)args = vk_direct_unix_call;
+    return STATUS_SUCCESS;
+}
+
+#endif /* _WIN64 */
+
+NTSTATUS init_vulkan32(void *args)
+{
+    vk_funcs = __wine_get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
+    if (!vk_funcs)
+    {
+        ERR("Failed to load Wine graphics driver supporting Vulkan.\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+#ifndef _WIN64
+    *(void **)args = vk_direct_unix_call;
+#endif
     return STATUS_SUCCESS;
 }
 
@@ -1422,6 +1441,27 @@ void wine_vkDestroySurfaceKHR(VkInstance handle, VkSurfaceKHR surface,
     free(object);
 }
 
+VkResult wine_vkMapMemory(VkDevice handle, VkDeviceMemory memory, VkDeviceSize offset,
+                          VkDeviceSize size, VkMemoryMapFlags flags, void **data)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    VkResult result;
+
+    result = device->funcs.p_vkMapMemory(device->device, memory, offset, size, flags, data);
+
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset && result == VK_SUCCESS && (UINT_PTR)*data >> 32)
+    {
+        FIXME("returned mapping %p does not fit 32-bit pointer\n", *data);
+        device->funcs.p_vkUnmapMemory(device->device, memory);
+        *data = NULL;
+        result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+#endif
+
+    return result;
+}
+
 static inline void adjust_max_image_count(struct wine_phys_dev *phys_dev, VkSurfaceCapabilitiesKHR* capabilities)
 {
     /* Many Windows games, for example Strange Brigade, No Man's Sky, Path of Exile
@@ -1587,6 +1627,8 @@ void wine_vkDestroyDebugReportCallbackEXT(VkInstance handle, VkDebugReportCallba
     free(object);
 }
 
+#ifdef _WIN64
+
 NTSTATUS vk_is_available_instance_function(void *arg)
 {
     struct is_available_instance_function_params *params = arg;
@@ -1599,4 +1641,28 @@ NTSTATUS vk_is_available_device_function(void *arg)
     struct is_available_device_function_params *params = arg;
     struct wine_device *device = wine_device_from_handle(params->device);
     return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, params->name);
+}
+
+#endif /* _WIN64 */
+
+NTSTATUS vk_is_available_instance_function32(void *arg)
+{
+    struct
+    {
+        UINT32 instance;
+        UINT32 name;
+    } *params = arg;
+    struct wine_instance *instance = wine_instance_from_handle(UlongToPtr(params->instance));
+    return !!vk_funcs->p_vkGetInstanceProcAddr(instance->instance, UlongToPtr(params->name));
+}
+
+NTSTATUS vk_is_available_device_function32(void *arg)
+{
+    struct
+    {
+        UINT32 device;
+        UINT32 name;
+    } *params = arg;
+    struct wine_device *device = wine_device_from_handle(UlongToPtr(params->device));
+    return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, UlongToPtr(params->name));
 }

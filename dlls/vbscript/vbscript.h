@@ -31,7 +31,6 @@
 #include "vbscript_classes.h"
 #include "vbscript_defs.h"
 
-#include "wine/heap.h"
 #include "wine/list.h"
 
 typedef struct {
@@ -184,6 +183,7 @@ static inline VARIANT *get_arg(DISPPARAMS *dp, DWORD i)
 struct _script_ctx_t {
     IActiveScriptSite *site;
     LCID lcid;
+    UINT codepage;
 
     IInternetHostSecurityManager *secmgr;
     DWORD safeopt;
@@ -384,6 +384,7 @@ void clear_ei(EXCEPINFO*) DECLSPEC_HIDDEN;
 HRESULT report_script_error(script_ctx_t*,const vbscode_t*,unsigned) DECLSPEC_HIDDEN;
 void detach_global_objects(script_ctx_t*) DECLSPEC_HIDDEN;
 HRESULT get_builtin_id(BuiltinDisp*,const WCHAR*,DISPID*) DECLSPEC_HIDDEN;
+HRESULT array_access(SAFEARRAY *array, DISPPARAMS *dp, VARIANT **ret) DECLSPEC_HIDDEN;
 
 void release_regexp_typelib(void) DECLSPEC_HIDDEN;
 HRESULT get_dispatch_typeinfo(ITypeInfo**) DECLSPEC_HIDDEN;
@@ -412,22 +413,6 @@ HRESULT WINAPI VBScriptFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,vo
 HRESULT WINAPI VBScriptRegExpFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
 
 BSTR get_vbscript_string(int) DECLSPEC_HIDDEN;
-
-static inline LPWSTR heap_strdupW(LPCWSTR str)
-{
-    LPWSTR ret = NULL;
-
-    if(str) {
-        DWORD size;
-
-        size = (lstrlenW(str)+1)*sizeof(WCHAR);
-        ret = heap_alloc(size);
-        if(ret)
-            memcpy(ret, str, size);
-    }
-
-    return ret;
-}
 
 #define VBSCRIPT_BUILD_VERSION 16978
 #define VBSCRIPT_MAJOR_VERSION 5

@@ -380,12 +380,12 @@ HKEY open_hkcu_key( const char *name )
 
         sid = ((TOKEN_USER *)sid_data)->User.Sid;
         len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                       MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
-                                           sid->IdentifierAuthority.Value[4] ),
-                                 MAKEWORD( sid->IdentifierAuthority.Value[3],
-                                           sid->IdentifierAuthority.Value[2] )));
+                       (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
+                                                sid->IdentifierAuthority.Value[4] ),
+                                      MAKEWORD( sid->IdentifierAuthority.Value[3],
+                                                sid->IdentifierAuthority.Value[2] )));
         for (i = 0; i < sid->SubAuthorityCount; i++)
-            len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+            len += sprintf( buffer + len, "-%u", (int)sid->SubAuthority[i] );
 
         ascii_to_unicode( bufferW, buffer, len );
         hkcu = reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
@@ -1157,7 +1157,7 @@ static HANDLE get_display_device_init_mutex(void)
     HANDLE mutex;
 
     snprintf( buffer, ARRAY_SIZE(buffer), "\\Sessions\\%u\\BaseNamedObjects\\display_device_init",
-              NtCurrentTeb()->Peb->SessionId );
+              (int)NtCurrentTeb()->Peb->SessionId );
     name.Length = name.MaximumLength = asciiz_to_unicode( bufferW, buffer );
 
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
@@ -1290,7 +1290,7 @@ NTSTATUS CDECL X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *des
     VkPhysicalDevice *vk_physical_devices = NULL;
     VkPhysicalDeviceProperties2 properties2;
     NTSTATUS status = STATUS_UNSUCCESSFUL;
-    DWORD device_count, device_idx = 0;
+    UINT device_count, device_idx = 0;
     struct x11_d3dkmt_adapter *adapter;
     VkInstanceCreateInfo create_info;
     VkPhysicalDeviceIDProperties id;
@@ -1299,8 +1299,8 @@ NTSTATUS CDECL X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *des
 
     if (!get_vulkan_uuid_from_luid(&desc->AdapterLuid, &uuid))
     {
-        WARN("Failed to find Vulkan device with LUID %08x:%08x.\n", desc->AdapterLuid.HighPart,
-             desc->AdapterLuid.LowPart);
+        WARN("Failed to find Vulkan device with LUID %08x:%08x.\n",
+             (int)desc->AdapterLuid.HighPart, (int)desc->AdapterLuid.LowPart);
         return STATUS_INVALID_PARAMETER;
     }
 

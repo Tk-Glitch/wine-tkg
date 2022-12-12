@@ -138,7 +138,7 @@ struct unix_funcs
                                      INT width, INT height, HBITMAP mask, INT x_mask, INT y_mask,
                                      DWORD bk_color );
     BOOL     (WINAPI *pNtGdiPolyDraw)(HDC hdc, const POINT *points, const BYTE *types, DWORD count );
-    ULONG    (WINAPI *pNtGdiPolyPolyDraw)( HDC hdc, const POINT *points, const UINT *counts,
+    ULONG    (WINAPI *pNtGdiPolyPolyDraw)( HDC hdc, const POINT *points, const ULONG *counts,
                                            DWORD count, UINT function );
     BOOL     (WINAPI *pNtGdiPtVisible)( HDC hdc, INT x, INT y );
     BOOL     (WINAPI *pNtGdiRectVisible)( HDC hdc, const RECT *rect );
@@ -207,7 +207,6 @@ struct unix_funcs
     BOOL (CDECL *get_brush_bitmap_info)( HBRUSH handle, BITMAPINFO *info, void *bits, UINT *usage );
     BOOL (CDECL *get_file_outline_text_metric)( const WCHAR *path, OUTLINETEXTMETRICW *otm );
     BOOL (CDECL *get_icm_profile)( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename );
-    struct opengl_funcs * (CDECL *get_wgl_driver)( HDC hdc, UINT version );
     BOOL (CDECL *wine_send_input)( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput );
 };
 
@@ -329,7 +328,7 @@ extern void track_scroll_bar( HWND hwnd, int scrollbar, POINT pt ) DECLSPEC_HIDD
 extern BOOL enable_thunk_lock DECLSPEC_HIDDEN;
 extern HBRUSH get_55aa_brush(void) DECLSPEC_HIDDEN;
 extern DWORD get_dialog_base_units(void) DECLSPEC_HIDDEN;
-extern LONG get_char_dimensions( HDC hdc, TEXTMETRICW *metric, LONG *height ) DECLSPEC_HIDDEN;
+extern LONG get_char_dimensions( HDC hdc, TEXTMETRICW *metric, int *height ) DECLSPEC_HIDDEN;
 extern RECT get_display_rect( const WCHAR *display ) DECLSPEC_HIDDEN;
 extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
 extern BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info ) DECLSPEC_HIDDEN;
@@ -351,9 +350,9 @@ extern BOOL message_beep( UINT i ) DECLSPEC_HIDDEN;
 extern POINT point_phys_to_win_dpi( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern POINT point_thread_to_win_dpi( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect ) DECLSPEC_HIDDEN;
-extern HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
-extern HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
-extern HMONITOR monitor_from_window( HWND hwnd, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
+extern HMONITOR monitor_from_point( POINT pt, UINT flags, UINT dpi ) DECLSPEC_HIDDEN;
+extern HMONITOR monitor_from_rect( const RECT *rect, UINT flags, UINT dpi ) DECLSPEC_HIDDEN;
+extern HMONITOR monitor_from_window( HWND hwnd, UINT flags, UINT dpi ) DECLSPEC_HIDDEN;
 extern void user_lock(void) DECLSPEC_HIDDEN;
 extern void user_unlock(void) DECLSPEC_HIDDEN;
 extern void user_check_not_lock(void) DECLSPEC_HIDDEN;
@@ -504,6 +503,15 @@ static inline const char *debugstr_us( const UNICODE_STRING *us )
 {
     if (!us) return "<null>";
     return debugstr_wn( us->Buffer, us->Length / sizeof(WCHAR) );
+}
+
+static inline const char *debugstr_color( COLORREF color )
+{
+    if (color & (1 << 24))  /* PALETTEINDEX */
+        return wine_dbg_sprintf( "PALETTEINDEX(%u)", LOWORD(color) );
+    if (color >> 16 == 0x10ff)  /* DIBINDEX */
+        return wine_dbg_sprintf( "DIBINDEX(%u)", LOWORD(color) );
+    return wine_dbg_sprintf( "RGB(%02x,%02x,%02x)", GetRValue(color), GetGValue(color), GetBValue(color) );
 }
 
 #endif /* __WINE_WIN32U_PRIVATE */

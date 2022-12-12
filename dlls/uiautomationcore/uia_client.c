@@ -23,10 +23,92 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(uiautomation);
 
-static HRESULT get_safearray_bounds(SAFEARRAY *sa, LONG *lbound, LONG *elems)
+static const struct UiaCondition UiaFalseCondition = { ConditionType_False };
+
+static BOOL uia_array_reserve(void **elements, SIZE_T *capacity, SIZE_T count, SIZE_T size)
+{
+    SIZE_T max_capacity, new_capacity;
+    void *new_elements;
+
+    if (count <= *capacity)
+        return TRUE;
+
+    max_capacity = ~(SIZE_T)0 / size;
+    if (count > max_capacity)
+        return FALSE;
+
+    new_capacity = max(1, *capacity);
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = count;
+
+    if (!*elements)
+        new_elements = heap_alloc_zero(new_capacity * size);
+    else
+        new_elements = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, *elements, new_capacity * size);
+    if (!new_elements)
+        return FALSE;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
+    return TRUE;
+}
+
+struct uia_node_array {
+    HUIANODE *nodes;
+    int node_count;
+    SIZE_T node_arr_size;
+};
+
+static void clear_node_array(struct uia_node_array *nodes)
+{
+    if (nodes->nodes)
+    {
+        int i;
+
+        for (i = 0; i < nodes->node_count; i++)
+            UiaNodeRelease(nodes->nodes[i]);
+
+        heap_free(nodes->nodes);
+    }
+
+    memset(nodes, 0, sizeof(*nodes));
+}
+
+static HRESULT add_node_to_node_array(struct uia_node_array *out_nodes, HUIANODE node)
+{
+    if (!uia_array_reserve((void **)&out_nodes->nodes, &out_nodes->node_arr_size, out_nodes->node_count + 1,
+                sizeof(node)))
+        return E_OUTOFMEMORY;
+
+    IWineUiaNode_AddRef((IWineUiaNode *)node);
+    out_nodes->nodes[out_nodes->node_count] = node;
+    out_nodes->node_count++;
+
+    return S_OK;
+}
+
+static HRESULT get_safearray_dim_bounds(SAFEARRAY *sa, UINT dim, LONG *lbound, LONG *elems)
 {
     LONG ubound;
     HRESULT hr;
+
+    *lbound = *elems = 0;
+    hr = SafeArrayGetLBound(sa, dim, lbound);
+    if (FAILED(hr))
+        return hr;
+
+    hr = SafeArrayGetUBound(sa, dim, &ubound);
+    if (FAILED(hr))
+        return hr;
+
+    *elems = (ubound - (*lbound)) + 1;
+    return S_OK;
+}
+
+static HRESULT get_safearray_bounds(SAFEARRAY *sa, LONG *lbound, LONG *elems)
+{
     UINT dims;
 
     *lbound = *elems = 0;
@@ -37,16 +119,7 @@ static HRESULT get_safearray_bounds(SAFEARRAY *sa, LONG *lbound, LONG *elems)
         return E_FAIL;
     }
 
-    hr = SafeArrayGetLBound(sa, 1, lbound);
-    if (FAILED(hr))
-        return hr;
-
-    hr = SafeArrayGetUBound(sa, 1, &ubound);
-    if (FAILED(hr))
-        return hr;
-
-    *elems = (ubound - (*lbound)) + 1;
-    return S_OK;
+    return get_safearray_dim_bounds(sa, 1, lbound, elems);
 }
 
 int uia_compare_safearrays(SAFEARRAY *sa1, SAFEARRAY *sa2, int prop_type)
@@ -871,6 +944,195 @@ static HRESULT navigate_uia_node(struct uia_node *node, int nav_dir, HUIANODE *o
     }
 
     return S_OK;
+}
+
+static HRESULT uia_condition_check(HUIANODE node, struct UiaCondition *condition);
+static BOOL uia_condition_matched(HRESULT hr);
+
+/*
+ * Assuming we have a tree that looks like this:
+ *                  +-------+
+ *                  |       |
+ *                  |   1   |
+ *                  |       |
+ *                  +---+---+
+ *                      |
+ *          +-----------+-----------+
+ *          |           |           |
+ *      +---+---+   +---+---+   +---+---+
+ *      |       |   |       |   |       |
+ *      |   2   +---|   3   +---+   4   |
+ *      |       |   |       |   |       |
+ *      +---+---+   +-------+   +-------+
+ *          |
+ *      +---+---+
+ *      |       |
+ *      |   5   |
+ *      |       |
+ *      +-------+
+ * If we start navigation of the tree from node 1, our visit order for a
+ * depth first search would be 1 -> 2 -> 5 -> 3 -> 4.
+ *
+ * However, if we start from the middle of the sequence at node 5 without the
+ * prior context of navigating from nodes 1 and 2, we need to use the function
+ * below to reach node 3, so we can visit the nodes within the tree in the
+ * same order of 5 -> 3 -> 4.
+ */
+static HRESULT traverse_uia_node_tree_siblings(HUIANODE huianode, struct UiaCondition *ascending_stop_cond,
+        int dir, BOOL at_root_level, HUIANODE *out_node)
+{
+    struct uia_node *node = unsafe_impl_from_IWineUiaNode((IWineUiaNode *)huianode);
+    HUIANODE node2 = NULL;
+    HRESULT hr;
+
+    *out_node = NULL;
+
+    IWineUiaNode_AddRef(&node->IWineUiaNode_iface);
+    while (1)
+    {
+        hr = navigate_uia_node(node, dir, &node2);
+        if (FAILED(hr) || node2 || !at_root_level)
+            break;
+
+        hr = navigate_uia_node(node, NavigateDirection_Parent, &node2);
+        if (FAILED(hr) || !node2)
+            break;
+
+        hr = uia_condition_check(node2, ascending_stop_cond);
+        if (FAILED(hr) || uia_condition_matched(hr))
+        {
+            UiaNodeRelease(node2);
+            node2 = NULL;
+            break;
+        }
+
+        IWineUiaNode_Release(&node->IWineUiaNode_iface);
+        node = unsafe_impl_from_IWineUiaNode((IWineUiaNode *)node2);
+    }
+
+    IWineUiaNode_Release(&node->IWineUiaNode_iface);
+    *out_node = node2;
+
+    return hr;
+}
+
+/*
+ * This function is used to traverse the 'raw' tree of HUIANODEs using a
+ * depth-first search. As each node in the tree is visited, it is checked
+ * against two conditions.
+ *
+ * The first is the view condition, which is a filter for what is considered to
+ * be a valid node in the current tree 'view'. The view condition essentially
+ * creates a sort of 'virtual' tree. UI Automation provides three default tree
+ * views:
+ * -The 'raw' view has the view condition as ConditionType_True, so the tree
+ *  is completely unfiltered. All nodes are valid.
+ * -The 'control' view contains only nodes that do not return VARIANT_FALSE
+ *  for UIA_IsControlElementPropertyId.
+ * -The 'content' view contains only nodes that do not return VARIANT_FALSE
+ *  for both UIA_IsControlElementPropertyId and UIA_IsContentElementPropertyId.
+ *
+ * If the currently visited node is considered to be valid within our view
+ * condition, it is then checked against the search condition to determine if
+ * it should be returned.
+ */
+static HRESULT traverse_uia_node_tree(HUIANODE huianode, struct UiaCondition *view_cond,
+        struct UiaCondition *search_cond, struct UiaCondition *pre_sibling_nav_stop_cond,
+        struct UiaCondition *ascending_stop_cond, int traversal_opts, BOOL at_root_level, BOOL find_first,
+        BOOL *root_found, int max_depth, int *cur_depth, struct uia_node_array *out_nodes)
+{
+    HUIANODE node = huianode;
+    HRESULT hr;
+
+    while (1)
+    {
+        struct uia_node *node_data = unsafe_impl_from_IWineUiaNode((IWineUiaNode *)node);
+        BOOL incr_depth = FALSE;
+        HUIANODE node2 = NULL;
+
+        hr = uia_condition_check(node, view_cond);
+        if (FAILED(hr))
+            break;
+
+        if (uia_condition_matched(hr))
+        {
+            /*
+             * If this is a valid node within our treeview, we need to increment
+             * our current depth within the tree.
+             */
+            incr_depth = TRUE;
+
+            if (*root_found)
+            {
+                hr = uia_condition_check(node, search_cond);
+                if (FAILED(hr))
+                    break;
+
+                if (uia_condition_matched(hr))
+                {
+                    hr = add_node_to_node_array(out_nodes, node);
+                    if (FAILED(hr))
+                        break;
+
+                    if (find_first)
+                    {
+                        hr = S_FALSE;
+                        break;
+                    }
+                }
+            }
+
+            *root_found = TRUE;
+        }
+
+        if (incr_depth)
+            (*cur_depth)++;
+
+        /* If we haven't exceeded our maximum traversal depth, visit children of this node. */
+        if (max_depth < 0 || (*cur_depth) <= max_depth)
+        {
+            if (traversal_opts & TreeTraversalOptions_LastToFirstOrder)
+                hr = navigate_uia_node(node_data, NavigateDirection_LastChild, &node2);
+            else
+                hr = navigate_uia_node(node_data, NavigateDirection_FirstChild, &node2);
+
+            if (SUCCEEDED(hr) && node2)
+                hr = traverse_uia_node_tree(node2, view_cond, search_cond, pre_sibling_nav_stop_cond, ascending_stop_cond,
+                        traversal_opts, FALSE, find_first, root_found, max_depth, cur_depth, out_nodes);
+
+            if (FAILED(hr) || hr == S_FALSE)
+                break;
+        }
+
+        if (incr_depth)
+            (*cur_depth)--;
+
+        /*
+         * Before attempting to visit any siblings of huianode, make sure
+         * huianode doesn't match our stop condition.
+         */
+        hr = uia_condition_check(node, pre_sibling_nav_stop_cond);
+        if (FAILED(hr) || uia_condition_matched(hr))
+            break;
+
+        /* Now, check for any siblings to visit. */
+        if (traversal_opts & TreeTraversalOptions_LastToFirstOrder)
+            hr = traverse_uia_node_tree_siblings(node, ascending_stop_cond, NavigateDirection_PreviousSibling,
+                    at_root_level, &node2);
+        else
+            hr = traverse_uia_node_tree_siblings(node, ascending_stop_cond, NavigateDirection_NextSibling,
+                    at_root_level, &node2);
+
+        if (FAILED(hr) || !node2)
+            break;
+
+        UiaNodeRelease(node);
+        node = node2;
+    }
+
+    UiaNodeRelease(node);
+
+    return hr;
 }
 
 /*
@@ -2555,6 +2817,198 @@ HRESULT WINAPI UiaNavigate(HUIANODE huianode, enum NavigateDirection dir, struct
         if (FAILED(hr))
             WARN("UiaGetUpdatedCache failed with hr %#lx\n", hr);
         UiaNodeRelease(node2);
+    }
+
+    return hr;
+}
+
+/* Combine multiple cache requests into a single SAFEARRAY. */
+static HRESULT uia_cache_request_combine(SAFEARRAY **reqs, int reqs_count, SAFEARRAY *out_req)
+{
+    LONG idx[2], lbound[2], elems[2], cur_offset;
+    int i, x, y;
+    HRESULT hr;
+    VARIANT v;
+
+    for (i = cur_offset = 0; i < reqs_count; i++)
+    {
+        if (!reqs[i])
+            continue;
+
+        for (x = 0; x < 2; x++)
+        {
+            hr = get_safearray_dim_bounds(reqs[i], 1 + x, &lbound[x], &elems[x]);
+            if (FAILED(hr))
+                return hr;
+        }
+
+        for (x = 0; x < elems[0]; x++)
+        {
+            for (y = 0; y < elems[1]; y++)
+            {
+                idx[0] = x + lbound[0];
+                idx[1] = y + lbound[1];
+                hr = SafeArrayGetElement(reqs[i], idx, &v);
+                if (FAILED(hr))
+                    return hr;
+
+                idx[0] = x + cur_offset;
+                idx[1] = y;
+                hr = SafeArrayPutElement(out_req, idx, &v);
+                if (FAILED(hr))
+                    return hr;
+            }
+        }
+
+        cur_offset += elems[0];
+    }
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *          UiaFind (uiautomationcore.@)
+ */
+HRESULT WINAPI UiaFind(HUIANODE huianode, struct UiaFindParams *find_params, struct UiaCacheRequest *cache_req,
+        SAFEARRAY **out_req, SAFEARRAY **out_offsets, SAFEARRAY **out_tree_structs)
+{
+    struct UiaPropertyCondition prop_cond = { ConditionType_Property, UIA_RuntimeIdPropertyId };
+    struct uia_node *node = unsafe_impl_from_IWineUiaNode((IWineUiaNode *)huianode);
+    SAFEARRAY *runtime_id, *req, *offsets, *tree_structs, **tmp_reqs;
+    struct UiaCondition *sibling_stop_cond;
+    struct uia_node_array nodes = { 0 };
+    LONG idx, lbound, elems, cur_offset;
+    SAFEARRAYBOUND sabound[2];
+    int i, cur_depth = 0;
+    BSTR tree_struct;
+    BOOL root_found;
+    HRESULT hr;
+
+    TRACE("(%p, %p, %p, %p, %p, %p)\n", huianode, find_params, cache_req, out_req, out_offsets, out_tree_structs);
+
+    if (!node || !find_params || !cache_req || !out_req || !out_offsets || !out_tree_structs)
+        return E_INVALIDARG;
+
+    *out_tree_structs = *out_offsets = *out_req = tree_structs = offsets = req = NULL;
+    tmp_reqs = NULL;
+
+    /*
+     * If the initial node has a runtime ID, we'll use it as a stop
+     * condition.
+     */
+    hr = UiaGetRuntimeId(huianode, &runtime_id);
+    if (SUCCEEDED(hr) && runtime_id)
+    {
+        V_VT(&prop_cond.Value) = VT_I4 | VT_ARRAY;
+        V_ARRAY(&prop_cond.Value) = runtime_id;
+        sibling_stop_cond = (struct UiaCondition *)&prop_cond;
+    }
+    else
+        sibling_stop_cond =  (struct UiaCondition *)&UiaFalseCondition;
+
+    if (find_params->ExcludeRoot)
+        root_found = FALSE;
+    else
+        root_found = TRUE;
+
+    IWineUiaNode_AddRef(&node->IWineUiaNode_iface);
+    hr = traverse_uia_node_tree(huianode, cache_req->pViewCondition, find_params->pFindCondition, sibling_stop_cond,
+            cache_req->pViewCondition, TreeTraversalOptions_Default, TRUE, find_params->FindFirst, &root_found,
+            find_params->MaxDepth, &cur_depth, &nodes);
+    if (FAILED(hr) || !nodes.node_count)
+        goto exit;
+
+    if (!(offsets = SafeArrayCreateVector(VT_I4, 0, nodes.node_count)))
+    {
+        hr = E_FAIL;
+        goto exit;
+    }
+
+    if (!(tree_structs = SafeArrayCreateVector(VT_BSTR, 0, nodes.node_count)))
+    {
+        hr = E_FAIL;
+        goto exit;
+    }
+
+    if (!(tmp_reqs = heap_alloc_zero(sizeof(*tmp_reqs) * nodes.node_count)))
+    {
+        hr = E_OUTOFMEMORY;
+        goto exit;
+    }
+
+    /*
+     * Get a count of how many total nodes we'll need to return, as well as
+     * set the tree structure strings and cache request offsets for our final
+     * combined SAFEARRAY.
+     */
+    for (i = cur_offset = 0; i < nodes.node_count; i++)
+    {
+        hr = UiaGetUpdatedCache(nodes.nodes[i], cache_req, NormalizeState_None, NULL, &tmp_reqs[i], &tree_struct);
+        if (FAILED(hr))
+            goto exit;
+
+        idx = i;
+        hr = SafeArrayPutElement(tree_structs, &idx, tree_struct);
+        SysFreeString(tree_struct);
+        if (FAILED(hr))
+            goto exit;
+
+        hr = SafeArrayPutElement(offsets, &idx, &cur_offset);
+        if (FAILED(hr))
+            goto exit;
+
+        if (!tmp_reqs[i])
+            continue;
+
+        hr = get_safearray_dim_bounds(tmp_reqs[i], 1, &lbound, &elems);
+        if (FAILED(hr))
+            goto exit;
+
+        cur_offset += elems;
+    }
+
+    if (nodes.node_count == 1)
+    {
+        req = tmp_reqs[0];
+        heap_free(tmp_reqs);
+        tmp_reqs = NULL;
+    }
+    else
+    {
+        sabound[0].lLbound = sabound[1].lLbound = 0;
+        sabound[0].cElements = cur_offset;
+        sabound[1].cElements = 1 + cache_req->cProperties + cache_req->cPatterns;
+        if (!(req = SafeArrayCreate(VT_VARIANT, 2, sabound)))
+        {
+            hr = E_FAIL;
+            goto exit;
+        }
+
+        hr = uia_cache_request_combine(tmp_reqs, nodes.node_count, req);
+        if (FAILED(hr))
+            goto exit;
+    }
+
+    *out_tree_structs = tree_structs;
+    *out_offsets = offsets;
+    *out_req = req;
+
+exit:
+    VariantClear(&prop_cond.Value);
+    clear_node_array(&nodes);
+
+    if (tmp_reqs)
+    {
+        for (i = 0; i < nodes.node_count; i++)
+            SafeArrayDestroy(tmp_reqs[i]);
+        heap_free(tmp_reqs);
+    }
+
+    if (FAILED(hr))
+    {
+        SafeArrayDestroy(tree_structs);
+        SafeArrayDestroy(offsets);
+        SafeArrayDestroy(req);
     }
 
     return hr;

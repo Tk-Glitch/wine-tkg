@@ -90,15 +90,16 @@ my %arg_types =
      "GLfloat" =>              [ "float",  "%f" ],
      "GLhalfNV" =>             [ "long",   "%d" ],
      "GLhandleARB" =>          [ "long",   "%d" ],
+     "int" =>                  [ "long",   "%d" ],
      "GLint" =>                [ "long",   "%d" ],
      "GLint64" =>              [ "int64",  "wine_dbgstr_longlong(%s)" ],
      "GLint64EXT" =>           [ "int64",  "wine_dbgstr_longlong(%s)" ],
-     "GLintptr" =>             [ "long",   "%ld" ],
-     "GLintptrARB" =>          [ "long",   "%ld" ],
+     "GLintptr" =>             [ "long",   "%Id" ],
+     "GLintptrARB" =>          [ "long",   "%Id" ],
      "GLshort" =>              [ "long",   "%d" ],
      "GLsizei" =>              [ "long",   "%d" ],
-     "GLsizeiptr" =>           [ "long",   "%ld" ],
-     "GLsizeiptrARB" =>        [ "long",   "%ld" ],
+     "GLsizeiptr" =>           [ "long",   "%Id" ],
+     "GLsizeiptrARB" =>        [ "long",   "%Id" ],
      "GLstring" =>             [ "str",    "wine_dbgstr_a(%s)" ],
      "GLsync" =>               [ "ptr",    "%p" ],
      "GLubyte" =>              [ "long",   "%d" ],
@@ -106,7 +107,7 @@ my %arg_types =
      "GLuint64" =>             [ "int64",  "wine_dbgstr_longlong(%s)" ],
      "GLuint64EXT" =>          [ "int64",  "wine_dbgstr_longlong(%s)" ],
      "GLushort" =>             [ "long",   "%d" ],
-     "GLvdpauSurfaceNV" =>     [ "long",   "%ld" ],
+     "GLvdpauSurfaceNV" =>     [ "long",   "%Id" ],
      "GLDEBUGPROC" =>          [ "ptr",    "%p" ],
      "GLDEBUGPROCARB" =>       [ "ptr",    "%p" ],
      "GLDEBUGPROCAMD" =>       [ "ptr",    "%p" ],
@@ -119,7 +120,7 @@ my %arg_types =
      "LPGLYPHMETRICSFLOAT" =>  [ "ptr",    "%p" ],
      "LPCSTR" =>               [ "str",    "wine_dbgstr_a(%s)" ],
      "UINT" =>                 [ "long",   "%u" ],
-     "DWORD" =>                [ "long",   "%u" ],
+     "DWORD" =>                [ "long",   "%lu" ],
      "BOOL" =>                 [ "long",   "%u" ],
      "FLOAT" =>                [ "float",  "%f" ],
     );
@@ -161,10 +162,94 @@ my %manual_win_functions =
     );
 my %manual_win_thunks =
     (
+     "glGetString" => 1,
+     "glGetStringi" => 1,
+     "glMapBuffer" => 1,
+     "glMapBufferARB" => 1,
+     "glMapBufferRange" => 1,
+     "glMapNamedBuffer" => 1,
+     "glMapNamedBufferEXT" => 1,
+     "glMapNamedBufferRange" => 1,
+     "glMapNamedBufferRangeEXT" => 1,
+     "glUnmapBuffer" => 1,
+     "glUnmapBufferARB" => 1,
+     "glUnmapNamedBuffer" => 1,
+     "glUnmapNamedBufferEXT" => 1,
      "wglGetCurrentReadDCARB" => 1,
+     "wglGetExtensionsStringARB" => 1,
+     "wglGetExtensionsStringEXT" => 1,
      "wglGetPixelFormat" => 1,
      "wglGetProcAddress" => 1,
+     "wglQueryCurrentRendererStringWINE" => 1,
+     "wglQueryRendererStringWINE" => 1,
      "wglSwapBuffers" => 1,
+    );
+my %manual_wow64_thunks =
+    (
+     "glClientWaitSync" => 1,
+     "glDeleteSync" => 1,
+     "glFenceSync" => 1,
+     "glGetBufferPointerv" => 1,
+     "glGetBufferPointervARB" => 1,
+     "glGetNamedBufferPointerv" => 1,
+     "glGetNamedBufferPointervEXT" => 1,
+     "glGetString" => 1,
+     "glGetStringi" => 1,
+     "glGetSynciv" => 1,
+     "glIsSync" => 1,
+     "glMapBuffer" => 1,
+     "glMapBufferARB" => 1,
+     "glMapBufferRange" => 1,
+     "glMapNamedBuffer" => 1,
+     "glMapNamedBufferEXT" => 1,
+     "glMapNamedBufferRange" => 1,
+     "glMapNamedBufferRangeEXT" => 1,
+     "glPathGlyphIndexRangeNV" => 1,
+     "glUnmapBuffer" => 1,
+     "glUnmapBufferARB" => 1,
+     "glUnmapNamedBuffer" => 1,
+     "glUnmapNamedBufferEXT" => 1,
+     "glWaitSync" => 1,
+     "wglCreateContext" => 1,
+     "wglCreateContextAttribsARB" => 1,
+     "wglCreatePbufferARB" => 1,
+     "wglDeleteContext" => 1,
+     "wglGetExtensionsStringARB" => 1,
+     "wglGetExtensionsStringEXT" => 1,
+     "wglGetPbufferDCARB" => 1,
+     "wglGetProcAddress" => 1,
+     "wglGetProcAddress" => 1,
+     "wglMakeContextCurrentARB" => 1,
+     "wglMakeCurrent" => 1,
+     "wglQueryCurrentRendererStringWINE" => 1,
+     "wglQueryRendererStringWINE" => 1,
+    );
+my %pointer_array_count =
+    (
+     "glCompileShaderIncludeARB" => "count",
+     "glCreateShaderProgramv" => "count",
+     "glGetUniformIndices" => "uniformCount",
+     "glMultiDrawElements" => "drawcount",
+     "glMultiDrawElementsBaseVertex" => "drawcount",
+     "glMultiDrawElementsEXT" => "primcount",
+     "glMultiModeDrawElementsIBM" => "primcount",
+     "glTransformFeedbackVaryings" => "count",
+     "glTransformFeedbackVaryingsEXT" => "count",
+     "glShaderSource" => "count",
+     "glShaderSourceARB" => "count",
+     "glBindBuffersRange" => "count",
+     "glBindVertexBuffers" => "count",
+     "glDrawCommandsNV" => "count",
+     "glVertexArrayVertexBuffers" => "count",
+     "glDrawCommandsStatesNV" => "count",
+     "glListDrawCommandsStatesClientNV" => "count",
+    );
+my %pointer_is_offset =
+    (
+     "glGetPointerv" => "params",
+     "glGetPointervEXT" => "params",
+     "glGetVertexAttribPointerv" => "pointer",
+     "glGetVertexAttribPointervARB" => "pointer",
     );
 
 #
@@ -257,7 +342,7 @@ sub generate_unix_thunk($$$)
     my $func_ret = get_func_ret( $func, 0 );
     my $ret = "";
 
-    $ret .= "static NTSTATUS $prefix\_$name( void *args )\n";
+    $ret .= "NTSTATUS $prefix\_$name( void *args )\n";
     $ret .= "{\n";
     $ret .= "    struct $name\_params *params = args;\n" unless !$call_args && is_void_func( $func );
     # special case for functions that take an HDC as first parameter
@@ -306,9 +391,126 @@ sub generate_win_thunk($$)
         $ret .= "    memcpy( args.$pname, $pname, sizeof(args.$pname) );\n" if $arg->textContent() =~ /\[/;
     }
     $ret .= "    " . get_func_trace( $name, $func, 1 ) if $gen_traces;
-    $ret .= "    if ((status = UNIX_CALL( $name, &args ))) WARN( \"$name returned %#x\\n\", status );\n";
+    $ret .= "    if ((status = UNIX_CALL( $name, &args ))) WARN( \"$name returned %#lx\\n\", status );\n";
     $ret .= "    return args.ret;\n" unless is_void_func($func);
     $ret .= "}\n";
+
+    return $ret;
+}
+
+sub get_wow64_arg_type($)
+{
+    my $arg = shift;
+    my $ptype = get_arg_type( $arg );
+    return "void" if $ptype =~ /^void$/;
+    return "PTR32" if $arg->textContent() =~ /(PROC|sizeiptr|intptr|\*|\[)/;
+    return $ptype unless defined $arg_types{$ptype};
+    return "PTR32" if ${$arg_types{$ptype}}[0] =~ /(ptr|str)/;
+    return "PTR32" if ${$arg_types{$ptype}}[1] =~ /%p/;
+    return $ptype;
+}
+
+sub needs_wow64_thunk($$)
+{
+    my ($name, $func) = @_;
+    foreach my $arg (@{$func->[1]})
+    {
+        return 1 if get_wow64_arg_type( $arg ) =~ /PTR32/;
+    }
+    return get_wow64_arg_type( $func->[0] ) =~ /PTR32/;
+}
+
+sub generate_wow64_thunk($$$)
+{
+    my ($name, $func, $prefix) = @_;
+    my $call_args = get_func_args( $func, 0, 1, "params->" );
+    my $func_ret = get_func_ret( $func, 0 );
+    my $need_manual_thunk = 0;
+    my $ret = "";
+
+    $ret .= "static NTSTATUS wow64_$prefix\_$name( void *args )\n";
+    $ret .= "{\n";
+    $ret .= "    struct\n    {\n";
+    foreach my $arg (@{$func->[1]})
+    {
+        my $ptype = get_wow64_arg_type( $arg );
+        my $pname = get_arg_name( $arg );
+        $ret .= "        $ptype $pname;\n";
+        $need_manual_thunk = 1 if $arg->textContent() =~ /(\*.*\*|\[|(sizei|int)ptr.*\*)/ &&
+                                  !defined $pointer_array_count{$_} && !defined $pointer_is_offset{$_};
+    }
+    if (!is_void_func($func))
+    {
+        my $ptype = get_wow64_arg_type( $func->[0] );
+        $ret .= "        $ptype ret;\n";
+    }
+    $ret .= "    } *params32 = args;\n";
+    $ret .= "    struct $name\_params params =\n";
+    $ret .= "    {\n";
+    foreach my $arg (@{$func->[1]})
+    {
+        next if $arg->textContent() =~ /(\*.*\*|\[|(sizei|int)ptr.*\*)/;
+        my $ptype = get_arg_type( $arg );
+        my $pname = get_arg_name( $arg );
+        if ($arg->textContent() =~ /(sizei|int)ptr/)
+        {
+            $ret .= "        .$pname = ($ptype)ULongToPtr(params32->$pname),\n";
+        }
+        elsif (get_wow64_arg_type( $arg ) =~ /PTR32/)
+        {
+            $ret .= "        .$pname = ULongToPtr(params32->$pname),\n";
+        }
+        else
+        {
+            $ret .= "        .$pname = params32->$pname,\n";
+        }
+    }
+    $ret .= "    };\n";
+
+    if ($need_manual_thunk || get_wow64_arg_type( $func->[0] ) =~ /PTR32/)
+    {
+        $ret .= "    FIXME( \"params32 %p, params %p stub!\\n\", params32, &params );\n";
+        $ret .= "    return STATUS_NOT_IMPLEMENTED;\n";
+        $ret .= "}\n\n";
+        return $ret;
+    }
+
+    $ret .= "    NTSTATUS status;\n";
+
+    foreach my $arg (@{$func->[1]})
+    {
+        next unless $arg->textContent() =~ /\*.*\*/ || $arg->textContent() =~ /(sizei|int)ptr.*\*/;
+        next unless defined $pointer_array_count{$_};
+        my $pname = get_arg_name( $arg );
+        $ret .= "    params.$pname = copy_wow64_ptr32s( (UINT_PTR)params32->$pname, params32->$pointer_array_count{$_} );\n";
+    }
+
+    $ret .= "    status = $prefix\_$name( &params );\n";
+    if (!is_void_func( $func ))
+    {
+        $ret .= "    params32->ret = ";
+        $ret .= "(UINT_PTR)" if get_wow64_arg_type( $func->[0] ) =~ /PTR32/;
+        $ret .= "params.ret;\n";
+    }
+
+    foreach my $arg (@{$func->[1]})
+    {
+        next unless $arg->textContent() =~ /\*.*\*/ || $arg->textContent() =~ /(sizei|int)ptr.*\*/;
+        next unless defined $pointer_array_count{$_};
+        my $pname = get_arg_name( $arg );
+        $ret .= "    free( (void *)params.$pname );\n";
+    }
+
+    foreach my $arg (@{$func->[1]})
+    {
+        next unless defined $pointer_is_offset{$_};
+        my $pname = get_arg_name( $arg );
+        next unless $pname =~ $pointer_is_offset{$_};
+        $ret .= "    params32->$pname = PtrToUlong( params.$pname );\n";
+    }
+
+    $ret .= "    return status;\n";
+    $ret .= "}\n\n";
 
     return $ret;
 }
@@ -379,9 +581,13 @@ sub is_void_func($)
 
 sub get_arg_type($)
 {
-    my $p = shift;
-    my @type = $p->findnodes("./ptype");
-    return @type ? $type[0]->textContent() : "GLint";
+    my $p = (shift)->cloneNode(1);
+    my @name = $p->findnodes("./name");
+    $p->removeChild(@name) if @name;
+    my $ret = $p->textContent();
+    $ret =~ s/^ +//;
+    $ret =~ s/ +$//;
+    return $ret;
 }
 
 sub get_arg_name($)
@@ -719,7 +925,7 @@ foreach (sort keys %norm_functions)
 }
 print HEADER "\n\n";
 
-print HEADER "extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );\n\n";
+print HEADER "extern struct opengl_funcs *__wine_get_wgl_driver( HDC hdc, UINT version );\n\n";
 print HEADER "#endif /* __WINE_WGL_DRIVER_H */\n";
 close HEADER;
 
@@ -816,6 +1022,7 @@ foreach (sort keys %ext_functions)
 print OUT "enum unix_funcs\n";
 print OUT "{\n";
 print OUT "    unix_thread_attach,\n";
+print OUT "    unix_process_detach,\n";
 foreach (sort keys %wgl_functions)
 {
     next if defined $manual_win_functions{$_};
@@ -847,8 +1054,7 @@ print OUT "    GLsizei length;\n";
 print OUT "    const GLchar *message;\n";
 print OUT "};\n\n";
 
-print OUT "extern unixlib_handle_t unixlib_handle DECLSPEC_HIDDEN;\n";
-print OUT "#define UNIX_CALL( func, params ) __wine_unix_call( unixlib_handle, unix_ ## func, params )\n\n";
+print OUT "#define UNIX_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )\n\n";
 
 print OUT "#endif /* __WINE_OPENGL32_UNIXLIB_H */\n";
 close OUT;
@@ -932,8 +1138,14 @@ print OUT "#include \"wingdi.h\"\n\n";
 
 print OUT "#include \"unixlib.h\"\n";
 print OUT "#include \"unix_private.h\"\n\n";
+print OUT "#include \"wine/debug.h\"\n\n";
+
+print OUT "#ifdef _WIN64\n";
+print OUT "WINE_DEFAULT_DEBUG_CHANNEL(opengl);\n";
+print OUT "#endif\n\n";
 
 print OUT "extern NTSTATUS thread_attach( void *args ) DECLSPEC_HIDDEN;\n";
+print OUT "extern NTSTATUS process_detach( void *args ) DECLSPEC_HIDDEN;\n";
 foreach (sort keys %wgl_functions)
 {
     next if defined $manual_win_functions{$_};
@@ -958,24 +1170,28 @@ foreach (sort keys %wgl_functions)
 {
     next if defined $manual_win_functions{$_};
     next if needs_wrapper( $_, $wgl_functions{$_} );
+    print OUT "static " unless defined $manual_wow64_thunks{$_};
     print OUT generate_unix_thunk($_, $wgl_functions{$_}, "wgl");
 }
 foreach (sort keys %norm_functions)
 {
     next if defined $manual_win_functions{$_};
     next if needs_wrapper( $_, $norm_functions{$_} );
+    print OUT "static " unless defined $manual_wow64_thunks{$_};
     print OUT generate_unix_thunk($_, $norm_functions{$_}, "gl");
 }
 foreach (sort keys %ext_functions)
 {
     next if defined $manual_win_functions{$_};
     next if needs_wrapper( $_, $ext_functions{$_} );
+    print OUT "static " unless defined $manual_wow64_thunks{$_};
     print OUT generate_unix_thunk($_, $ext_functions{$_}, "ext");
 }
 
 print OUT "const unixlib_entry_t __wine_unix_call_funcs[] =\n";
 print OUT "{\n";
 print OUT "    &thread_attach,\n";
+print OUT "    &process_detach,\n";
 foreach (sort keys %wgl_functions)
 {
     next if defined $manual_win_functions{$_};
@@ -993,6 +1209,91 @@ foreach (sort keys %ext_functions)
 }
 print OUT "};\n";
 print OUT "\n";
+
+print OUT "#ifdef _WIN64\n\n";
+print OUT "typedef ULONG PTR32;\n\n";
+print OUT "extern NTSTATUS wow64_process_detach( void *args ) DECLSPEC_HIDDEN;\n";
+foreach (sort keys %wgl_functions)
+{
+    next if defined $manual_win_functions{$_};
+    next if !needs_wow64_thunk($_, $wgl_functions{$_}) || defined $manual_wow64_thunks{$_};
+    print OUT generate_wow64_thunk($_, $wgl_functions{$_}, "wgl");
+}
+foreach (sort keys %norm_functions)
+{
+    next if defined $manual_win_functions{$_};
+    next if !needs_wow64_thunk($_, $norm_functions{$_}) || defined $manual_wow64_thunks{$_};
+    print OUT generate_wow64_thunk($_, $norm_functions{$_}, "gl");
+}
+foreach (sort keys %ext_functions)
+{
+    next if defined $manual_win_functions{$_};
+    next if !needs_wow64_thunk($_, $ext_functions{$_}) || defined $manual_wow64_thunks{$_};
+    print OUT generate_wow64_thunk($_, $ext_functions{$_}, "ext");
+}
+
+foreach (sort keys %wgl_functions)
+{
+    next if defined $manual_win_functions{$_};
+    next unless defined $manual_wow64_thunks{$_};
+    print OUT "extern NTSTATUS wow64_wgl_$_( void *args ) DECLSPEC_HIDDEN;\n";
+}
+foreach (sort keys %norm_functions)
+{
+    next if defined $manual_win_functions{$_};
+    next unless defined $manual_wow64_thunks{$_};
+    print OUT "extern NTSTATUS wow64_gl_$_( void *args ) DECLSPEC_HIDDEN;\n";
+}
+foreach (sort keys %ext_functions)
+{
+    next if defined $manual_win_functions{$_};
+    next unless defined $manual_wow64_thunks{$_};
+    print OUT "extern NTSTATUS wow64_ext_$_( void *args ) DECLSPEC_HIDDEN;\n";
+}
+
+print OUT "\nconst unixlib_entry_t __wine_unix_call_wow64_funcs[] =\n";
+print OUT "{\n";
+print OUT "    &thread_attach,\n";
+print OUT "    &wow64_process_detach,\n";
+foreach (sort keys %wgl_functions)
+{
+    next if defined $manual_win_functions{$_};
+    if (needs_wow64_thunk($_, $wgl_functions{$_}) || defined $manual_wow64_thunks{$_})
+    {
+        printf OUT "    &wow64_wgl_%s,\n", $_;
+    }
+    else
+    {
+        printf OUT "    &wgl_%s,\n", $_;
+    }
+}
+foreach (sort keys %norm_functions)
+{
+    next if defined $manual_win_functions{$_};
+    if (needs_wow64_thunk($_, $norm_functions{$_}) || defined $manual_wow64_thunks{$_})
+    {
+        printf OUT "    &wow64_gl_%s,\n", $_;
+    }
+    else
+    {
+        printf OUT "    &gl_%s,\n", $_;
+    }
+}
+foreach (sort keys %ext_functions)
+{
+    next if defined $manual_win_functions{$_};
+    if (needs_wow64_thunk($_, $ext_functions{$_}) || defined $manual_wow64_thunks{$_})
+    {
+        printf OUT "    &wow64_ext_%s,\n", $_;
+    }
+    else
+    {
+        printf OUT "    &ext_%s,\n", $_;
+    }
+}
+print OUT "};\n\n";
+
+print OUT "#endif\n\n";
 
 foreach (sort keys %wgl_functions)
 {

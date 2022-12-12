@@ -98,9 +98,7 @@ SOURCES = \
 	cryptuiapi.h \
 	ctfutb.idl \
 	ctxtcall.idl \
-	cuda.h \
 	custcntl.h \
-	cuviddec.h \
 	cvconst.h \
 	cvttyp.idl \
 	d2d1.idl \
@@ -573,9 +571,6 @@ SOURCES = \
 	ntsecpkg.h \
 	ntstatus.h \
 	ntuser.h \
-	nvapi.h \
-	nvcuvid.h \
-	nvencodeapi.h \
 	oaidl.idl \
 	objbase.h \
 	objectarray.idl \
@@ -816,8 +811,8 @@ SOURCES = \
 	windows.media.idl \
 	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
-	windows.networking.idl \
 	windows.networking.connectivity.idl \
+	windows.networking.idl \
 	windows.security.cryptography.idl \
 	windows.storage.streams.idl \
 	windows.system.idl \
@@ -940,6 +935,7 @@ SOURCES = \
 	wshisotp.h \
 	wsipx.h \
 	wsnwlink.h \
+	wspiapi.h \
 	wtsapi32.h \
 	wtypes.idl \
 	wuapi.idl \

@@ -130,7 +130,7 @@ static void dump_unwind_info( ULONG64 base, RUNTIME_FUNCTION *function )
     struct UNWIND_INFO *info;
     unsigned int i, count;
 
-    TRACE( "**** func %x-%x\n", function->BeginAddress, function->EndAddress );
+    TRACE( "**** func %lx-%lx\n", function->BeginAddress, function->EndAddress );
     for (;;)
     {
         if (function->UnwindData & 1)
@@ -387,7 +387,7 @@ static DWORD call_handler( EXCEPTION_RECORD *rec, CONTEXT *context, DISPATCHER_C
     TRACE_(seh)( "calling handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
                  dispatch->LanguageHandler, rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
     res = exception_handler_call_wrapper( rec, (void *)dispatch->EstablisherFrame, context, dispatch );
-    TRACE_(seh)( "handler at %p returned %u\n", dispatch->LanguageHandler, res );
+    TRACE_(seh)( "handler at %p returned %lu\n", dispatch->LanguageHandler, res );
 
     rec->ExceptionFlags &= EH_NONCONTINUABLE;
     if (res == ExceptionNestedException)
@@ -413,7 +413,7 @@ static DWORD call_teb_handler( EXCEPTION_RECORD *rec, CONTEXT *context, DISPATCH
     TRACE_(seh)( "calling TEB handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
                  teb_frame->Handler, rec, teb_frame, dispatch->ContextRecord, dispatch );
     res = teb_frame->Handler( rec, teb_frame, context, (EXCEPTION_REGISTRATION_RECORD**)dispatch );
-    TRACE_(seh)( "handler at %p returned %u\n", teb_frame->Handler, res );
+    TRACE_(seh)( "handler at %p returned %lu\n", teb_frame->Handler, res );
     return res;
 }
 
@@ -525,11 +525,10 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     NTSTATUS status;
     DWORD c;
 
-    TRACE_(seh)( "code=%x flags=%x addr=%p ip=%p tid=%04x\n",
-                 rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
-                 (void *)context->Rip, GetCurrentThreadId() );
+    TRACE_(seh)( "code=%lx flags=%lx addr=%p ip=%Ix\n",
+                 rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Rip );
     for (c = 0; c < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); c++)
-        TRACE_(seh)( " info[%d]=%016I64x\n", c, rec->ExceptionInformation[c] );
+        TRACE_(seh)( " info[%ld]=%016I64x\n", c, rec->ExceptionInformation[c] );
 
     if (rec->ExceptionCode == EXCEPTION_WINE_STUB)
     {
@@ -547,7 +546,7 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
         if ((DWORD)rec->ExceptionInformation[2] == -1)
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
         else
-            WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
+            WARN_(threadname)( "Thread ID %04lx renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
                                debugstr_a((char *)rec->ExceptionInformation[1]) );
 
         set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
@@ -563,9 +562,9 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     else
     {
         if (rec->ExceptionCode == STATUS_ASSERTION_FAILURE)
-            ERR_(seh)( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+            ERR_(seh)( "%s exception (code=%lx) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
         else
-            WARN_(seh)( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+            WARN_(seh)( "%s exception (code=%lx) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
 
         TRACE_(seh)( " rax=%016I64x rbx=%016I64x rcx=%016I64x rdx=%016I64x\n",
                      context->Rax, context->Rbx, context->Rcx, context->Rdx );
@@ -889,7 +888,7 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
     unsigned int i, prolog_offset;
     BOOL mach_frame = FALSE;
 
-    TRACE( "type %x rip %p rsp %p\n", type, (void *)pc, (void *)context->Rsp );
+    TRACE( "type %lx rip %I64x rsp %I64x\n", type, pc, context->Rsp );
     if (TRACE_ON(seh)) dump_unwind_info( base, function );
 
     frame = *frame_ret = context->Rsp;
@@ -1068,7 +1067,7 @@ DWORD call_unwind_handler( EXCEPTION_RECORD *rec, DISPATCHER_CONTEXT *dispatch )
     TRACE( "calling handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
            dispatch->LanguageHandler, rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
     res = unwind_handler_call_wrapper( rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
-    TRACE( "handler %p returned %x\n", dispatch->LanguageHandler, res );
+    TRACE( "handler %p returned %lx\n", dispatch->LanguageHandler, res );
 
     switch (res)
     {
@@ -1097,7 +1096,7 @@ static DWORD call_teb_unwind_handler( EXCEPTION_RECORD *rec, DISPATCHER_CONTEXT 
     TRACE( "calling TEB handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
            teb_frame->Handler, rec, teb_frame, dispatch->ContextRecord, dispatch );
     res = teb_frame->Handler( rec, teb_frame, dispatch->ContextRecord, (EXCEPTION_REGISTRATION_RECORD**)dispatch );
-    TRACE( "handler at %p returned %u\n", teb_frame->Handler, res );
+    TRACE( "handler at %p returned %lu\n", teb_frame->Handler, res );
 
     switch (res)
     {
@@ -1318,10 +1317,10 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
     rec->ExceptionFlags |= EH_UNWINDING | (end_frame ? 0 : EH_EXIT_UNWIND);
 
-    TRACE( "code=%x flags=%x end_frame=%p target_ip=%p rip=%016I64x\n",
+    TRACE( "code=%lx flags=%lx end_frame=%p target_ip=%p rip=%016I64x\n",
            rec->ExceptionCode, rec->ExceptionFlags, end_frame, target_ip, context->Rip );
     for (i = 0; i < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); i++)
-        TRACE( " info[%d]=%016I64x\n", i, rec->ExceptionInformation[i] );
+        TRACE( " info[%ld]=%016I64x\n", i, rec->ExceptionInformation[i] );
     TRACE(" rax=%016I64x rbx=%016I64x rcx=%016I64x rdx=%016I64x\n",
           context->Rax, context->Rbx, context->Rcx, context->Rdx );
     TRACE(" rsi=%016I64x rdi=%016I64x rbp=%016I64x rsp=%016I64x\n",
@@ -1575,7 +1574,7 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
     ULONG i;
     USHORT num_entries = 0;
 
-    TRACE( "(%u, %u, %p, %p)\n", skip, count, buffer, hash );
+    TRACE( "(%lu, %lu, %p, %p)\n", skip, count, buffer, hash );
 
     RtlCaptureContext( &context );
     dispatch.TargetIp      = 0;

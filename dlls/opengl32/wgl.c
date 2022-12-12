@@ -28,6 +28,7 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "ntuser.h"
+#include "malloc.h"
 
 #include "unixlib.h"
 #include "private.h"
@@ -35,12 +36,50 @@
 #include "wine/glu.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(wgl);
+WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
-unixlib_handle_t unixlib_handle;
-
 static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
+
+#ifndef _WIN64
+
+static char **wow64_strings;
+static SIZE_T wow64_strings_count;
+
+static CRITICAL_SECTION wow64_cs;
+static CRITICAL_SECTION_DEBUG wow64_cs_debug =
+{
+    0, 0, &wow64_cs,
+    { &wow64_cs_debug.ProcessLocksList, &wow64_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": wow64_cs") }
+};
+static CRITICAL_SECTION wow64_cs = { &wow64_cs_debug, -1, 0, 0, 0, 0 };
+
+static void append_wow64_string( char *str )
+{
+    char **tmp;
+
+    EnterCriticalSection( &wow64_cs );
+
+    if (!(tmp = realloc( wow64_strings, (wow64_strings_count + 1) * sizeof(*wow64_strings) )))
+        ERR( "Failed to allocate memory for wow64 strings\n" );
+    else
+    {
+        wow64_strings = tmp;
+        wow64_strings[wow64_strings_count] = str;
+        wow64_strings_count += 1;
+    }
+
+    LeaveCriticalSection( &wow64_cs );
+}
+
+static void cleanup_wow64_strings(void)
+{
+    while (wow64_strings_count--) free( wow64_strings[wow64_strings_count] );
+    free( wow64_strings );
+}
+
+#endif
 
 /***********************************************************************
  *		wglGetCurrentReadDCARB
@@ -79,11 +118,11 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
     int i, count, best_format;
     int bestDBuffer = -1, bestStereo = -1;
 
-    TRACE_(wgl)( "%p %p: size %u version %u flags %u type %u color %u %u,%u,%u,%u "
-                 "accum %u depth %u stencil %u aux %u\n",
-                 hdc, ppfd, ppfd->nSize, ppfd->nVersion, ppfd->dwFlags, ppfd->iPixelType,
-                 ppfd->cColorBits, ppfd->cRedBits, ppfd->cGreenBits, ppfd->cBlueBits, ppfd->cAlphaBits,
-                 ppfd->cAccumBits, ppfd->cDepthBits, ppfd->cStencilBits, ppfd->cAuxBuffers );
+    TRACE( "%p %p: size %u version %u flags %lu type %u color %u %u,%u,%u,%u "
+           "accum %u depth %u stencil %u aux %u\n",
+           hdc, ppfd, ppfd->nSize, ppfd->nVersion, ppfd->dwFlags, ppfd->iPixelType,
+           ppfd->cColorBits, ppfd->cRedBits, ppfd->cGreenBits, ppfd->cBlueBits, ppfd->cAlphaBits,
+           ppfd->cAccumBits, ppfd->cDepthBits, ppfd->cStencilBits, ppfd->cAuxBuffers );
 
     count = wglDescribePixelFormat( hdc, 0, 0, NULL );
     if (!count) return 0;
@@ -252,7 +291,7 @@ INT WINAPI wglGetPixelFormat(HDC hdc)
 
     if ((status = UNIX_CALL( wglGetPixelFormat, &args )))
     {
-        WARN( "wglGetPixelFormat returned %#x\n", status );
+        WARN( "wglGetPixelFormat returned %#lx\n", status );
         SetLastError( ERROR_INVALID_PIXEL_FORMAT );
     }
 
@@ -267,7 +306,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH wglSwapBuffers( HDC hdc )
     struct wglSwapBuffers_params args = { .hdc = hdc, };
     NTSTATUS status;
 
-    if ((status = UNIX_CALL( wglSwapBuffers, &args ))) WARN( "wglSwapBuffers returned %#x\n", status );
+    if ((status = UNIX_CALL( wglSwapBuffers, &args ))) WARN( "wglSwapBuffers returned %#lx\n", status );
     else if (TRACE_ON(fps))
     {
         static long prev_time, start_time;
@@ -339,7 +378,8 @@ PROC WINAPI wglGetProcAddress( LPCSTR name )
     NTSTATUS status;
 
     if (!name) return NULL;
-    if ((status = UNIX_CALL( wglGetProcAddress, &args ))) WARN( "wglGetProcAddress %s returned %#x\n", debugstr_a(name), status );
+    if ((status = UNIX_CALL( wglGetProcAddress, &args )))
+        WARN( "wglGetProcAddress %s returned %#lx\n", debugstr_a(name), status );
     if (args.ret == (void *)-1) return NULL;
 
     proc = extension_procs[(UINT_PTR)args.ret];
@@ -421,7 +461,7 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
          else
              needed_size = GetGlyphOutlineA(hdc, glyph, GGO_BITMAP, &gm, 0, NULL, &identity);
 
-         TRACE("Glyph: %3d / List: %d size %d\n", glyph, listBase, needed_size);
+         TRACE("Glyph: %3d / List: %ld size %d\n", glyph, listBase, needed_size);
          if (needed_size == GDI_ERROR) {
              ret = FALSE;
              break;
@@ -444,12 +484,13 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
              if (!ret) break;
          }
 
-         if (TRACE_ON(wgl)) {
+         if (TRACE_ON(opengl))
+         {
              unsigned int bitmask;
              unsigned char *bitmap_ = bitmap;
 
              TRACE("  - bbox: %d x %d\n", gm.gmBlackBoxX, gm.gmBlackBoxY);
-             TRACE("  - origin: (%d, %d)\n", gm.gmptGlyphOrigin.x, gm.gmptGlyphOrigin.y);
+             TRACE("  - origin: (%ld, %ld)\n", gm.gmptGlyphOrigin.x, gm.gmptGlyphOrigin.y);
              TRACE("  - increment: %d - %d\n", gm.gmCellIncX, gm.gmCellIncY);
              if (needed_size != 0) {
                  TRACE("  - bitmap:\n");
@@ -612,7 +653,7 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
     UINT em_size = 1024;
     RECT rc;
 
-    TRACE("(%p, %d, %d, %d, %f, %f, %d, %p, %s)\n", hdc, first, count,
+    TRACE("(%p, %ld, %ld, %ld, %f, %f, %d, %p, %s)\n", hdc, first, count,
           listBase, deviation, extrusion, format, lpgmf, unicode ? "W" : "A");
 
     if(deviation <= 0.0)
@@ -857,6 +898,345 @@ GLint WINAPI glDebugEntry( GLint unknown1, GLint unknown2 )
     return 0;
 }
 
+const GLubyte * WINAPI glGetStringi( GLenum name, GLuint index )
+{
+    struct glGetStringi_params args =
+    {
+        .name = name,
+        .index = index,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    GLubyte *wow64_str = NULL;
+#endif
+
+    TRACE( "name %d, index %d\n", name, index );
+
+#ifndef _WIN64
+    if (UNIX_CALL( glGetStringi, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( glGetStringi, &args ))) WARN( "glGetStringi returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( (char *)args.ret );
+#endif
+    return args.ret;
+}
+
+/***********************************************************************
+ *              glGetString (OPENGL32.@)
+ */
+const GLubyte * WINAPI glGetString( GLenum name )
+{
+    struct glGetString_params args = { .name = name, };
+    NTSTATUS status;
+#ifndef _WIN64
+    GLubyte *wow64_str = NULL;
+#endif
+
+    TRACE( "name %d\n", name );
+
+#ifndef _WIN64
+    if (UNIX_CALL( glGetString, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( glGetString, &args ))) WARN( "glGetString returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( (char *)args.ret );
+#endif
+    return args.ret;
+}
+
+const char * WINAPI wglGetExtensionsStringARB( HDC hdc )
+{
+    struct wglGetExtensionsStringARB_params args = { .hdc = hdc, };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "hdc %p\n", hdc );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglGetExtensionsStringARB, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglGetExtensionsStringARB, &args ))) WARN( "wglGetExtensionsStringARB returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+const char * WINAPI wglGetExtensionsStringEXT(void)
+{
+    struct wglGetExtensionsStringEXT_params args = {0};
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "\n" );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglGetExtensionsStringEXT, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglGetExtensionsStringEXT, &args ))) WARN( "wglGetExtensionsStringEXT returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+const GLchar * WINAPI wglQueryCurrentRendererStringWINE( GLenum attribute )
+{
+    struct wglQueryCurrentRendererStringWINE_params args = { .attribute = attribute, };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "attribute %d\n", attribute );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglQueryCurrentRendererStringWINE, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglQueryCurrentRendererStringWINE, &args ))) WARN( "wglQueryCurrentRendererStringWINE returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+const GLchar * WINAPI wglQueryRendererStringWINE( HDC dc, GLint renderer, GLenum attribute )
+{
+    struct wglQueryRendererStringWINE_params args =
+    {
+        .dc = dc,
+        .renderer = renderer,
+        .attribute = attribute,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "dc %p, renderer %d, attribute %d\n", dc, renderer, attribute );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglQueryCurrentRendererStringWINE, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglQueryRendererStringWINE, &args ))) WARN( "wglQueryRendererStringWINE returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+#ifndef _WIN64
+static void *get_buffer_pointer( GLenum target )
+{
+    void (WINAPI *p_glGetBufferPointerv)( GLenum target, GLenum pname, void **params );
+    void *ptr;
+    if (!(p_glGetBufferPointerv = (void *)wglGetProcAddress( "glGetBufferPointerv" ))) return 0;
+    p_glGetBufferPointerv( target, GL_BUFFER_MAP_POINTER, &ptr );
+    return ptr;
+}
+
+static void *get_named_buffer_pointer( GLint buffer )
+{
+    void (WINAPI *p_glGetNamedBufferPointerv)( GLuint buffer, GLenum pname, void **params );
+    void *ptr;
+    if (!(p_glGetNamedBufferPointerv = (void *)wglGetProcAddress( "glGetNamedBufferPointerv" ))) return 0;
+    p_glGetNamedBufferPointerv( buffer, GL_BUFFER_MAP_POINTER, &ptr );
+    return ptr;
+}
+#endif
+
+void * WINAPI glMapBuffer( GLenum target, GLenum access )
+{
+    struct glMapBuffer_params args =
+    {
+        .target = target,
+        .access = access,
+    };
+    NTSTATUS status;
+
+    TRACE( "target %d, access %d\n", target, access );
+
+    if (!(status = UNIX_CALL( glMapBuffer, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( (size_t)args.ret, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = UNIX_CALL( glMapBuffer, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+void * WINAPI glMapBufferARB( GLenum target, GLenum access )
+{
+    return glMapBuffer( target, access );
+}
+
+void * WINAPI glMapBufferRange( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access )
+{
+    struct glMapBufferRange_params args =
+    {
+        .target = target,
+        .offset = offset,
+        .length = length,
+        .access = access,
+    };
+    NTSTATUS status;
+
+    TRACE( "target %d, offset %Id, length %Id, access %d\n", target, offset, length, access );
+
+    if (!(status = UNIX_CALL( glMapBufferRange, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( length, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = UNIX_CALL( glMapBufferRange, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapBufferRange returned %#lx\n", status );
+    return args.ret;
+}
+
+void * WINAPI glMapNamedBuffer( GLuint buffer, GLenum access )
+{
+    struct glMapNamedBuffer_params args =
+    {
+        .buffer = buffer,
+        .access = access,
+    };
+    NTSTATUS status;
+
+    TRACE( "(%d, %d)\n", buffer, access );
+
+    if (!(status = UNIX_CALL( glMapNamedBuffer, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( (size_t)args.ret, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = UNIX_CALL( glMapNamedBuffer, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapNamedBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+void * WINAPI glMapNamedBufferEXT( GLuint buffer, GLenum access )
+{
+    return glMapNamedBuffer( buffer, access );
+}
+
+void * WINAPI glMapNamedBufferRange( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
+{
+    struct glMapNamedBufferRange_params args =
+    {
+        .buffer = buffer,
+        .offset = offset,
+        .length = length,
+        .access = access,
+    };
+    NTSTATUS status;
+
+    TRACE( "buffer %d, offset %Id, length %Id, access %d\n", buffer, offset, length, access );
+
+    if (!(status = UNIX_CALL( glMapNamedBufferRange, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( length, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = UNIX_CALL( glMapNamedBufferRange, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapNamedBufferRange returned %#lx\n", status );
+    return args.ret;
+}
+
+void * WINAPI glMapNamedBufferRangeEXT( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
+{
+    return glMapNamedBufferRange( buffer, offset, length, access );
+}
+
+GLboolean WINAPI glUnmapBuffer( GLenum target )
+{
+    struct glUnmapBuffer_params args =
+    {
+        .target = target,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    void *ptr = get_buffer_pointer( target );
+#endif
+
+    TRACE( "target %d\n", target );
+
+    if (!(status = UNIX_CALL( glUnmapBuffer, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Releasing wow64 copy buffer %p\n", ptr );
+        _aligned_free( ptr );
+        return args.ret;
+    }
+#endif
+    WARN( "glUnmapBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+GLboolean WINAPI glUnmapBufferARB( GLenum target )
+{
+    return glUnmapBuffer( target );
+}
+
+GLboolean WINAPI glUnmapNamedBuffer( GLuint buffer )
+{
+    struct glUnmapNamedBuffer_params args =
+    {
+        .buffer = buffer,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    void *ptr = get_named_buffer_pointer( buffer );
+#endif
+
+    TRACE( "buffer %d\n", buffer );
+
+    if (!(status = UNIX_CALL( glUnmapNamedBuffer, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Releasing wow64 copy buffer %p\n", ptr );
+        _aligned_free( ptr );
+        return args.ret;
+    }
+#endif
+    WARN( "glUnmapNamedBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer )
+{
+    return glUnmapNamedBuffer( buffer );
+}
+
 static BOOL WINAPI call_opengl_debug_message_callback( struct wine_gl_debug_message_params *params, ULONG size )
 {
     params->user_callback( params->source, params->type, params->id, params->severity,
@@ -875,10 +1255,9 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
-        if ((status = NtQueryVirtualMemory( GetCurrentProcess(), hinst, MemoryWineUnixFuncs,
-                                            &unixlib_handle, sizeof(unixlib_handle), NULL )))
+        if ((status = __wine_init_unix_call()))
         {
-            ERR( "Failed to load unixlib, status %#x\n", status );
+            ERR( "Failed to load unixlib, status %#lx\n", status );
             return FALSE;
         }
 
@@ -888,10 +1267,17 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     case DLL_THREAD_ATTACH:
         if ((status = UNIX_CALL( thread_attach, NULL )))
         {
-            WARN( "Failed to initialize thread, status %#x\n", status );
+            WARN( "Failed to initialize thread, status %#lx\n", status );
             return FALSE;
         }
         break;
+
+    case DLL_PROCESS_DETACH:
+        UNIX_CALL( process_detach, NULL );
+#ifndef _WIN64
+        cleanup_wow64_strings();
+#endif
+        return TRUE;
     }
     return TRUE;
 }

@@ -56,10 +56,10 @@ NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
 
     sid = ((TOKEN_USER *)sid_data)->User.Sid;
     len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
-                           MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
+                   (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+                                  MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+        len += sprintf( buffer + len, "-%u", (int)sid->SubAuthority[i] );
     len += sprintf( buffer + len, "\\%s", path );
 
     ascii_to_unicode( bufferW, buffer, len + 1 );
@@ -75,7 +75,7 @@ NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
 NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                              ULONG index, const UNICODE_STRING *class, ULONG options, ULONG *dispos )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     data_size_t len;
     struct object_attributes *objattr;
 
@@ -86,7 +86,7 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
     objattr->attributes |= OBJ_OPENIF | OBJ_CASE_INSENSITIVE;
 
     TRACE( "(%p,%s,%s,%x,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
-           debugstr_us(class), options, access, key );
+           debugstr_us(class), (int)options, (int)access, key );
 
     SERVER_START_REQ( create_key )
     {
@@ -123,7 +123,7 @@ NTSTATUS WINAPI NtCreateKeyTransacted( HANDLE *key, ACCESS_MASK access, const OB
                                        HANDLE transacted, ULONG *dispos )
 {
     FIXME( "(%p,%s,%s,%x,%x,%p,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
-           debugstr_us(class), options, access, transacted, key );
+           debugstr_us(class), (int)options, (int)access, transacted, key );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -133,16 +133,16 @@ NTSTATUS WINAPI NtCreateKeyTransacted( HANDLE *key, ACCESS_MASK access, const OB
  */
 NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr, ULONG options )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     ULONG attributes;
 
     *key = 0;
     if (attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
     if (attr->ObjectName->Length & 1) return STATUS_OBJECT_NAME_INVALID;
 
-    TRACE( "(%p,%s,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName), access, key );
+    TRACE( "(%p,%s,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName), (int)access, key );
 
-    if (options & ~REG_OPTION_OPEN_LINK) FIXME( "options %x not implemented\n", options );
+    if (options & ~REG_OPTION_OPEN_LINK) FIXME( "options %x not implemented\n", (int)options );
 
     attributes = attr->Attributes | OBJ_CASE_INSENSITIVE;
 
@@ -176,7 +176,7 @@ NTSTATUS WINAPI NtOpenKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBU
 NTSTATUS WINAPI NtOpenKeyTransactedEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                                        ULONG options, HANDLE transaction )
 {
-    FIXME( "(%p %x %p %x %p)\n", key, access, attr, options, transaction );
+    FIXME( "(%p %x %p %x %p)\n", key, (int)access, attr, (int)options, transaction );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -196,7 +196,7 @@ NTSTATUS WINAPI NtOpenKeyTransacted( HANDLE *key, ACCESS_MASK access, const OBJE
  */
 NTSTATUS WINAPI NtDeleteKey( HANDLE key )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "(%p)\n", key );
 
@@ -215,7 +215,7 @@ NTSTATUS WINAPI NtDeleteKey( HANDLE key )
  */
 NTSTATUS WINAPI NtRenameKey( HANDLE key, UNICODE_STRING *name )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "(%p %s)\n", key, debugstr_us(name) );
 
@@ -242,7 +242,7 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
                                void *info, DWORD length, DWORD *result_len )
 
 {
-    NTSTATUS ret;
+    unsigned int ret;
     void *data_ptr;
     size_t fixed_size;
 
@@ -379,7 +379,7 @@ NTSTATUS WINAPI NtQueryKey( HANDLE handle, KEY_INFORMATION_CLASS info_class,
  */
 NTSTATUS WINAPI NtSetInformationKey( HANDLE key, int class, void *info, ULONG length )
 {
-    FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, length );
+    FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", key, class, info, (int)length );
     return STATUS_SUCCESS;
 }
 
@@ -437,11 +437,11 @@ static void copy_key_value_info( KEY_VALUE_INFORMATION_CLASS info_class, void *i
 NTSTATUS WINAPI NtEnumerateValueKey( HANDLE handle, ULONG index, KEY_VALUE_INFORMATION_CLASS info_class,
                                      void *info, DWORD length, DWORD *result_len )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     void *ptr;
     size_t fixed_size;
 
-    TRACE( "(%p,%u,%d,%p,%d)\n", handle, index, info_class, info, length );
+    TRACE( "(%p,%u,%d,%p,%d)\n", handle, (int)index, info_class, info, (int)length );
 
     /* compute the length we want to retrieve */
     switch (info_class)
@@ -481,11 +481,11 @@ NTSTATUS WINAPI NtQueryValueKey( HANDLE handle, const UNICODE_STRING *name,
                                  KEY_VALUE_INFORMATION_CLASS info_class,
                                  void *info, DWORD length, DWORD *result_len )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     UCHAR *data_ptr;
     unsigned int fixed_size, min_size;
 
-    TRACE( "(%p,%s,%d,%p,%d)\n", handle, debugstr_us(name), info_class, info, length );
+    TRACE( "(%p,%s,%d,%p,%d)\n", handle, debugstr_us(name), info_class, info, (int)length );
 
     if (name->Length > MAX_VALUE_LENGTH) return STATUS_OBJECT_NAME_NOT_FOUND;
 
@@ -549,7 +549,7 @@ NTSTATUS WINAPI NtQueryValueKey( HANDLE handle, const UNICODE_STRING *name,
 NTSTATUS WINAPI NtQueryMultipleValueKey( HANDLE key, KEY_MULTIPLE_VALUE_INFORMATION *info,
                                          ULONG count, void *buffer, ULONG length, ULONG *retlen )
 {
-    FIXME( "(%p,%p,0x%08x,%p,0x%08x,%p) stub!\n", key, info, count, buffer, length, retlen );
+    FIXME( "(%p,%p,0x%08x,%p,0x%08x,%p) stub!\n", key, info, (int)count, buffer, (int)length, retlen );
     return STATUS_SUCCESS;
 }
 
@@ -560,9 +560,9 @@ NTSTATUS WINAPI NtQueryMultipleValueKey( HANDLE key, KEY_MULTIPLE_VALUE_INFORMAT
 NTSTATUS WINAPI NtSetValueKey( HANDLE key, const UNICODE_STRING *name, ULONG index,
                                ULONG type, const void *data, ULONG count )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
-    TRACE( "(%p,%s,%d,%p,%d)\n", key, debugstr_us(name), type, data, count );
+    TRACE( "(%p,%s,%d,%p,%d)\n", key, debugstr_us(name), (int)type, data, (int)count );
 
     if (name->Length > MAX_VALUE_LENGTH) return STATUS_INVALID_PARAMETER;
 
@@ -585,7 +585,7 @@ NTSTATUS WINAPI NtSetValueKey( HANDLE key, const UNICODE_STRING *name, ULONG ind
  */
 NTSTATUS WINAPI NtDeleteValueKey( HANDLE key, const UNICODE_STRING *name )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "(%p,%s)\n", key, debugstr_us(name) );
 
@@ -610,10 +610,11 @@ NTSTATUS WINAPI NtNotifyChangeMultipleKeys( HANDLE key, ULONG count, OBJECT_ATTR
                                             IO_STATUS_BLOCK *io, ULONG filter, BOOLEAN subtree,
                                             void *buffer, ULONG length, BOOLEAN async )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "(%p,%u,%p,%p,%p,%p,%p,0x%08x, 0x%08x,%p,0x%08x,0x%08x)\n",
-           key, count, attr, event, apc, apc_context, io, filter, async, buffer, length, subtree );
+           key, (int)count, attr, event, apc, apc_context, io,
+           (int)filter, async, buffer, (int)length, subtree );
 
     if (count || attr || apc || apc_context || buffer || length)
         FIXME( "Unimplemented optional parameter\n" );
@@ -662,7 +663,7 @@ NTSTATUS WINAPI NtNotifyChangeKey( HANDLE key, HANDLE event, PIO_APC_ROUTINE apc
  */
 NTSTATUS WINAPI NtFlushKey( HANDLE key )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "key=%p\n", key );
 
@@ -699,7 +700,7 @@ NTSTATUS WINAPI NtLoadKey2( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *fi
 NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *file, ULONG flags, HANDLE trustkey,
                              HANDLE event, ACCESS_MASK access, HANDLE *roothandle, IO_STATUS_BLOCK *iostatus )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     HANDLE key;
     data_size_t len;
     struct object_attributes *objattr;
@@ -707,9 +708,10 @@ NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *f
     UNICODE_STRING nt_name;
     OBJECT_ATTRIBUTES new_attr = *file;
 
-    TRACE( "(%p,%p,0x%x,%p,%p,0x%x,%p,%p)\n", attr, file, flags, trustkey, event, access, roothandle, iostatus );
+    TRACE( "(%p,%p,0x%x,%p,%p,0x%x,%p,%p)\n",
+           attr, file, (int)flags, trustkey, event, (int)access, roothandle, iostatus );
 
-    if (flags) FIXME( "flags %x not handled\n", flags );
+    if (flags) FIXME( "flags %x not handled\n", (int)flags );
     if (trustkey) FIXME("trustkey parameter not supported\n");
     if (event) FIXME("event parameter not supported\n");
     if (access) FIXME("access parameter not supported\n");
@@ -749,7 +751,7 @@ NTSTATUS WINAPI NtLoadKeyEx( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *f
  */
 NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "(%p)\n", attr );
 
@@ -774,7 +776,7 @@ NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
  */
 NTSTATUS WINAPI NtSaveKey( HANDLE key, HANDLE file )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "(%p,%p)\n", key, file );
 
@@ -794,7 +796,7 @@ NTSTATUS WINAPI NtSaveKey( HANDLE key, HANDLE file )
  */
 NTSTATUS WINAPI NtRestoreKey( HANDLE key, HANDLE file, ULONG flags )
 {
-    FIXME( "(%p,%p,0x%08x) stub\n", key, file, flags );
+    FIXME( "(%p,%p,0x%08x) stub\n", key, file, (int)flags );
     return STATUS_SUCCESS;
 }
 

@@ -779,6 +779,7 @@ struct testfilter
 {
     struct strmbase_filter filter;
     struct strmbase_source source;
+    struct strmbase_sink sink;
 };
 
 static inline struct testfilter *impl_from_strmbase_filter(struct strmbase_filter *iface)
@@ -798,6 +799,7 @@ static void testfilter_destroy(struct strmbase_filter *iface)
 {
     struct testfilter *filter = impl_from_strmbase_filter(iface);
     strmbase_source_cleanup(&filter->source);
+    strmbase_sink_cleanup(&filter->sink);
     strmbase_filter_cleanup(&filter->filter);
 }
 
@@ -819,37 +821,190 @@ static const struct strmbase_source_ops testsource_ops =
     .pfnDecideAllocator = testsource_DecideAllocator,
 };
 
+static HRESULT testsink_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    struct testfilter *filter = impl_from_strmbase_filter(iface->filter);
+
+    if (IsEqualGUID(iid, &IID_IMemInputPin))
+        *out = &filter->sink.IMemInputPin_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static const struct strmbase_sink_ops testsink_ops =
+{
+    .base.pin_query_interface = testsink_query_interface,
+};
+
 static void testfilter_init(struct testfilter *filter)
 {
     static const GUID clsid = {0xabacab};
     memset(filter, 0, sizeof(*filter));
     strmbase_filter_init(&filter->filter, NULL, &clsid, &testfilter_ops);
     strmbase_source_init(&filter->source, &filter->filter, L"source", &testsource_ops);
+    strmbase_sink_init(&filter->sink, &filter->filter, L"sink", &testsink_ops, NULL);
+}
+
+static void test_sink_allocator(IMemInputPin *input)
+{
+    IMemAllocator *req_allocator, *ret_allocator;
+    ALLOCATOR_PROPERTIES props, ret_props;
+    HRESULT hr;
+
+    hr = IMemInputPin_GetAllocatorRequirements(input, &props);
+    ok(hr == E_NOTIMPL, "Got hr %#lx.\n", hr);
+
+    hr = IMemInputPin_GetAllocator(input, &ret_allocator);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    if (hr == S_OK)
+    {
+        hr = IMemAllocator_GetProperties(ret_allocator, &props);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(!props.cBuffers, "Got %ld buffers.\n", props.cBuffers);
+        ok(!props.cbBuffer, "Got size %ld.\n", props.cbBuffer);
+        ok(!props.cbAlign, "Got alignment %ld.\n", props.cbAlign);
+        ok(!props.cbPrefix, "Got prefix %ld.\n", props.cbPrefix);
+
+        hr = IMemInputPin_NotifyAllocator(input, ret_allocator, TRUE);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        IMemAllocator_Release(ret_allocator);
+    }
+
+    hr = IMemInputPin_NotifyAllocator(input, NULL, TRUE);
+    ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
+
+    CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMemAllocator, (void **)&req_allocator);
+
+    props.cBuffers = 1;
+    props.cbBuffer = 256;
+    props.cbAlign = 1;
+    props.cbPrefix = 0;
+    hr = IMemAllocator_SetProperties(req_allocator, &props, &ret_props);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IMemInputPin_NotifyAllocator(input, req_allocator, TRUE);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IMemInputPin_GetAllocator(input, &ret_allocator);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(ret_allocator == req_allocator, "Allocators didn't match.\n");
+
+    IMemAllocator_Release(req_allocator);
+    IMemAllocator_Release(ret_allocator);
+}
+
+static void test_source_allocator(IFilterGraph2 *graph, IMediaControl *control,
+        IPin *sink, IPin *source, struct testfilter *testsource, struct testfilter *testsink)
+{
+    ALLOCATOR_PROPERTIES props, req_props = {2, 30000, 32, 0};
+    IMemAllocator *allocator;
+    IMediaSample *sample;
+    WAVEFORMATEX format;
+    AM_MEDIA_TYPE mt;
+    HRESULT hr;
+
+    hr = IFilterGraph2_ConnectDirect(graph, &testsource->source.pin.IPin_iface, sink, &mp3_mt1);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    init_pcm_mt(&mt, &format, 1, 32000, 16);
+    mt.lSampleSize = 2222;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink->sink.pin.IPin_iface, &mt);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ok(!!testsink->sink.pAllocator, "Expected an allocator.\n");
+    hr = IMemAllocator_GetProperties(testsink->sink.pAllocator, &props);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    /* Earlier versions used 16 buffers of lSampleSize bytes,
+     * later versions use 8 buffers of lSampleSize * 4 bytes. */
+    ok(props.cBuffers == 16 || props.cBuffers == 8, "Got %ld buffers.\n", props.cBuffers);
+    ok(props.cbBuffer == 2222 || props.cbBuffer == 8888, "Got size %ld.\n", props.cbBuffer);
+    ok(props.cbAlign == 1, "Got alignment %ld.\n", props.cbAlign);
+    ok(!props.cbPrefix, "Got prefix %ld.\n", props.cbPrefix);
+
+    hr = IMemAllocator_GetBuffer(testsink->sink.pAllocator, &sample, NULL, NULL, 0);
+    ok(hr == VFW_E_NOT_COMMITTED, "Got hr %#lx.\n", hr);
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IMemAllocator_GetBuffer(testsink->sink.pAllocator, &sample, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    if (hr == S_OK)
+        IMediaSample_Release(sample);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IMemAllocator_GetBuffer(testsink->sink.pAllocator, &sample, NULL, NULL, 0);
+    ok(hr == VFW_E_NOT_COMMITTED, "Got hr %#lx.\n", hr);
+
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink->sink.pin.IPin_iface);
+
+    CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMemAllocator, (void **)&allocator);
+    testsink->sink.pAllocator = allocator;
+
+    hr = IMemAllocator_SetProperties(allocator, &req_props, &props);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    init_pcm_mt(&mt, &format, 1, 32000, 16);
+    mt.lSampleSize = 2222;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink->sink.pin.IPin_iface, &mt);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    ok(testsink->sink.pAllocator == allocator, "Expected an allocator.\n");
+    hr = IMemAllocator_GetProperties(testsink->sink.pAllocator, &props);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    /* Earlier versions used 16 buffers of lSampleSize bytes,
+     * later versions use 8 buffers of lSampleSize * 4 bytes. */
+    ok(props.cBuffers == 16 || props.cBuffers == 8, "Got %ld buffers.\n", props.cBuffers);
+    ok(props.cbBuffer == 2222 || props.cbBuffer == 8888, "Got size %ld.\n", props.cbBuffer);
+    ok(props.cbAlign == 1, "Got alignment %ld.\n", props.cbAlign);
+    ok(!props.cbPrefix, "Got prefix %ld.\n", props.cbPrefix);
+
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink->sink.pin.IPin_iface);
+
+    IFilterGraph2_Disconnect(graph, sink);
+    IFilterGraph2_Disconnect(graph, &testsource->source.pin.IPin_iface);
 }
 
 static void test_connect_pin(void)
 {
     IBaseFilter *filter = create_mpeg_layer3_decoder();
-    struct testfilter testsource;
+    struct testfilter testsource, testsink;
+    WAVEFORMATEX expect_format;
     IPin *sink, *source, *peer;
+    IEnumMediaTypes *enummt;
+    AM_MEDIA_TYPE expect_mt;
     WAVEFORMATEX req_format;
     IMediaControl *control;
+    AM_MEDIA_TYPE mt, *pmt;
     IMemInputPin *meminput;
     AM_MEDIA_TYPE req_mt;
     IFilterGraph2 *graph;
-    AM_MEDIA_TYPE mt;
     HRESULT hr;
     ULONG ref;
 
     CoCreateInstance(&CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER,
             &IID_IFilterGraph2, (void **)&graph);
     testfilter_init(&testsource);
+    testfilter_init(&testsink);
+    IFilterGraph2_AddFilter(graph, &testsink.filter.IBaseFilter_iface, L"sink");
     IFilterGraph2_AddFilter(graph, &testsource.filter.IBaseFilter_iface, L"source");
     IFilterGraph2_AddFilter(graph, filter, L"MPEG layer-3 decoder");
     IBaseFilter_FindPin(filter, L"In", &sink);
     IBaseFilter_FindPin(filter, L"Out", &source);
     IPin_QueryInterface(sink, &IID_IMemInputPin, (void **)&meminput);
     IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
+
+    test_source_allocator(graph, control, sink, source, &testsource, &testsink);
 
     /* Test sink connection. */
 
@@ -942,6 +1097,31 @@ static void test_connect_pin(void)
     hr = IMediaControl_Stop(control);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
+    hr = IPin_EnumMediaTypes(source, &enummt);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    init_pcm_mt(&expect_mt, &expect_format, 1, 32000, 16);
+    expect_mt.lSampleSize = 2304;
+
+    hr = IEnumMediaTypes_Next(enummt, 1, &pmt, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    if (hr == S_OK)
+    {
+        ok(!memcmp(pmt, &expect_mt, offsetof(AM_MEDIA_TYPE, cbFormat)),
+                "Media types didn't match.\n");
+        ok(!memcmp(pmt->pbFormat, &expect_format, sizeof(WAVEFORMATEX)),
+                "Format blocks didn't match.\n");
+
+        DeleteMediaType(pmt);
+    }
+
+    hr = IEnumMediaTypes_Next(enummt, 1, &pmt, NULL);
+    ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
+
+    IEnumMediaTypes_Release(enummt);
+
+    test_sink_allocator(meminput);
+
     IMemInputPin_Release(meminput);
     IPin_Release(sink);
     IPin_Release(source);
@@ -951,6 +1131,8 @@ static void test_connect_pin(void)
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
     ref = IBaseFilter_Release(&testsource.filter.IBaseFilter_iface);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+    ref = IBaseFilter_Release(&testsink.filter.IBaseFilter_iface);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
 }
 

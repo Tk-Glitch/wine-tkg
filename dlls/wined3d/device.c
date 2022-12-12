@@ -1137,7 +1137,8 @@ static struct wined3d_allocator_block *wined3d_device_gl_allocate_memory(struct 
     return block;
 }
 
-static bool use_buffer_chunk_suballocation(const struct wined3d_gl_info *gl_info, GLenum binding)
+static bool use_buffer_chunk_suballocation(struct wined3d_device_gl *device_gl,
+        const struct wined3d_gl_info *gl_info, GLenum binding)
 {
     switch (binding)
     {
@@ -1147,6 +1148,12 @@ static bool use_buffer_chunk_suballocation(const struct wined3d_gl_info *gl_info
         case GL_PIXEL_UNPACK_BUFFER:
         case GL_UNIFORM_BUFFER:
             return true;
+
+        case GL_ELEMENT_ARRAY_BUFFER:
+            /* There is no way to specify an element array buffer offset for
+             * indirect draws in OpenGL. */
+            return device_gl->d.wined3d->flags & WINED3D_NO_DRAW_INDIRECT
+                    || !gl_info->supported[ARB_DRAW_INDIRECT];
 
         case GL_TEXTURE_BUFFER:
             return gl_info->supported[ARB_TEXTURE_BUFFER_RANGE];
@@ -1170,7 +1177,7 @@ bool wined3d_device_gl_create_bo(struct wined3d_device_gl *device_gl, struct win
 
     if (gl_info->supported[ARB_BUFFER_STORAGE])
     {
-        if (use_buffer_chunk_suballocation(gl_info, binding))
+        if (use_buffer_chunk_suballocation(device_gl, gl_info, binding))
         {
             if ((memory = wined3d_device_gl_allocate_memory(device_gl, context_gl, memory_type_idx, size, &id)))
                 buffer_offset = memory->offset;
@@ -2237,14 +2244,6 @@ void CDECL wined3d_device_context_set_rasterizer_state(struct wined3d_device_con
         wined3d_rasterizer_state_decref(prev);
 out:
     wined3d_device_context_unlock(context);
-}
-
-void CDECL wined3d_device_context_set_depth_bounds(struct wined3d_device_context *context,
-        BOOL enable, float min, float max)
-{
-    TRACE("context %p, enable %d, min %.8e, max %.8e.\n", context, enable, min, max);
-
-    wined3d_device_context_emit_set_depth_bounds(context, enable, min, max);
 }
 
 void CDECL wined3d_device_context_set_viewports(struct wined3d_device_context *context, unsigned int viewport_count,
@@ -3967,8 +3966,7 @@ static void wined3d_device_set_texture(struct wined3d_device *device,
 void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
         struct wined3d_stateblock *stateblock)
 {
-    bool set_blend_state = false, set_depth_stencil_state = false, set_rasterizer_state = false,
-            set_depth_bounds = false;
+    BOOL set_blend_state = FALSE, set_depth_stencil_state = FALSE, set_rasterizer_state = FALSE;
     const struct wined3d_stateblock_state *state = &stateblock->stateblock_state;
     const struct wined3d_saved_states *changed = &stateblock->changed;
     const unsigned int word_bit_count = sizeof(DWORD) * CHAR_BIT;
@@ -4076,7 +4074,7 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                 case WINED3D_RS_COLORWRITEENABLE1:
                 case WINED3D_RS_COLORWRITEENABLE2:
                 case WINED3D_RS_COLORWRITEENABLE3:
-                    set_blend_state = true;
+                    set_blend_state = TRUE;
                     break;
 
                 case WINED3D_RS_BACK_STENCILFAIL:
@@ -4095,7 +4093,7 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                 case WINED3D_RS_ZENABLE:
                 case WINED3D_RS_ZFUNC:
                 case WINED3D_RS_ZWRITEENABLE:
-                    set_depth_stencil_state = true;
+                    set_depth_stencil_state = TRUE;
                     break;
 
                 case WINED3D_RS_FILLMODE:
@@ -4104,14 +4102,8 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                 case WINED3D_RS_DEPTHBIAS:
                 case WINED3D_RS_SCISSORTESTENABLE:
                 case WINED3D_RS_ANTIALIASEDLINEENABLE:
-                    set_rasterizer_state = true;
+                    set_rasterizer_state = TRUE;
                     break;
-
-                case WINED3D_RS_ADAPTIVETESS_X:
-                case WINED3D_RS_ADAPTIVETESS_Z:
-                case WINED3D_RS_ADAPTIVETESS_W:
-                    set_depth_bounds = true;
-                    /* fall through */
 
                 default:
                     wined3d_device_set_render_state(device, idx, state->rs[idx]);
@@ -4299,20 +4291,6 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                 wined3d_depth_stencil_state_decref(depth_stencil_state);
             }
         }
-    }
-
-    if (set_depth_bounds)
-    {
-        union
-        {
-            DWORD d;
-            float f;
-        } zmin, zmax;
-
-        zmin.d = state->rs[WINED3D_RS_ADAPTIVETESS_Z];
-        zmax.d = state->rs[WINED3D_RS_ADAPTIVETESS_W];
-        wined3d_device_context_set_depth_bounds(context,
-                state->rs[WINED3D_RS_ADAPTIVETESS_X] == WINED3DFMT_NVDB, zmin.f, zmax.f);
     }
 
     for (i = 0; i < ARRAY_SIZE(changed->textureState); ++i)

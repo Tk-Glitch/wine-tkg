@@ -424,7 +424,7 @@ HKL WINAPI NtUserGetKeyboardLayout( DWORD thread_id )
     HKL layout = thread->kbd_layout;
 
     if (thread_id && thread_id != GetCurrentThreadId())
-        FIXME( "couldn't return keyboard layout for thread %04x\n", thread_id );
+        FIXME( "couldn't return keyboard layout for thread %04x\n", (int)thread_id );
 
     if (!layout) return get_locale_kbd_layout();
     return layout;
@@ -757,7 +757,7 @@ INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
     const char *const *vscname;
     const UINT *vsc2vk;
 
-    TRACE_(keyboard)( "lparam %d, buffer %p, size %d.\n", lparam, buffer, size );
+    TRACE_(keyboard)( "lparam %d, buffer %p, size %d.\n", (int)lparam, buffer, size );
 
     if (!buffer || !size) return 0;
     if ((len = user_driver->pGetKeyNameText( lparam, buffer, size )) >= 0) return len;
@@ -964,7 +964,8 @@ BOOL WINAPI NtUserGetKeyboardLayoutName( WCHAR *name )
     KEY_NODE_INFORMATION *key = (KEY_NODE_INFORMATION *)buffer;
     KEY_VALUE_PARTIAL_INFORMATION *value = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
     WCHAR klid[KL_NAMELENGTH];
-    DWORD tmp, i = 0;
+    UINT id;
+    ULONG len, i = 0;
     HKEY hkey, subkey;
     HKL layout;
 
@@ -984,27 +985,27 @@ BOOL WINAPI NtUserGetKeyboardLayoutName( WCHAR *name )
     }
 
     layout = NtUserGetKeyboardLayout( 0 );
-    tmp = HandleToUlong( layout );
-    if (HIWORD( tmp ) == LOWORD( tmp )) tmp = LOWORD( tmp );
-    sprintf( buffer, "%08X", tmp );
+    id = HandleToUlong( layout );
+    if (HIWORD( id ) == LOWORD( id )) id = LOWORD( id );
+    sprintf( buffer, "%08X", id );
     asciiz_to_unicode( name, buffer );
 
     if ((hkey = reg_open_key( NULL, keyboard_layouts_keyW, sizeof(keyboard_layouts_keyW) )))
     {
         while (!NtEnumerateKey( hkey, i++, KeyNodeInformation, key,
-                                sizeof(buffer) - sizeof(WCHAR), &tmp ))
+                                sizeof(buffer) - sizeof(WCHAR), &len ))
         {
             if (!(subkey = reg_open_key( hkey, key->Name, key->NameLength ))) continue;
             memcpy( klid, key->Name, key->NameLength );
             klid[key->NameLength / sizeof(WCHAR)] = 0;
             if (query_reg_ascii_value( subkey, "Layout Id", value, sizeof(buffer) ) &&
                 value->Type == REG_SZ)
-                tmp = 0xf000 | (wcstoul( (const WCHAR *)value->Data, NULL, 16 ) & 0xfff);
+                id = 0xf000 | (wcstoul( (const WCHAR *)value->Data, NULL, 16 ) & 0xfff);
             else
-                tmp = wcstoul( klid, NULL, 16 );
+                id = wcstoul( klid, NULL, 16 );
             NtClose( subkey );
 
-            if (HIWORD( layout ) == tmp)
+            if (HIWORD( layout ) == id)
             {
                 lstrcpynW( name, klid, KL_NAMELENGTH );
                 break;
@@ -1093,7 +1094,7 @@ int WINAPI NtUserGetMouseMovePointsEx( UINT size, MOUSEMOVEPOINT *ptin, MOUSEMOV
     unsigned int i;
 
 
-    TRACE( "%d, %p, %p, %d, %d\n", size, ptin, ptout, count, resolution );
+    TRACE( "%d, %p, %p, %d, %d\n", size, ptin, ptout, count, (int)resolution );
 
     if ((size != sizeof(MOUSEMOVEPOINT)) || (count < 0) || (count > ARRAY_SIZE( positions )))
     {
@@ -1285,11 +1286,11 @@ BOOL WINAPI NtUserTrackMouseEvent( TRACKMOUSEEVENT *info )
     POINT pos;
 
     TRACE( "size %u, flags %#x, hwnd %p, time %u\n",
-           info->cbSize, info->dwFlags, info->hwndTrack, info->dwHoverTime );
+           (int)info->cbSize, (int)info->dwFlags, info->hwndTrack, (int)info->dwHoverTime );
 
     if (info->cbSize != sizeof(TRACKMOUSEEVENT))
     {
-        WARN( "wrong size %u\n", info->cbSize );
+        WARN( "wrong size %u\n", (int)info->cbSize );
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
@@ -1317,7 +1318,7 @@ BOOL WINAPI NtUserTrackMouseEvent( TRACKMOUSEEVENT *info )
     TRACE( "point %s hwnd %p hittest %d\n", wine_dbgstr_point(&pos), hwnd, hittest );
 
     if (info->dwFlags & ~(TME_CANCEL | TME_HOVER | TME_LEAVE | TME_NONCLIENT))
-        FIXME( "ignoring flags %#x\n", info->dwFlags & ~(TME_CANCEL | TME_HOVER | TME_LEAVE | TME_NONCLIENT) );
+        FIXME( "ignoring flags %#x\n", (int)info->dwFlags & ~(TME_CANCEL | TME_HOVER | TME_LEAVE | TME_NONCLIENT) );
 
     if (info->dwFlags & TME_CANCEL)
     {

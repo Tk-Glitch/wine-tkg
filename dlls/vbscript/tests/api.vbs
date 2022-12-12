@@ -1555,6 +1555,10 @@ Call ok(TypeName(True) = "Boolean", "TypeName(True) = " & TypeName(True))
 Call ok(getVT(TypeName(True)) = "VT_BSTR", "getVT(TypeName(True)) = " & getVT(TypeName(True)))
 Call ok(TypeName(arr) = "Variant()", "TypeName(arr) = " & TypeName(arr))
 Call ok(getVT(TypeName(arr)) = "VT_BSTR", "getVT(TypeName(arr)) = " & getVT(TypeName(arr)))
+Call ok(TypeName(collectionObj) = "Object", "TypeName(collectionObj) = " & TypeName(collectionObj))
+Dim regex
+set regex = new RegExp
+Call ok(TypeName(regex) = "IRegExp2", "TypeName(regex) = " & TypeName(regex))
 
 Call ok(VarType(Empty) = vbEmpty, "VarType(Empty) = " & VarType(Empty))
 Call ok(getVT(VarType(Empty)) = "VT_I2", "getVT(VarType(Empty)) = " & getVT(VarType(Empty)))
@@ -2334,5 +2338,138 @@ end sub
 
 call testRandomize()
 call testRandomizeError()
+
+sub testFormatCurrencyError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatCurrency(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,0,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatCurrency()
+    dim x
+
+    x = FormatCurrency(0)
+    x = FormatCurrency(-1000,,,-1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatCurrency()
+call testFormatCurrencyError()
+
+sub testFormatPercentError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatPercent(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,0,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatPercent()
+    dim x
+
+    x = FormatPercent(0)
+    x = FormatPercent(.12,,,-1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatPercent()
+call testFormatPercentError()
+
+sub testFormatDateTimeError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatDateTime(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatDateTime(.10,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatDateTime()
+    dim x
+
+    x = FormatDateTime(0)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+    x = FormatDateTime(0.1,1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatDateTime()
+call testFormatDateTimeError()
+
+sub testFormatNumberError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatNumber(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,0,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatNumber()
+    dim x
+
+    x = FormatNumber(0)
+    x = FormatNumber(.12,,,-1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatNumber()
+call testFormatNumberError()
 
 Call reportSuccess()

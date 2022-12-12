@@ -20,10 +20,6 @@
 #ifndef __WINE_VULKAN_PRIVATE_H
 #define __WINE_VULKAN_PRIVATE_H
 
-/* Perform vulkan struct conversion on 32-bit x86 platforms. */
-#if defined(__i386__)
-#define USE_STRUCT_CONVERSION
-#endif
 #define WINE_VK_HOST
 #define VK_NO_PROTOTYPES
 
@@ -233,11 +229,14 @@ BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_is_type_wrapped(VkObjectType type) DECLSPEC_HIDDEN;
 
 NTSTATUS init_vulkan(void *args) DECLSPEC_HIDDEN;
+NTSTATUS init_vulkan32(void *args) DECLSPEC_HIDDEN;
 
 NTSTATUS WINAPI vk_direct_unix_call(unixlib_handle_t handle, unsigned int code, void *arg) DECLSPEC_HIDDEN;
 
 NTSTATUS vk_is_available_instance_function(void *arg) DECLSPEC_HIDDEN;
 NTSTATUS vk_is_available_device_function(void *arg) DECLSPEC_HIDDEN;
+NTSTATUS vk_is_available_instance_function32(void *arg) DECLSPEC_HIDDEN;
+NTSTATUS vk_is_available_device_function32(void *arg) DECLSPEC_HIDDEN;
 
 struct conversion_context
 {
@@ -264,7 +263,7 @@ static inline void *conversion_context_alloc(struct conversion_context *pool, si
     if (pool->used + size <= sizeof(pool->buffer))
     {
         void *ret = pool->buffer + pool->used;
-        pool->used += size;
+        pool->used += (size + sizeof(UINT64) - 1) & ~(sizeof(UINT64) - 1);
         return ret;
     }
     else
@@ -275,6 +274,33 @@ static inline void *conversion_context_alloc(struct conversion_context *pool, si
         list_add_tail(&pool->alloc_entries, entry);
         return entry + 1;
     }
+}
+
+typedef UINT32 PTR32;
+
+typedef struct
+{
+    VkStructureType sType;
+    PTR32 pNext;
+} VkBaseInStructure32;
+
+typedef struct
+{
+    VkStructureType sType;
+    PTR32 pNext;
+} VkBaseOutStructure32;
+
+static inline void *find_next_struct32(void *s, VkStructureType t)
+{
+    VkBaseOutStructure32 *header;
+
+    for (header = s; header; header = UlongToPtr(header->pNext))
+    {
+        if (header->sType == t)
+            return header;
+    }
+
+    return NULL;
 }
 
 static inline void *find_next_struct(const void *s, VkStructureType t)

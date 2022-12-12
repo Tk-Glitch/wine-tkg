@@ -73,6 +73,18 @@ blank2.html HTML "blank.html"
 /* @makedep: blank.html */
 123 HTML "blank.html"
 
+/* @makedep: blank_ie10.html */
+blank_ie10.html HTML "blank_ie10.html"
+
+/* @makedep: doc_with_prop.html */
+doc_with_prop.html HTML "doc_with_prop.html"
+
+/* @makedep: doc_with_prop_ie9.html */
+doc_with_prop_ie9.html HTML "doc_with_prop_ie9.html"
+
+/* @makedep: iframe.html */
+iframe.html HTML "iframe.html"
+
 /* For res: protocol test: */
 
 /* @makedep: jstest.html */

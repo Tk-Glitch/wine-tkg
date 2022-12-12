@@ -78,7 +78,6 @@ static void transform_destroy(struct strmbase_filter *iface)
     strmbase_sink_cleanup(&filter->sink);
     strmbase_filter_cleanup(&filter->filter);
 
-    wg_sample_queue_destroy(filter->sample_queue);
     free(filter);
 }
 
@@ -109,9 +108,15 @@ static HRESULT transform_init_stream(struct strmbase_filter *iface)
         if (!amt_to_wg_format(&filter->source.pin.mt, &output_format))
             return E_FAIL;
 
+        if (FAILED(hr = wg_sample_queue_create(&filter->sample_queue)))
+            return hr;
+
         filter->transform = wg_transform_create(&input_format, &output_format);
         if (!filter->transform)
+        {
+            wg_sample_queue_destroy(filter->sample_queue);
             return E_FAIL;
+        }
 
         hr = IMemAllocator_Commit(filter->source.pAllocator);
         if (FAILED(hr))
@@ -129,7 +134,10 @@ static HRESULT transform_cleanup_stream(struct strmbase_filter *iface)
     {
         IMemAllocator_Decommit(filter->source.pAllocator);
 
+        EnterCriticalSection(&filter->filter.stream_cs);
         wg_transform_destroy(filter->transform);
+        wg_sample_queue_destroy(filter->sample_queue);
+        LeaveCriticalSection(&filter->filter.stream_cs);
     }
 
     return S_OK;
@@ -536,17 +544,10 @@ static const IQualityControlVtbl source_quality_control_vtbl =
 static HRESULT transform_create(IUnknown *outer, const CLSID *clsid, const struct transform_ops *ops, struct transform **out)
 {
     struct transform *object;
-    HRESULT hr;
 
     object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
-
-    if (FAILED(hr = wg_sample_queue_create(&object->sample_queue)))
-    {
-        free(object);
-        return hr;
-    }
 
     strmbase_filter_init(&object->filter, outer, clsid, &filter_ops);
     strmbase_sink_init(&object->sink, &object->filter, L"In", &sink_ops, NULL);
@@ -766,12 +767,50 @@ static HRESULT mpeg_layer3_decoder_source_query_accept(struct transform *filter,
 
 static HRESULT mpeg_layer3_decoder_source_get_media_type(struct transform *filter, unsigned int index, AM_MEDIA_TYPE *mt)
 {
-    return VFW_S_NO_MORE_ITEMS;
+    const MPEGLAYER3WAVEFORMAT *input_format;
+    WAVEFORMATEX *output_format;
+
+    if (!filter->sink.pin.peer)
+        return VFW_S_NO_MORE_ITEMS;
+
+    if (index > 0)
+        return VFW_S_NO_MORE_ITEMS;
+
+    input_format = (const MPEGLAYER3WAVEFORMAT *)filter->sink.pin.mt.pbFormat;
+
+    output_format = CoTaskMemAlloc(sizeof(*output_format));
+    if (!output_format)
+        return E_OUTOFMEMORY;
+
+    memset(output_format, 0, sizeof(*output_format));
+    output_format->wFormatTag = WAVE_FORMAT_PCM;
+    output_format->nSamplesPerSec = input_format->wfx.nSamplesPerSec;
+    output_format->nChannels = input_format->wfx.nChannels;
+    output_format->wBitsPerSample = 16;
+    output_format->nBlockAlign = output_format->nChannels * output_format->wBitsPerSample / 8;
+    output_format->nAvgBytesPerSec = output_format->nBlockAlign * output_format->nSamplesPerSec;
+
+    memset(mt, 0, sizeof(*mt));
+    mt->majortype = MEDIATYPE_Audio;
+    mt->subtype = MEDIASUBTYPE_PCM;
+    mt->bFixedSizeSamples = TRUE;
+    mt->lSampleSize = 1152 * output_format->nBlockAlign;
+    mt->formattype = FORMAT_WaveFormatEx;
+    mt->cbFormat = sizeof(*output_format);
+    mt->pbFormat = (BYTE *)output_format;
+
+    return S_OK;
 }
 
 static HRESULT mpeg_layer3_decoder_source_decide_buffer_size(struct transform *filter, IMemAllocator *allocator, ALLOCATOR_PROPERTIES *props)
 {
-    return S_OK;
+    ALLOCATOR_PROPERTIES ret_props;
+
+    props->cBuffers = max(props->cBuffers, 8);
+    props->cbBuffer = max(props->cbBuffer, filter->source.pin.mt.lSampleSize * 4);
+    props->cbAlign = max(props->cbAlign, 1);
+
+    return IMemAllocator_SetProperties(allocator, props, &ret_props);
 }
 
 static const struct transform_ops mpeg_layer3_decoder_transform_ops =
@@ -784,8 +823,38 @@ static const struct transform_ops mpeg_layer3_decoder_transform_ops =
 
 HRESULT mpeg_layer3_decoder_create(IUnknown *outer, IUnknown **out)
 {
+    static const struct wg_format output_format =
+    {
+        .major_type = WG_MAJOR_TYPE_AUDIO,
+        .u.audio =
+        {
+            .format = WG_AUDIO_FORMAT_S16LE,
+            .channel_mask = 1,
+            .channels = 1,
+            .rate = 44100,
+        },
+    };
+    static const struct wg_format input_format =
+    {
+        .major_type = WG_MAJOR_TYPE_AUDIO_MPEG1,
+        .u.audio_mpeg1 =
+        {
+            .layer = 3,
+            .channels = 1,
+            .rate = 44100,
+        },
+    };
+    struct wg_transform *transform;
     struct transform *object;
     HRESULT hr;
+
+    transform = wg_transform_create(&input_format, &output_format);
+    if (!transform)
+    {
+        ERR_(winediag)("GStreamer doesn't support MPEG-1 audio decoding, please install appropriate plugins.\n");
+        return E_FAIL;
+    }
+    wg_transform_destroy(transform);
 
     hr = transform_create(outer, &CLSID_mpeg_layer3_decoder, &mpeg_layer3_decoder_transform_ops, &object);
     if (FAILED(hr))

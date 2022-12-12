@@ -1,5 +1,0 @@
-MODULE    = nvencodeapi.dll
-EXTRADLLFLAGS = -mcygwin
-
-C_SRCS = \
-	nvencodeapi.c

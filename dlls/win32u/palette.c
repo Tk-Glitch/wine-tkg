@@ -384,7 +384,7 @@ UINT WINAPI NtGdiGetNearestPaletteIndex( HPALETTE hpalette, COLORREF color )
         }
         GDI_ReleaseObj( hpalette );
     }
-    TRACE("(%p,%06x): returning %d\n", hpalette, color, index );
+    TRACE("(%p,%s): returning %d\n", hpalette, debugstr_color(color), index );
     return index;
 }
 
@@ -413,7 +413,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
 
         if (!get_palette_entries( hpal, index, 1, &entry ))
         {
-            WARN("RGB(%x) : idx %d is out of bounds, assuming NULL\n", color, index );
+            WARN("%s: idx %d is out of bounds, assuming NULL\n", debugstr_color(color), index );
             if (!get_palette_entries( hpal, 0, 1, &entry )) return CLR_INVALID;
         }
         color = RGB( entry.peRed, entry.peGreen, entry.peBlue );
@@ -616,7 +616,7 @@ BOOL WINAPI NtGdiUpdateColors( HDC hDC )
  */
 BOOL WINAPI NtGdiSetMagicColors( HDC hdc, DWORD magic, ULONG index )
 {
-    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, magic, index );
+    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, (int)magic, (int)index );
     return TRUE;
 }
 
@@ -641,7 +641,7 @@ LONG WINAPI NtGdiDoPalette( HGDIOBJ handle, WORD start, WORD count, void *entrie
     case NtGdiGetDIBColorTable:
         return get_dib_dc_color_table( handle, start, count, entries );
     default:
-        WARN( "invalid func %u\n", func );
+        WARN( "invalid func %u\n", (int)func );
         return 0;
     }
 }

@@ -3182,61 +3182,6 @@ static const struct ID3D11MultithreadVtbl d3d11_multithread_vtbl =
     d3d11_multithread_GetMultithreadProtected,
 };
 
-/* IWineD3DDeviceContext methods */
-
-static inline struct d3d11_device_context *context_from_IWineD3DDeviceContext(IWineD3DDeviceContext *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3d11_device_context, IWineD3DDeviceContext_iface);
-}
-
-static HRESULT STDMETHODCALLTYPE context_d3d_device_context_QueryInterface(IWineD3DDeviceContext *iface,
-        REFIID iid, void **out)
-{
-    struct d3d11_device_context *context = context_from_IWineD3DDeviceContext(iface);
-
-    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
-
-    return d3d11_device_context_QueryInterface(&context->ID3D11DeviceContext1_iface, iid, out);
-}
-
-static ULONG STDMETHODCALLTYPE context_d3d_device_context_AddRef(IWineD3DDeviceContext *iface)
-{
-    struct d3d11_device_context *context = context_from_IWineD3DDeviceContext(iface);
-
-    TRACE("iface %p.\n", iface);
-
-    return d3d11_device_context_AddRef(&context->ID3D11DeviceContext1_iface);
-}
-
-static ULONG STDMETHODCALLTYPE context_d3d_device_context_Release(IWineD3DDeviceContext *iface)
-{
-    struct d3d11_device_context *context = context_from_IWineD3DDeviceContext(iface);
-
-    TRACE("iface %p.\n", iface);
-
-    return d3d11_device_context_Release(&context->ID3D11DeviceContext1_iface);
-}
-
-static struct wined3d_device_context * STDMETHODCALLTYPE context_d3d_device_context_get_wined3d_device_context(
-        IWineD3DDeviceContext *iface)
-{
-    struct d3d11_device_context *context = context_from_IWineD3DDeviceContext(iface);
-
-    TRACE("iface %p.\n", iface);
-
-    return context->wined3d_context;
-}
-
-static const struct IWineD3DDeviceContextVtbl context_d3d_device_context_vtbl =
-{
-    /* IUnknown methods */
-    context_d3d_device_context_QueryInterface,
-    context_d3d_device_context_AddRef,
-    context_d3d_device_context_Release,
-    /* IWineD3DDeviceContext methods */
-    context_d3d_device_context_get_wined3d_device_context,
-};
-
 /* ID3DUserDefinedAnnotation methods */
 
 static inline struct d3d11_device_context *impl_from_ID3DUserDefinedAnnotation(ID3DUserDefinedAnnotation *iface)
@@ -3317,7 +3262,6 @@ static void d3d11_device_context_init(struct d3d11_device_context *context, stru
     context->ID3D11DeviceContext1_iface.lpVtbl = &d3d11_device_context_vtbl;
     context->ID3D11Multithread_iface.lpVtbl = &d3d11_multithread_vtbl;
     context->ID3DUserDefinedAnnotation_iface.lpVtbl = &d3d11_user_defined_annotation_vtbl;
-    context->IWineD3DDeviceContext_iface.lpVtbl = &context_d3d_device_context_vtbl;
     context->refcount = 1;
     context->type = type;
 
@@ -6802,49 +6746,6 @@ static const struct ID3D10MultithreadVtbl d3d10_multithread_vtbl =
     d3d10_multithread_GetMultithreadProtected,
 };
 
-/* IWineD3DDeviceContext methods */
-
-static inline struct d3d_device *device_from_IWineD3DDeviceContext(IWineD3DDeviceContext *iface)
-{
-    return CONTAINING_RECORD(iface, struct d3d_device, IWineD3DDeviceContext_iface);
-}
-
-static HRESULT STDMETHODCALLTYPE device_d3d_device_context_QueryInterface(IWineD3DDeviceContext *iface,
-        REFIID iid, void **out)
-{
-    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
-    return IUnknown_QueryInterface(device->outer_unk, iid, out);
-}
-
-static ULONG STDMETHODCALLTYPE device_d3d_device_context_AddRef(IWineD3DDeviceContext *iface)
-{
-    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
-    return IUnknown_AddRef(device->outer_unk);
-}
-
-static ULONG STDMETHODCALLTYPE device_d3d_device_context_Release(IWineD3DDeviceContext *iface)
-{
-    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
-    return IUnknown_Release(device->outer_unk);
-}
-
-static struct wined3d_device_context * STDMETHODCALLTYPE device_d3d_device_context_get_wined3d_device_context(
-        IWineD3DDeviceContext *iface)
-{
-    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
-    return device->immediate_context.wined3d_context;
-}
-
-static const struct IWineD3DDeviceContextVtbl device_d3d_device_context_vtbl =
-{
-    /* IUnknown methods */
-    device_d3d_device_context_QueryInterface,
-    device_d3d_device_context_AddRef,
-    device_d3d_device_context_Release,
-    /* IWineD3DDeviceContext methods */
-    device_d3d_device_context_get_wined3d_device_context,
-};
-
 /* IWineDXGIDeviceParent IUnknown methods */
 
 static inline struct d3d_device *device_from_dxgi_device_parent(IWineDXGIDeviceParent *iface)
@@ -7048,7 +6949,6 @@ void d3d_device_init(struct d3d_device *device, void *outer_unknown)
     device->ID3D11Device2_iface.lpVtbl = &d3d11_device_vtbl;
     device->ID3D10Device1_iface.lpVtbl = &d3d10_device1_vtbl;
     device->ID3D10Multithread_iface.lpVtbl = &d3d10_multithread_vtbl;
-    device->IWineD3DDeviceContext_iface.lpVtbl = &device_d3d_device_context_vtbl;
     device->IWineDXGIDeviceParent_iface.lpVtbl = &d3d_dxgi_device_parent_vtbl;
     device->device_parent.ops = &d3d_wined3d_device_parent_ops;
     device->refcount = 1;

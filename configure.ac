@@ -43,12 +43,10 @@ AC_ARG_WITH(gssapi,    AS_HELP_STRING([--without-gssapi],[do not use GSSAPI (Ker
 AC_ARG_WITH(gstreamer, AS_HELP_STRING([--without-gstreamer],[do not use GStreamer (codecs support)]))
 AC_ARG_WITH(inotify,   AS_HELP_STRING([--without-inotify],[do not use inotify (filesystem change notifications)]))
 AC_ARG_WITH(krb5,      AS_HELP_STRING([--without-krb5],[do not use krb5 (Kerberos)]))
-AC_ARG_WITH(ldap,      AS_HELP_STRING([--without-ldap],[do not use LDAP]),
-            [if test "x$withval" = "xno"; then ac_cv_header_ldap_h=no; ac_cv_header_lber_h=no; fi])
 AC_ARG_WITH(mingw,     AS_HELP_STRING([--without-mingw],[do not use the MinGW cross-compiler]))
 AC_ARG_WITH(netapi,    AS_HELP_STRING([--without-netapi],[do not use the Samba NetAPI library]))
 AC_ARG_WITH(opencl,    AS_HELP_STRING([--without-opencl],[do not use OpenCL]),
-            [if test "x$withval" = "xno"; then ac_cv_header_CL_cl_h=no; ac_cv_header_OpenCL_opencl_h=no; fi])
+            [if test "x$withval" = "xno"; then ac_cv_header_CL_cl_h=no; ac_cv_header_CL_opencl_h=no; fi])
 AC_ARG_WITH(opengl,    AS_HELP_STRING([--without-opengl],[do not use OpenGL]))
 AC_ARG_WITH(osmesa,     AS_HELP_STRING([--without-osmesa],[do not use the OSMesa library]))
 AC_ARG_WITH(oss,       AS_HELP_STRING([--without-oss],[do not use the OSS sound support]))
@@ -134,8 +132,8 @@ case $host in
       host_cpu="i386"
       notice_platform="32-bit "
       TARGETFLAGS="$TARGETFLAGS -m32"
-      PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib32/pkgconfig:/usr/lib/pkgconfig}
-      export PKG_CONFIG_PATH
+      PKG_CONFIG_LIBDIR=${PKG_CONFIG_LIBDIR:-/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib32/pkgconfig:/usr/lib/pkgconfig}
+      export PKG_CONFIG_LIBDIR
       with_unwind=${with_unwind:-no}
     else
       if test "x${GCC}" = "xyes"
@@ -199,13 +197,6 @@ enable_win64=${enable_win64:-no}
 enable_wow64=${enable_wow64:-aarch64,x86_64}
 enable_wow64win=${enable_wow64win:-aarch64,x86_64}
 enable_wow64cpu=${enable_wow64cpu:-x86_64}
-
-if test "x$enable_win64" != "xyes"
-then
-  enable_win32="yes"
-else
-  enable_win32="no"
-fi
 
 dnl Disable winetest too if tests are disabled
 enable_winetest=${enable_winetest:-$enable_tests}
@@ -427,7 +418,6 @@ AC_CHECK_HEADERS(\
 	EGL/egl.h \
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
-	CL/opencl.h \
 	Security/Security.h \
 	SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h \
 	SystemConfiguration/SCNetworkConfiguration.h \
@@ -468,7 +458,6 @@ AC_CHECK_HEADERS(\
 	port.h \
 	pthread.h \
 	pwd.h \
-	sasl/sasl.h \
 	sched.h \
 	scsi/scsi.h \
 	scsi/scsi_ioctl.h \
@@ -480,6 +469,7 @@ AC_CHECK_HEADERS(\
 	sys/epoll.h \
 	sys/event.h \
 	sys/eventfd.h \
+	sys/extattr.h \
 	sys/filio.h \
 	sys/ipc.h \
 	sys/link.h \
@@ -511,6 +501,8 @@ AC_CHECK_HEADERS(\
 	valgrind/memcheck.h \
 	valgrind/valgrind.h
 )
+dnl Wine use HAVE_OPENCL_OPENCL_H to condition, explicit it.
+AC_CHECK_HEADER(CL/opencl.h,[AC_DEFINE(HAVE_OPENCL_OPENCL_H, 1, [Define to 1 if you have the <CL/opencl.h> header file.])])
 WINE_HEADER_MAJOR()
 AC_HEADER_STAT()
 
@@ -671,9 +663,6 @@ LIBEXT="so"
 WINE_PATH_SONAME_TOOLS
 WINE_CONFIG_HELPERS
 
-wine_binary="wine"
-test "$HOST_ARCH" != x86_64 || wine_binary="wine64"
-AC_SUBST(WINELOADER_PROGRAMS,"$wine_binary")
 libwine_soversion=`expr $libwine_version : '\([[0-9]]*\)\..*'`
 
 case $host_os in
@@ -724,8 +713,8 @@ case $host_os in
     then
         WINE_TRY_CFLAGS([-Wl,-no_pie],
                         [WINEPRELOADER_LDFLAGS="-Wl,-no_pie $WINEPRELOADER_LDFLAGS"])
-        test "$wine_binary" = wine || WINE_IGNORE_FILE(loader/wine-preloader)
-        WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
+        dnl If preloader is used, the loader needs to be an LC_UNIXTHREAD binary to avoid AppKit/Core Animation problems.
+        WINELOADER_LDFLAGS="$WINELOADER_LDFLAGS -mmacosx-version-min=10.7"
     else
         WINE_WARNING([can't build Wine preloader; many programs won't work])
     fi
@@ -744,7 +733,7 @@ case $host_os in
         AC_SUBST(COREAUDIO_LIBS,"-framework CoreFoundation -framework CoreAudio -framework AudioUnit -framework AudioToolbox -framework CoreMIDI")
         enable_winecoreaudio_drv=${enable_winecoreaudio_drv:-yes}
     fi
-    if test "$ac_cv_header_OpenCL_opencl_h" = "yes"
+    if test "$ac_cv_header_CL_opencl_h" = "yes"
     then
         AC_SUBST(OPENCL_LIBS,"-framework OpenCL")
         ac_cv_lib_OpenCL_clGetPlatformInfo=yes
@@ -927,7 +916,7 @@ do
     CFLAGS=${CROSSCFLAGS:-"-g -O2"}
     AS_VAR_COPY([CC],[${wine_arch}_CC])
     AS_VAR_COPY([${wine_arch}_CFLAGS],[CFLAGS])
-    AS_VAR_COPY([${wine_arch}_LDFLAGS],[LDFLAGS])
+    AS_VAR_COPY([${wine_arch}_LDFLAGS],[CROSSLDFLAGS])
     AS_VAR_SET([${wine_arch}_EXTRACFLAGS],["-D__WINE_PE_BUILD -Wall"])
 
     target=""
@@ -966,9 +955,16 @@ do
                             AS_VAR_SET([${wine_arch}_DELAYLOADFLAG],["-Wl,-delayload,"])
                             AS_VAR_APPEND([${wine_arch}_EXTRACFLAGS],[" -target $target"])
                             CFLAGS="$CFLAGS -target $target $llvm_cflags"])
-        AS_VAR_SET([${wine_arch}_TARGET],[$target])
-        PE_ARCHS="$PE_ARCHS $wine_arch"])
+        AS_VAR_SET([${wine_arch}_TARGET],[$target])])
     AS_VAR_POPDEF([wine_cv_crosscc])
+
+    if test -z "$target"
+    then
+        CC=$saved_CC
+        CFLAGS=$saved_CFLAGS
+        continue
+    fi
+    AS_VAR_APPEND([PE_ARCHS],[" $wine_arch"])
 
     AS_VAR_PUSHDEF([wine_cv_crosscc_c99],[ac_cv_${wine_arch}_crosscc_c99])
     AC_MSG_CHECKING([for $CC option to enable C99 features])
@@ -1195,6 +1191,7 @@ WINE_EXTLIB_FLAGS(GSM, gsm, gsm, "-I\$(top_srcdir)/libs/gsm/inc")
 WINE_EXTLIB_FLAGS(JPEG, jpeg, jpeg, "-I\$(top_srcdir)/libs/jpeg")
 WINE_EXTLIB_FLAGS(JXR, jxr, jxr, "-I\$(top_srcdir)/libs/jxr/jxrgluelib -I\$(top_srcdir)/libs/jxr/image/sys")
 WINE_EXTLIB_FLAGS(LCMS2, lcms2, lcms2, "-I\$(top_srcdir)/libs/lcms2/include")
+WINE_EXTLIB_FLAGS(LDAP, ldap, ldap, "-I\$(top_srcdir)/libs/ldap/include")
 WINE_EXTLIB_FLAGS(MPG123, mpg123, mpg123, "-I\$(top_srcdir)/libs/mpg123/src/libmpg123")
 WINE_EXTLIB_FLAGS(PNG, png, "png \$(ZLIB_PE_LIBS)", "-I\$(top_srcdir)/libs/png")
 WINE_EXTLIB_FLAGS(TIFF, tiff, "tiff \$(ZLIB_PE_LIBS)", "-I\$(top_srcdir)/libs/tiff/libtiff")
@@ -2052,6 +2049,13 @@ fi
 
 dnl **** Platform-specific checks ****
 
+case "$HOST_ARCH,$PE_ARCHS" in
+  x86_64,*i386*) wine_binary="wine" ;;
+  x86_64,*) wine_binary="wine64" ;;
+  *) wine_binary="wine" ;;
+esac
+AC_SUBST(WINELOADER_PROGRAMS,"$wine_binary")
+
 case $host_os in
   linux*)
     case $host_cpu in
@@ -2060,6 +2064,13 @@ case $host_os in
         WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
         ;;
     esac
+    ;;
+  darwin*|macosx*)
+    if test "$wine_can_build_preloader" = "yes"
+    then
+        test "$wine_binary" = wine || WINE_IGNORE_FILE(loader/wine-preloader)
+        WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
+    fi
     ;;
 esac
 
@@ -2130,31 +2141,6 @@ AC_SEARCH_LIBS(shm_open, rt,
                [AC_DEFINE(HAVE_SHM_OPEN, 1, [Define to 1 if you have the `shm_open' function.])
                 test "$ac_res" = "none required" || AC_SUBST(RT_LIBS,"$ac_res")])
 LIBS=$ac_save_LIBS
-
-dnl **** Check for OpenLDAP ***
-if test "x$with_ldap" != "xno"
-then
-    dnl Actually there's no pkg-config support for ldap, but this way we can still override the flags
-    WINE_PACKAGE_FLAGS(LDAP,[openldap],[-lldap -llber],,,
-        [AC_CHECK_HEADERS([ldap.h lber.h])
-        if test "$ac_cv_header_ldap_h" = "yes" -a "$ac_cv_header_lber_h" = "yes"
-        then
-            AC_CHECK_TYPE(LDAPSortKey,
-                [AC_CHECK_LIB(ldap, ldap_initialize,
-                    [AC_CHECK_LIB(lber, ber_init,
-                        [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])],
-                        [LDAP_LIBS=""],
-                        [$PTHREAD_LIBS $LDAP_LIBS])],
-                    [LDAP_LIBS=""],
-                    [$PTHREAD_LIBS $LDAP_LIBS])],
-                [LDAP_LIBS=""],
-                [#include <ldap.h>])
-        else
-            LDAP_LIBS=""
-        fi])
-fi
-WINE_NOTICE_WITH(ldap,[test "x$LDAP_LIBS" = "x"],
-                 [libldap (OpenLDAP) ${notice_platform}development files not found, LDAP won't be supported.])
 
 AC_CACHE_CHECK([for sched_setaffinity],wine_cv_have_sched_setaffinity,
                 AC_LINK_IFELSE([AC_LANG_PROGRAM(
@@ -2991,14 +2977,6 @@ WINE_CONFIG_MAKEFILE(dlls/ntoskrnl.exe)
 WINE_CONFIG_MAKEFILE(dlls/ntoskrnl.exe/tests)
 WINE_CONFIG_MAKEFILE(dlls/ntprint)
 WINE_CONFIG_MAKEFILE(dlls/ntprint/tests)
-WINE_CONFIG_MAKEFILE(dlls/nvapi,enable_win32)
-WINE_CONFIG_MAKEFILE(dlls/nvapi/tests)
-WINE_CONFIG_MAKEFILE(dlls/nvapi64,enable_win64)
-WINE_CONFIG_MAKEFILE(dlls/nvcuda)
-WINE_CONFIG_MAKEFILE(dlls/nvcuda/tests)
-WINE_CONFIG_MAKEFILE(dlls/nvcuvid)
-WINE_CONFIG_MAKEFILE(dlls/nvencodeapi,enable_win32)
-WINE_CONFIG_MAKEFILE(dlls/nvencodeapi64,enable_win64)
 WINE_CONFIG_MAKEFILE(dlls/objsel)
 WINE_CONFIG_MAKEFILE(dlls/odbc32)
 WINE_CONFIG_MAKEFILE(dlls/odbcbcp)
@@ -3253,8 +3231,10 @@ WINE_CONFIG_MAKEFILE(dlls/windows.media.devices)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.devices/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech/tests)
-WINE_CONFIG_MAKEFILE(dlls/windows.networking)
+WINE_CONFIG_MAKEFILE(dlls/windows.media)
+WINE_CONFIG_MAKEFILE(dlls/windows.media/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs/tests)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecsext)
@@ -3287,6 +3267,7 @@ WINE_CONFIG_MAKEFILE(dlls/winmm)
 WINE_CONFIG_MAKEFILE(dlls/winmm/tests)
 WINE_CONFIG_MAKEFILE(dlls/winnls.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winnls32)
+WINE_CONFIG_MAKEFILE(dlls/winprint)
 WINE_CONFIG_MAKEFILE(dlls/winscard)
 WINE_CONFIG_MAKEFILE(dlls/winsock.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winspool.drv)
@@ -3378,6 +3359,7 @@ WINE_CONFIG_MAKEFILE(dlls/xinput1_3)
 WINE_CONFIG_MAKEFILE(dlls/xinput1_3/tests)
 WINE_CONFIG_MAKEFILE(dlls/xinput1_4)
 WINE_CONFIG_MAKEFILE(dlls/xinput9_1_0)
+WINE_CONFIG_MAKEFILE(dlls/xinputuap)
 WINE_CONFIG_MAKEFILE(dlls/xmllite)
 WINE_CONFIG_MAKEFILE(dlls/xmllite/tests)
 WINE_CONFIG_MAKEFILE(dlls/xolehlp)
@@ -3395,6 +3377,7 @@ WINE_CONFIG_MAKEFILE(libs/gsm)
 WINE_CONFIG_MAKEFILE(libs/jpeg)
 WINE_CONFIG_MAKEFILE(libs/jxr)
 WINE_CONFIG_MAKEFILE(libs/lcms2)
+WINE_CONFIG_MAKEFILE(libs/ldap)
 WINE_CONFIG_MAKEFILE(libs/mfuuid)
 WINE_CONFIG_MAKEFILE(libs/mpg123)
 WINE_CONFIG_MAKEFILE(libs/png)
@@ -3437,6 +3420,7 @@ WINE_CONFIG_MAKEFILE(programs/dxdiag)
 WINE_CONFIG_MAKEFILE(programs/eject)
 WINE_CONFIG_MAKEFILE(programs/expand)
 WINE_CONFIG_MAKEFILE(programs/explorer)
+WINE_CONFIG_MAKEFILE(programs/explorer/tests)
 WINE_CONFIG_MAKEFILE(programs/extrac32)
 WINE_CONFIG_MAKEFILE(programs/fc)
 WINE_CONFIG_MAKEFILE(programs/find)
@@ -3697,7 +3681,7 @@ dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.21.r0.gd935a41e\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.22.r0.gd8881486\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:

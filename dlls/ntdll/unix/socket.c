@@ -113,7 +113,7 @@ struct async_recv_ioctl
     void *control;
     struct WS_sockaddr *addr;
     int *addr_len;
-    DWORD *ret_flags;
+    unsigned int *ret_flags;
     int unix_flags;
     unsigned int count;
     BOOL icmp_over_dgram;
@@ -144,7 +144,7 @@ struct async_transmit_ioctl
     unsigned int buffer_cursor; /* amount of data currently in the buffer already sent */
     unsigned int tail_cursor;   /* amount of tail data already sent */
     unsigned int file_len;      /* total file length to send */
-    DWORD flags;
+    unsigned int flags;
     const char *head;
     const char *tail;
     unsigned int head_len;
@@ -630,7 +630,7 @@ static ssize_t fixup_icmp_over_dgram( struct msghdr *hdr, union unix_sockaddr *u
 {
     unsigned int tot_len = sizeof(struct ip_hdr) + recv_len;
     struct icmp_hdr *icmp_h = NULL;
-    NTSTATUS fixup_status;
+    unsigned int fixup_status;
     struct cmsghdr *cmsg;
     struct ip_hdr ip_h;
     size_t buf_len;
@@ -809,7 +809,7 @@ static NTSTATUS try_recv( int fd, struct async_recv_ioctl *async, ULONG_PTR *siz
     return status;
 }
 
-static BOOL async_recv_proc( void *user, ULONG_PTR *info, NTSTATUS *status )
+static BOOL async_recv_proc( void *user, ULONG_PTR *info, unsigned int *status )
 {
     struct async_recv_ioctl *async = user;
     int fd, needs_close;
@@ -854,8 +854,7 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
 {
     HANDLE wait_handle;
     BOOL nonblocking;
-    NTSTATUS status;
-    unsigned int i;
+    unsigned int i, status;
     ULONG options;
 
     for (i = 0; i < async->count; ++i)
@@ -907,7 +906,7 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
 
 static NTSTATUS sock_ioctl_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user, IO_STATUS_BLOCK *io,
                                  int fd, const void *buffers_ptr, unsigned int count, WSABUF *control,
-                                 struct WS_sockaddr *addr, int *addr_len, DWORD *ret_flags, int unix_flags, int force_async )
+                                 struct WS_sockaddr *addr, int *addr_len, unsigned int *ret_flags, int unix_flags, int force_async )
 {
     struct async_recv_ioctl *async;
     DWORD async_size;
@@ -1046,7 +1045,7 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
     return STATUS_SUCCESS;
 }
 
-static BOOL async_send_proc( void *user, ULONG_PTR *info, NTSTATUS *status )
+static BOOL async_send_proc( void *user, ULONG_PTR *info, unsigned int *status )
 {
     struct async_send_ioctl *async = user;
     int fd, needs_close;
@@ -1101,7 +1100,7 @@ static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
 {
     HANDLE wait_handle;
     BOOL nonblocking;
-    NTSTATUS status;
+    unsigned int status;
     ULONG options;
 
     SERVER_START_REQ( send_socket )
@@ -1293,7 +1292,7 @@ static NTSTATUS try_transmit( int sock_fd, int file_fd, struct async_transmit_io
     return STATUS_SUCCESS;
 }
 
-static BOOL async_transmit_proc( void *user, ULONG_PTR *info, NTSTATUS *status )
+static BOOL async_transmit_proc( void *user, ULONG_PTR *info, unsigned int *status )
 {
     int sock_fd, file_fd = -1, sock_needs_close = FALSE, file_needs_close = FALSE;
     struct async_transmit_ioctl *async = user;
@@ -1334,7 +1333,7 @@ static NTSTATUS sock_transmit( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc,
     union unix_sockaddr addr;
     socklen_t addr_len;
     HANDLE wait_handle;
-    NTSTATUS status;
+    unsigned int status;
     ULONG options;
 
     addr_len = sizeof(addr);
@@ -1487,7 +1486,7 @@ static int get_sock_type( HANDLE handle )
 
 
 NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user, IO_STATUS_BLOCK *io,
-                     ULONG code, void *in_buffer, ULONG in_size, void *out_buffer, ULONG out_size )
+                     UINT code, void *in_buffer, UINT in_size, void *out_buffer, UINT out_size )
 {
     int fd, needs_close = FALSE;
     NTSTATUS status;

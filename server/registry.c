@@ -518,6 +518,15 @@ static struct object *key_lookup_name( struct object *obj, struct unicode_str *n
                 set_error( STATUS_OBJECT_NAME_NOT_FOUND );
             }
         }
+
+        key = (struct key *)obj;
+        if (key && (key->flags & KEY_WOWSHARE) && (attr & OBJ_KEY_WOW64) && !name->str)
+        {
+            key = get_parent( key );
+            release_object( obj );
+            return grab_object( key );
+        }
+
         return obj;
     }
 
@@ -770,9 +779,35 @@ static struct key *grab_wow6432node( struct key *key )
     struct key *ret = key->wow6432node;
 
     if (!ret) return key;
+    if (ret->flags & KEY_WOWSHARE) return key;
     grab_object( ret );
     release_object( key );
     return ret;
+}
+
+/* recursively obtain the wow6432node parent key if any */
+static struct key *get_wow6432node( struct key *key )
+{
+    struct key *parent, *ret;
+    struct unicode_str name;
+    int index;
+
+    if (!key)
+        return NULL;
+
+    if (key->wow6432node)
+        return key->wow6432node;
+
+    parent = get_parent( key );
+    if (parent && key == parent->wow6432node)
+        return key;
+
+    if (!(ret = get_wow6432node( parent )))
+        return key;
+
+    name.str = key->obj.name->name;
+    name.len = key->obj.name->len;
+    return find_subkey( ret, &name, &index );
 }
 
 /* open a subkey */
@@ -787,10 +822,11 @@ static struct key *open_key( struct key *parent, const struct unicode_str *name,
         return NULL;
     }
 
-    if (parent && (access & KEY_WOW64_32KEY))
+    if (parent && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name->str, name->len ))
     {
-        if (parent->wow6432node && !is_wow6432node( name->str, name->len ))
-            parent = parent->wow6432node;
+        key = get_wow6432node( parent );
+        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWSHARE)))
+            parent = key;
     }
 
     if (!(access & KEY_WOW64_64KEY)) attributes |= OBJ_KEY_WOW64;
@@ -812,9 +848,11 @@ static struct key *create_key( struct key *parent, const struct unicode_str *nam
 
     if (options & REG_OPTION_CREATE_LINK) attributes = (attributes & ~OBJ_OPENIF) | OBJ_OPENLINK;
 
-    if (parent && (access & KEY_WOW64_32KEY))
+    if (parent && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name->str, name->len ))
     {
-        if (parent->wow6432node && !is_wow6432node( name->str, name->len )) parent = parent->wow6432node;
+        key = get_wow6432node( parent );
+        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWSHARE)))
+            parent = key;
     }
 
     if (!(access & KEY_WOW64_64KEY)) attributes |= OBJ_KEY_WOW64;

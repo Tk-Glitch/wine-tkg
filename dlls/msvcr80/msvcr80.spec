@@ -942,9 +942,9 @@
 @ varargs _scprintf_p(str)
 @ varargs _scprintf_p_l(str ptr)
 @ varargs _scwprintf(wstr)
-@ stub _scwprintf_l
-@ stub _scwprintf_p
-@ stub _scwprintf_p_l
+@ varargs _scwprintf_l(wstr ptr)
+@ varargs _scwprintf_p(wstr)
+@ varargs _scwprintf_p_l(wstr ptr)
 @ cdecl _searchenv(str str ptr)
 @ cdecl _searchenv_s(str str ptr long)
 @ stdcall -arch=i386 _seh_longjmp_unwind4(ptr)
@@ -1102,13 +1102,13 @@
 @ cdecl _utime32(str ptr)
 @ cdecl _utime64(str ptr)
 @ cdecl _vcprintf(str ptr)
-@ stub _vcprintf_l
+@ cdecl _vcprintf_l(str ptr ptr)
 @ stub _vcprintf_p
 @ stub _vcprintf_p_l
 @ stub _vcprintf_s
 @ stub _vcprintf_s_l
 @ cdecl _vcwprintf(wstr ptr)
-@ stub _vcwprintf_l
+@ cdecl _vcwprintf_l(wstr ptr ptr)
 @ stub _vcwprintf_p
 @ stub _vcwprintf_p_l
 @ stub _vcwprintf_s

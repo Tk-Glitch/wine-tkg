@@ -66,8 +66,6 @@ __ASM_STDCALL_FUNC( wrap_fastcall_func1, 8,
 
 DECLARE_CRITICAL_SECTION(wineusb_cs);
 
-static unixlib_handle_t unix_handle;
-
 static struct list device_list = LIST_INIT(device_list);
 
 struct usb_device
@@ -99,7 +97,7 @@ static void destroy_unix_device(struct unix_device *unix_device)
         .device = unix_device,
     };
 
-    __wine_unix_call(unix_handle, unix_usb_destroy_device, &params);
+    WINE_UNIX_CALL(unix_usb_destroy_device, &params);
 }
 
 static void add_unix_device(const struct usb_add_device_event *event)
@@ -119,7 +117,7 @@ static void add_unix_device(const struct usb_add_device_event *event)
     if ((status = IoCreateDevice(driver_obj, sizeof(*device), &string,
             FILE_DEVICE_USB, 0, FALSE, &device_obj)))
     {
-        ERR("Failed to create device, status %#x.\n", status);
+        ERR("Failed to create device, status %#lx.\n", status);
         return;
     }
 
@@ -171,7 +169,7 @@ static HANDLE libusb_event_thread, event_thread;
 
 static DWORD CALLBACK libusb_event_thread_proc(void *arg)
 {
-    __wine_unix_call(unix_handle, unix_usb_main_loop, NULL);
+    WINE_UNIX_CALL(unix_usb_main_loop, NULL);
 
     return 0;
 }
@@ -199,7 +197,7 @@ static DWORD CALLBACK event_thread_proc(void *arg)
             .event = &event,
         };
 
-        __wine_unix_call(unix_handle, unix_usb_get_event, &params);
+        WINE_UNIX_CALL(unix_usb_get_event, &params);
 
         switch (event.type)
         {
@@ -282,7 +280,7 @@ static NTSTATUS fdo_pnp(IRP *irp)
         {
             struct usb_device *device, *cursor;
 
-            __wine_unix_call(unix_handle, unix_usb_exit, NULL);
+            WINE_UNIX_CALL(unix_usb_exit, NULL);
             WaitForSingleObject(libusb_event_thread, INFINITE);
             CloseHandle(libusb_event_thread);
             WaitForSingleObject(event_thread, INFINITE);
@@ -536,7 +534,7 @@ static NTSTATUS usb_submit_urb(struct usb_device *device, IRP *irp)
                     .transfer = queued_irp->Tail.Overlay.DriverContext[0],
                 };
 
-                __wine_unix_call(unix_handle, unix_usb_cancel_transfer, &params);
+                WINE_UNIX_CALL(unix_usb_cancel_transfer, &params);
             }
             LeaveCriticalSection(&wineusb_cs);
 
@@ -560,7 +558,7 @@ static NTSTATUS usb_submit_urb(struct usb_device *device, IRP *irp)
              * completion between submitting and queuing, we won't try to
              * dequeue the IRP until it's actually been queued. */
             EnterCriticalSection(&wineusb_cs);
-            status = __wine_unix_call(unix_handle, unix_usb_submit_urb, &params);
+            status = WINE_UNIX_CALL(unix_usb_submit_urb, &params);
             if (status == STATUS_PENDING)
             {
                 IoMarkIrpPending(irp);
@@ -586,7 +584,7 @@ static NTSTATUS WINAPI driver_internal_ioctl(DEVICE_OBJECT *device_obj, IRP *irp
     NTSTATUS status = STATUS_NOT_IMPLEMENTED;
     BOOL removed;
 
-    TRACE("device_obj %p, irp %p, code %#x.\n", device_obj, irp, code);
+    TRACE("device_obj %p, irp %p, code %#lx.\n", device_obj, irp, code);
 
     EnterCriticalSection(&wineusb_cs);
     removed = device->removed;
@@ -606,7 +604,7 @@ static NTSTATUS WINAPI driver_internal_ioctl(DEVICE_OBJECT *device_obj, IRP *irp
             break;
 
         default:
-            FIXME("Unhandled ioctl %#x (device %#x, access %#x, function %#x, method %#x).\n",
+            FIXME("Unhandled ioctl %#lx (device %#lx, access %#lx, function %#lx, method %#lx).\n",
                     code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
     }
 
@@ -626,7 +624,7 @@ static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *p
 
     if ((ret = IoCreateDevice(driver, 0, NULL, FILE_DEVICE_BUS_EXTENDER, 0, FALSE, &bus_fdo)))
     {
-        ERR("Failed to create FDO, status %#x.\n", ret);
+        ERR("Failed to create FDO, status %#lx.\n", ret);
         return ret;
     }
 
@@ -644,15 +642,12 @@ static void WINAPI driver_unload(DRIVER_OBJECT *driver)
 NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, UNICODE_STRING *path)
 {
     NTSTATUS status;
-    void *instance;
 
     TRACE("driver %p, path %s.\n", driver, debugstr_w(path->Buffer));
 
-    RtlPcToFileHeader(DriverEntry, &instance);
-    if ((status = NtQueryVirtualMemory(GetCurrentProcess(), instance,
-            MemoryWineUnixFuncs, &unix_handle, sizeof(unix_handle), NULL)))
+    if ((status = __wine_init_unix_call()))
     {
-        ERR("Failed to initialize Unix library, status %#x.\n", status);
+        ERR("Failed to initialize Unix library, status %#lx.\n", status);
         return status;
     }
 

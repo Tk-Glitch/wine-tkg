@@ -57,7 +57,8 @@ static void test_ldap_parse_sort_control( LDAP *ld )
     ctrls[1] = NULL;
     timeout.tv_sec = 20;
     timeout.tv_usec = 0;
-    ret = ldap_search_ext_sA( ld, (char *)"", LDAP_SCOPE_ONELEVEL, (char *)"(ou=*)", NULL, 0, ctrls, NULL, &timeout, 10, &res );
+    ret = ldap_search_ext_sA( ld, (char *)"dc=debian,dc=org", LDAP_SCOPE_ONELEVEL, (char *)"(uid=*)", NULL, 0,
+                              ctrls, NULL, &timeout, 10, &res );
     if (ret == LDAP_SERVER_DOWN || ret == LDAP_TIMEOUT)
     {
         skip("test server can't be reached\n");
@@ -66,14 +67,6 @@ static void test_ldap_parse_sort_control( LDAP *ld )
     }
     ok( !ret, "ldap_search_ext_sA failed %#lx\n", ret );
     ok( res != NULL, "expected res != NULL\n" );
-
-    if (GetProcAddress(GetModuleHandleA("wldap32.dll"), "ber_init"))
-    {
-        ret = ldap_parse_resultA( NULL, res, &result, NULL, NULL, NULL, &server_ctrls, 1 );
-        ok( ret == LDAP_PARAM_ERROR, "ldap_parse_resultA failed %#lx\n", ret );
-    }
-    else
-        win_skip("Test would crash on older wldap32 versions\n");
 
     result = ~0u;
     ret = ldap_parse_resultA( ld, res, &result, NULL, NULL, NULL, &server_ctrls, 1 );
@@ -127,7 +120,7 @@ static void test_ldap_set_optionW( LDAP *ld )
     }
 
     ret = ldap_set_optionW( ld, LDAP_OPT_REFERRALS, LDAP_OPT_OFF );
-    ok( !ret || broken(ret == LDAP_PARAM_ERROR) /* nt4, win2k */, "ldap_set_optionW failed %#lx\n", ret );
+    ok( !ret, "ldap_set_optionW failed %#lx\n", ret );
 
     ret = ldap_set_optionW( ld, LDAP_OPT_REFERRALS, (void *)&oldvalue );
     ok( !ret, "ldap_set_optionW failed %#lx\n", ret );
@@ -148,8 +141,8 @@ static void test_ldap_bind_sA( void )
     ULONG ret;
     int version;
 
-    ld = ldap_initA( (char *)"ldap.forumsys.com", 389 );
-    ok( ld != NULL, "ldap_init failed\n" );
+    ld = ldap_sslinitA( (char *)"db.debian.org", 636, 1 );
+    ok( ld != NULL, "ldap_sslinit failed\n" );
 
     version = LDAP_VERSION3;
     ret = ldap_set_optionW( ld, LDAP_OPT_PROTOCOL_VERSION, &version );
@@ -163,9 +156,16 @@ static void test_ldap_bind_sA( void )
     ret = ldap_connect( ld, NULL );
     ok( !ret, "ldap_connect failed %#lx\n", ret );
 
-    ret = ldap_bind_sA( ld, (char *)"CN=read-only-admin,DC=example,DC=com", (char *)"password", LDAP_AUTH_SIMPLE );
-    ok( !ret, "ldap_bind_s failed %#lx\n", ret );
+    ret = ldap_bind_sA( ld, (char *)"uid=winetest,ou=users,dc=debian,dc=org", (char *)"winetest",
+                        LDAP_AUTH_SIMPLE );
+    ok( ret == LDAP_INVALID_CREDENTIALS, "ldap_bind_s returned %#lx\n", ret );
+    ldap_unbind( ld );
 
+    ld = ldap_sslinitA( (char *)"db.debian.org", 389, 0 );
+    ok( ld != NULL, "ldap_sslinit failed\n" );
+
+    ret = ldap_connect( ld, NULL );
+    ok( !ret, "ldap_connect failed %#lx\n", ret );
     ldap_unbind( ld );
 }
 
@@ -179,7 +179,7 @@ static void test_ldap_server_control( void )
     LDAPControlW *ctrls[2], mask;
     LDAPMessage *res;
 
-    ld = ldap_initA( (char *)"ldap.forumsys.com", 389 );
+    ld = ldap_initA( (char *)"db.debian.org", 389 );
     ok( ld != NULL, "ldap_init failed\n" );
 
     version = LDAP_VERSION3;
@@ -205,7 +205,7 @@ static void test_ldap_server_control( void )
     ok( ret == LDAP_PARAM_ERROR, "ldap_set_optionW should fail: %#lx\n", ret );
 
     res = NULL;
-    ret = ldap_search_sA( ld, (char *)"OU=scientists,DC=example,DC=com", LDAP_SCOPE_BASE, (char *)"(objectclass=*)", NULL, FALSE, &res );
+    ret = ldap_search_sA( ld, (char *)"dc=debian,dc=org", LDAP_SCOPE_BASE, (char *)"(objectclass=*)", NULL, FALSE, &res );
     ok( !ret, "ldap_search_sA failed %#lx\n", ret );
     ok( res != NULL, "expected res != NULL\n" );
 
@@ -223,7 +223,7 @@ static void test_ldap_paged_search(void)
     BerElement *ber;
     WCHAR *attr;
 
-    ld = ldap_initA( (char *)"ldap.forumsys.com", 389 );
+    ld = ldap_initA( (char *)"db.debian.org", 389 );
     ok( ld != NULL, "ldap_init failed\n" );
 
     version = LDAP_VERSION3;
@@ -280,7 +280,7 @@ START_TEST (parse)
     test_ldap_server_control();
     test_ldap_bind_sA();
 
-    ld = ldap_initA((char *)"ldap.itd.umich.edu", 389 );
+    ld = ldap_initA( (char *)"db.debian.org", 389 );
     ok( ld != NULL, "ldap_init failed\n" );
 
     test_ldap_parse_sort_control( ld );

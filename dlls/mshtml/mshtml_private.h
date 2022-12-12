@@ -30,7 +30,6 @@
 #include "tlogstg.h"
 #include "shdeprecated.h"
 
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
 
@@ -288,6 +287,7 @@ typedef struct EventTarget EventTarget;
     XIID(IWineHTMLElementPrivate) \
     XIID(IWineHTMLWindowPrivate) \
     XIID(IWineHTMLWindowCompatPrivate) \
+    XIID(IWinePageTransitionEvent) \
     XIID(IWineXMLHttpRequestPrivate) \
     XIID(IWineMSHTMLConsole) \
     XIID(IWineMSHTMLMediaQueryList)
@@ -502,6 +502,30 @@ typedef struct {
     HTMLInnerWindow *window;
 } OmHistory;
 
+typedef struct {
+    DispatchEx dispex;
+    IHTMLPerformanceTiming IHTMLPerformanceTiming_iface;
+
+    LONG ref;
+
+    ULONGLONG navigation_start_time;
+    ULONGLONG unload_event_start_time;
+    ULONGLONG unload_event_end_time;
+    ULONGLONG redirect_time;
+    ULONGLONG dns_lookup_time;
+    ULONGLONG connect_time;
+    ULONGLONG request_time;
+    ULONGLONG response_start_time;
+    ULONGLONG response_end_time;
+    ULONGLONG dom_interactive_time;
+    ULONGLONG dom_complete_time;
+    ULONGLONG dom_content_loaded_event_start_time;
+    ULONGLONG dom_content_loaded_event_end_time;
+    ULONGLONG load_event_start_time;
+    ULONGLONG load_event_end_time;
+    ULONGLONG first_paint_time;
+} HTMLPerformanceTiming;
+
 typedef struct nsChannelBSC nsChannelBSC;
 
 struct HTMLWindow {
@@ -578,6 +602,7 @@ struct HTMLInnerWindow {
 
     BOOL performance_initialized;
     VARIANT performance;
+    HTMLPerformanceTiming *performance_timing;
 
     unsigned parser_callback_cnt;
     struct list script_queue;
@@ -640,7 +665,6 @@ struct  ConnectionPoint {
 };
 
 struct HTMLDocumentObj {
-    DispatchEx dispex;
     IUnknown IUnknown_inner;
     IDispatchEx IDispatchEx_iface;
     ICustomDoc ICustomDoc_iface;
@@ -677,6 +701,7 @@ struct HTMLDocumentObj {
     IObjectSafety IObjectSafety_iface;
     IServiceProvider IServiceProvider_iface;
     ITargetContainer ITargetContainer_iface;
+    IEventTarget IEventTarget_iface;
 
     IWindowForBindingUI IWindowForBindingUI_iface;
 
@@ -923,7 +948,8 @@ struct HTMLDocumentNode {
 
     nsIDOMDocument *dom_document;
     nsIDOMHTMLDocument *html_document;
-    BOOL content_ready;
+    BOOL content_ready : 1;
+    BOOL unload_sent : 1;
 
     IHTMLDOMImplementation *dom_implementation;
     IHTMLNamespaceCollection *namespaces;
@@ -964,7 +990,8 @@ HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow*,HTMLXMLHttpRequestFact
 HRESULT HTMLLocation_Create(HTMLInnerWindow*,HTMLLocation**) DECLSPEC_HIDDEN;
 HRESULT create_navigator(compat_mode_t,IOmNavigator**) DECLSPEC_HIDDEN;
 HRESULT create_html_screen(compat_mode_t,IHTMLScreen**) DECLSPEC_HIDDEN;
-HRESULT create_performance(compat_mode_t,IHTMLPerformance**) DECLSPEC_HIDDEN;
+HRESULT create_performance(HTMLInnerWindow*,IHTMLPerformance**) DECLSPEC_HIDDEN;
+HRESULT create_performance_timing(HTMLPerformanceTiming**) DECLSPEC_HIDDEN;
 HRESULT create_history(HTMLInnerWindow*,OmHistory**) DECLSPEC_HIDDEN;
 HRESULT create_namespace_collection(compat_mode_t,IHTMLNamespaceCollection**) DECLSPEC_HIDDEN;
 HRESULT create_dom_implementation(HTMLDocumentNode*,IHTMLDOMImplementation**) DECLSPEC_HIDDEN;
@@ -1306,33 +1333,12 @@ DEFINE_GUID(IID_IDispatchJS,0x719c3050,0xf9d3,0x11cf,0xa4,0x93,0x00,0x40,0x05,0x
 
 /* memory allocation functions */
 
-static inline void * __WINE_ALLOC_SIZE(2) heap_realloc_zero(void *mem, size_t len)
-{
-    return HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, len);
-}
-
-static inline LPWSTR heap_strdupW(LPCWSTR str)
+static inline WCHAR *strndupW(LPCWSTR str, unsigned len)
 {
     LPWSTR ret = NULL;
 
     if(str) {
-        DWORD size;
-
-        size = (lstrlenW(str)+1)*sizeof(WCHAR);
-        ret = heap_alloc(size);
-        if(ret)
-            memcpy(ret, str, size);
-    }
-
-    return ret;
-}
-
-static inline LPWSTR heap_strndupW(LPCWSTR str, unsigned len)
-{
-    LPWSTR ret = NULL;
-
-    if(str) {
-        ret = heap_alloc((len+1)*sizeof(WCHAR));
+        ret = malloc((len + 1) * sizeof(WCHAR));
         if(ret)
         {
             memcpy(ret, str, len*sizeof(WCHAR));
@@ -1343,23 +1349,7 @@ static inline LPWSTR heap_strndupW(LPCWSTR str, unsigned len)
     return ret;
 }
 
-static inline char *heap_strdupA(const char *str)
-{
-    char *ret = NULL;
-
-    if(str) {
-        DWORD size;
-
-        size = strlen(str)+1;
-        ret = heap_alloc(size);
-        if(ret)
-            memcpy(ret, str, size);
-    }
-
-    return ret;
-}
-
-static inline WCHAR *heap_strdupAtoW(const char *str)
+static inline WCHAR *strdupAtoW(const char *str)
 {
     LPWSTR ret = NULL;
 
@@ -1367,7 +1357,7 @@ static inline WCHAR *heap_strdupAtoW(const char *str)
         DWORD len;
 
         len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-        ret = heap_alloc(len*sizeof(WCHAR));
+        ret = malloc(len * sizeof(WCHAR));
         if(ret)
             MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
     }
@@ -1375,13 +1365,13 @@ static inline WCHAR *heap_strdupAtoW(const char *str)
     return ret;
 }
 
-static inline char *heap_strdupWtoA(LPCWSTR str)
+static inline char *strdupWtoA(const WCHAR *str)
 {
     char *ret = NULL;
 
     if(str) {
         DWORD size = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
-        ret = heap_alloc(size);
+        ret = malloc(size);
         if(ret)
             WideCharToMultiByte(CP_ACP, 0, str, -1, ret, size, NULL, NULL);
     }
@@ -1389,7 +1379,7 @@ static inline char *heap_strdupWtoA(LPCWSTR str)
     return ret;
 }
 
-static inline WCHAR *heap_strdupUtoW(const char *str)
+static inline WCHAR *strdupUtoW(const char *str)
 {
     WCHAR *ret = NULL;
 
@@ -1397,7 +1387,7 @@ static inline WCHAR *heap_strdupUtoW(const char *str)
         size_t len;
 
         len = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
-        ret = heap_alloc(len*sizeof(WCHAR));
+        ret = malloc(len * sizeof(WCHAR));
         if(ret)
             MultiByteToWideChar(CP_UTF8, 0, str, -1, ret, len);
     }
@@ -1405,13 +1395,13 @@ static inline WCHAR *heap_strdupUtoW(const char *str)
     return ret;
 }
 
-static inline char *heap_strdupWtoU(const WCHAR *str)
+static inline char *strdupWtoU(const WCHAR *str)
 {
     char *ret = NULL;
 
     if(str) {
         size_t size = WideCharToMultiByte(CP_UTF8, 0, str, -1, NULL, 0, NULL, NULL);
-        ret = heap_alloc(size);
+        ret = malloc(size);
         if(ret)
             WideCharToMultiByte(CP_UTF8, 0, str, -1, ret, size, NULL, NULL);
     }
@@ -1419,14 +1409,14 @@ static inline char *heap_strdupWtoU(const WCHAR *str)
     return ret;
 }
 
-static inline char *heap_strndupWtoU(LPCWSTR str, unsigned len)
+static inline char *strndupWtoU(const WCHAR *str, unsigned len)
 {
     char *ret = NULL;
     DWORD size;
 
     if(str) {
         size = len ? WideCharToMultiByte(CP_UTF8, 0, str, len, NULL, 0, NULL, NULL) : 0;
-        ret = heap_alloc(size + 1);
+        ret = malloc(size + 1);
         if(ret) {
             if(len) WideCharToMultiByte(CP_UTF8, 0, str, len, ret, size, NULL, NULL);
             ret[size] = '\0';

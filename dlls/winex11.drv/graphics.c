@@ -1445,7 +1445,7 @@ BOOL CDECL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT 
     RECT rect, bounds;
     POINT pt;
 
-    TRACE("X11DRV_ExtFloodFill %d,%d %06x %d\n", x, y, color, fillType );
+    TRACE("X11DRV_ExtFloodFill %d,%d %s %d\n", x, y, debugstr_color(color), fillType );
 
     pt.x = x;
     pt.y = y;
@@ -1704,7 +1704,7 @@ BOOL CDECL X11DRV_GetICMProfile( PHYSDEV dev, BOOL allow_default, LPDWORD size, 
         IO_STATUS_BLOCK io;
         UINT64 hash = 0;
         HANDLE file;
-        NTSTATUS status;
+        int status;
 
         for (i = 0; i < buflen; i++) hash = (hash << 16) - hash + buffer[i];
         for (i = 0; i < sizeof(hash) * 2; i++)

@@ -1,7 +1,0 @@
-MODULE    = nvcuda.dll
-EXTRADLLFLAGS = -mcygwin
-EXTRALIBS = $(PTHREAD_LIBS)
-
-C_SRCS = \
-	internal.c \
-	nvcuda.c

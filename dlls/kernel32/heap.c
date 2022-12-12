@@ -197,7 +197,10 @@ HGLOBAL WINAPI GlobalReAlloc( HGLOBAL handle, SIZE_T size, UINT flags )
     struct mem_entry *mem;
     void *ptr;
 
-    if ((mem = unsafe_mem_from_HLOCAL( handle )) && mem->lock) return 0;
+    if (!(flags & GMEM_MODIFY) && (mem = unsafe_mem_from_HLOCAL( handle )) &&
+        mem->lock && (!size || (flags & GMEM_DISCARDABLE)))
+        return 0;
+
     if (!(handle = LocalReAlloc( handle, size, flags ))) return 0;
 
     /* GlobalReAlloc allows changing GMEM_FIXED to GMEM_MOVEABLE with GMEM_MODIFY */
@@ -345,6 +348,7 @@ UINT WINAPI LocalFlags( HLOCAL handle )
  */
 HLOCAL WINAPI LocalHandle( const void *ptr )
 {
+    HANDLE heap = GetProcessHeap();
     HLOCAL handle = (HANDLE)ptr;
     ULONG flags;
 
@@ -356,11 +360,14 @@ HLOCAL WINAPI LocalHandle( const void *ptr )
         return 0;
     }
 
-    if (!RtlGetUserInfoHeap( GetProcessHeap(), 0, (void *)ptr, &handle, &flags ))
+    RtlLockHeap( heap );
+    if (!HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ) ||
+        !RtlGetUserInfoHeap( heap, HEAP_NO_SERIALIZE, (void *)ptr, &handle, &flags ))
     {
         SetLastError( ERROR_INVALID_HANDLE );
-        return 0;
+        handle = 0;
     }
+    RtlUnlockHeap( heap );
 
     return handle;
 }
@@ -387,7 +394,8 @@ SIZE_T WINAPI LocalSize( HLOCAL handle )
     TRACE_(globalmem)( "handle %p\n", handle );
 
     RtlLockHeap( heap );
-    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
         ret = HeapSize( heap, HEAP_NO_SERIALIZE, ptr );
     else if ((mem = unsafe_mem_from_HLOCAL( handle )))
     {

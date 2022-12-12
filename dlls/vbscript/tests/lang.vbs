@@ -167,6 +167,8 @@ call ok(false imp null, "false imp null is false?")
 
 Call ok(2 >= 1, "! 2 >= 1")
 Call ok(2 >= 2, "! 2 >= 2")
+Call ok(2 => 1, "! 2 => 1")
+Call ok(2 => 2, "! 2 => 2")
 Call ok(not(true >= 2), "true >= 2 ?")
 Call ok(2 > 1, "! 2 > 1")
 Call ok(false > true, "! false < true")
@@ -177,6 +179,12 @@ Call ok(1 < 2, "! 1 < 2")
 Call ok(1 = 1 < 0, "! 1 = 1 < 0")
 Call ok(1 <= 2, "! 1 <= 2")
 Call ok(2 <= 2, "! 2 <= 2")
+Call ok(1 =< 2, "! 1 =< 2")
+Call ok(2 =< 2, "! 2 =< 2")
+Call ok(not (2 >< 2), "2 >< 2")
+Call ok(2 >< 1, "! 2 >< 1")
+Call ok(not (2 <> 2), "2 <> 2")
+Call ok(2 <> 1, "! 2 <> 1")
 
 Call ok(isNull(0 = null), "'(0 = null)' is not null")
 Call ok(isNull(null = 1), "'(null = 1)' is not null")
@@ -279,6 +287,14 @@ If false Then
    Call ok(false, "inside if false")
 Else
    x = true
+End If
+Call ok(x, "else not called?")
+
+' Else without following newline
+x = false
+If false Then
+   Call ok(false, "inside if false")
+Else x = true
 End If
 Call ok(x, "else not called?")
 
@@ -996,6 +1012,7 @@ Call ok(getVT(x) = "VT_DISPATCH*", "getVT(x) = " & getVT(x))
 
 Class TestClass
     Public publicProp
+    Public publicArrayProp
 
     Private privateProp
 
@@ -1050,6 +1067,11 @@ Class TestClass
 
     Public Sub Class_Initialize
         publicProp2 = 2
+        ReDim publicArrayProp(2)
+
+        publicArrayProp(0) = 1
+        publicArrayProp(1) = 2
+
         privateProp = true
         Call ok(getVT(privateProp) = "VT_BOOL*", "getVT(privateProp) = " & getVT(privateProp))
         Call ok(getVT(publicProp2) = "VT_I2*", "getVT(publicProp2) = " & getVT(publicProp2))
@@ -1101,6 +1123,13 @@ Call ok(funcCalled = "GetDefVal", "funcCalled = " & funcCalled)
 
 Call obj.Class_Initialize
 Call ok(obj.getPrivateProp() = true, "obj.getPrivateProp() = " & obj.getPrivateProp())
+
+'Accessing array property by index
+Call ok(obj.publicArrayProp(0) = 1, "obj.publicArrayProp(0) = " & obj.publicArrayProp(0))
+Call ok(obj.publicArrayProp(1) = 2, "obj.publicArrayProp(1) = " & obj.publicArrayProp(1))
+x = obj.publicArrayProp(2)
+Call ok(getVT(x) = "VT_EMPTY*", "getVT(x) = " & getVT(x))
+Call ok(obj.publicArrayProp("0") = 1, "obj.publicArrayProp(0) = " & obj.publicArrayProp("0"))
 
 x = (New testclass).publicProp
 
@@ -1540,6 +1569,29 @@ sub TestReDimList
     ok y(3) = vbEmpty, "y(3) = " & y(3)
 end sub
 call TestReDimList
+
+dim rx
+redim rx(4)
+sub TestReDimByRef(byref x)
+   ok ubound(x) = 4, "ubound(x) = " & ubound(x)
+   redim x(6)
+   ok ubound(x) = 6, "ubound(x) = " & ubound(x)
+end sub
+call TestReDimByRef(rx)
+ok ubound(rx) = 6, "ubound(rx) = " & ubound(rx)
+
+redim rx(5)
+rx(3)=2
+sub TestReDimPreserveByRef(byref x)
+   ok ubound(x) = 5, "ubound(x) = " & ubound(x)
+   ok x(3) = 2, "x(3) = " & x(3)
+   redim preserve x(7)
+   ok ubound(x) = 7, "ubound(x) = " & ubound(x)
+   ok x(3) = 2, "x(3) = " & x(3)
+end sub
+call TestReDimPreserveByRef(rx)
+ok ubound(rx) = 7, "ubound(rx) = " & ubound(rx)
+ok rx(3) = 2, "rx(3) = " & rx(3)
 
 Class ArrClass
     Dim classarr(3)

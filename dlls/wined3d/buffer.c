@@ -34,6 +34,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 #define VB_MAXFULLCONVERSIONS 5       /* Number of full conversions before we stop converting */
 #define VB_RESETFULLCONVS     20      /* Reset full conversion counts after that number of draws */
 
+#define SB_MIN_SIZE (512 * 1024)    /* Minimum size of an allocated streaming buffer. */
+
 struct wined3d_buffer_ops
 {
     BOOL (*buffer_prepare_location)(struct wined3d_buffer *buffer,
@@ -1665,7 +1667,7 @@ static HRESULT wined3d_streaming_buffer_prepare(struct wined3d_device *device,
             return S_OK;
     }
 
-    size = max(old_size * 2, min_size);
+    size = max(SB_MIN_SIZE, max(old_size * 2, min_size));
     TRACE("Growing buffer to %u bytes.\n", size);
 
     desc.byte_width = size;
@@ -1685,8 +1687,9 @@ static HRESULT wined3d_streaming_buffer_prepare(struct wined3d_device *device,
     return hr;
 }
 
-HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, struct wined3d_streaming_buffer *buffer,
-        const void *data, unsigned int size, unsigned int stride, unsigned int *ret_pos)
+HRESULT CDECL wined3d_streaming_buffer_map(struct wined3d_device *device,
+        struct wined3d_streaming_buffer *buffer, unsigned int size, unsigned int stride,
+        unsigned int *ret_pos, void **ret_data)
 {
     unsigned int map_flags = WINED3D_MAP_WRITE;
     struct wined3d_resource *resource;
@@ -1695,8 +1698,8 @@ HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, str
     struct wined3d_box box;
     HRESULT hr;
 
-    TRACE("device %p, buffer %p, data %p, size %u, stride %u, ret_pos %p.\n",
-            device, buffer, data, size, stride, ret_pos);
+    TRACE("device %p, buffer %p, size %u, stride %u, ret_pos %p, ret_data %p.\n",
+            device, buffer, size, stride, ret_pos, ret_data);
 
     if (FAILED(hr = wined3d_streaming_buffer_prepare(device, buffer, size)))
         return hr;
@@ -1719,10 +1722,28 @@ HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, str
     wined3d_box_set(&box, pos, 0, pos + size, 1, 0, 1);
     if (SUCCEEDED(hr = wined3d_resource_map(resource, 0, &map_desc, &box, map_flags)))
     {
-        memcpy(map_desc.data, data, size);
-        wined3d_resource_unmap(resource, 0);
         *ret_pos = pos;
+        *ret_data = map_desc.data;
         buffer->pos = pos + size;
+    }
+    return hr;
+}
+
+void CDECL wined3d_streaming_buffer_unmap(struct wined3d_streaming_buffer *buffer)
+{
+    wined3d_resource_unmap(&buffer->buffer->resource, 0);
+}
+
+HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, struct wined3d_streaming_buffer *buffer,
+        const void *data, unsigned int size, unsigned int stride, unsigned int *ret_pos)
+{
+    void *dst_data;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = wined3d_streaming_buffer_map(device, buffer, size, stride, ret_pos, &dst_data)))
+    {
+        memcpy(dst_data, data, size);
+        wined3d_streaming_buffer_unmap(buffer);
     }
     return hr;
 }

@@ -222,7 +222,7 @@ HBRUSH WINAPI NtGdiCreateHatchBrushInternal( INT style, COLORREF color, BOOL pen
 {
     LOGBRUSH logbrush;
 
-    TRACE( "%d %06x\n", style, color );
+    TRACE( "%d %s\n", style, debugstr_color(color) );
 
     logbrush.lbStyle = BS_HATCHED;
     logbrush.lbColor = color;
@@ -262,8 +262,8 @@ HBRUSH WINAPI NtGdiCreateDIBBrush( const void *data, UINT coloruse, UINT size,
     if (!data)
         return NULL;
 
-    TRACE( "%p %dx%d %dbpp\n", info, info->bmiHeader.biWidth,
-           info->bmiHeader.biHeight,  info->bmiHeader.biBitCount );
+    TRACE( "%p %dx%d %dbpp\n", info, (int)info->bmiHeader.biWidth,
+           (int)info->bmiHeader.biHeight,  (int)info->bmiHeader.biBitCount );
 
     logbrush.lbStyle = BS_DIBPATTERNPT;
     logbrush.lbColor = coloruse;
@@ -282,7 +282,7 @@ HBRUSH WINAPI NtGdiCreateSolidBrush( COLORREF color, HBRUSH brush )
 {
     LOGBRUSH logbrush;
 
-    TRACE("%06x\n", color );
+    TRACE("%s\n", debugstr_color(color) );
 
     logbrush.lbStyle = BS_SOLID;
     logbrush.lbColor = color;

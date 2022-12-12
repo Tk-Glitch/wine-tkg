@@ -1771,6 +1771,21 @@ typedef struct _WIN32_MEMORY_RANGE_ENTRY
     SIZE_T NumberOfBytes;
 } WIN32_MEMORY_RANGE_ENTRY, *PWIN32_MEMORY_RANGE_ENTRY;
 
+typedef enum _PROCESS_INFORMATION_CLASS
+{
+    ProcessMemoryPriority,
+    ProcessMemoryExhaustionInfo,
+    ProcessAppMemoryInfo,
+    ProcessInPrivateInfo,
+    ProcessPowerThrottling,
+    ProcessReservedValue1,
+    ProcessTelemetryCoverageInfo,
+    ProcessProtectionLevelInfo,
+    ProcessLeapSecondInfo,
+    ProcessMachineTypeInfo,
+    ProcessInformationClassMax
+} PROCESS_INFORMATION_CLASS;
+
 WINBASEAPI BOOL        WINAPI ActivateActCtx(HANDLE,ULONG_PTR *);
 WINADVAPI  BOOL        WINAPI AddAccessAllowedAce(PACL,DWORD,DWORD,PSID);
 WINADVAPI  BOOL        WINAPI AddAccessAllowedAceEx(PACL,DWORD,DWORD,DWORD,PSID);
@@ -2201,6 +2216,7 @@ WINBASEAPI DWORD       WINAPI GetLongPathNameA(LPCSTR,LPSTR,DWORD);
 WINBASEAPI DWORD       WINAPI GetLongPathNameW(LPCWSTR,LPWSTR,DWORD);
 #define                       GetLongPathName WINELIB_NAME_AW(GetLongPathName)
 WINBASEAPI BOOL        WINAPI GetMailslotInfo(HANDLE,LPDWORD,LPDWORD,LPDWORD,LPDWORD);
+WINBASEAPI DWORD       WINAPI GetMaximumProcessorCount(WORD);
 WINBASEAPI DWORD       WINAPI GetModuleFileNameA(HMODULE,LPSTR,DWORD);
 WINBASEAPI DWORD       WINAPI GetModuleFileNameW(HMODULE,LPWSTR,DWORD);
 #define                       GetModuleFileName WINELIB_NAME_AW(GetModuleFileName)
@@ -2688,6 +2704,7 @@ WINBASEAPI BOOL        WINAPI SetPriorityClass(HANDLE,DWORD);
 WINADVAPI  BOOL        WINAPI SetPrivateObjectSecurity(SECURITY_INFORMATION,PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR*,PGENERIC_MAPPING,HANDLE);
 WINADVAPI  BOOL        WINAPI SetPrivateObjectSecurityEx(SECURITY_INFORMATION,PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR*,ULONG,PGENERIC_MAPPING,HANDLE);
 WINBASEAPI BOOL        WINAPI SetProcessAffinityMask(HANDLE,DWORD_PTR);
+WINBASEAPI BOOL        WINAPI SetProcessInformation(HANDLE,PROCESS_INFORMATION_CLASS,LPVOID,DWORD);
 WINBASEAPI BOOL        WINAPI SetProcessPriorityBoost(HANDLE,BOOL);
 WINBASEAPI BOOL        WINAPI SetProcessShutdownParameters(DWORD,DWORD);
 WINBASEAPI BOOL        WINAPI SetProcessWorkingSetSize(HANDLE,SIZE_T,SIZE_T);
@@ -2950,7 +2967,14 @@ extern char * CDECL wine_get_unix_file_name( LPCWSTR dos );
 extern WCHAR * CDECL wine_get_dos_file_name( LPCSTR str );
 
 
-#ifdef __WINESRC__
+#ifdef WINE_UNIX_LIB
+
+#define GetCurrentProcess()   NtCurrentProcess()
+#define GetCurrentThread()    NtCurrentThread()
+#define GetCurrentProcessId() HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess)
+#define GetCurrentThreadId()  HandleToULong(NtCurrentTeb()->ClientId.UniqueThread)
+
+#elif defined(__WINESRC__)
 
 static FORCEINLINE HANDLE WINAPI GetCurrentProcess(void)
 {

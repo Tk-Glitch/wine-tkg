@@ -4,4 +4,4 @@ IMPORTS   =
 EXTRADLLFLAGS = -mwindows -municode
 
 C_SRCS = \
-        main.c \
+	main.c

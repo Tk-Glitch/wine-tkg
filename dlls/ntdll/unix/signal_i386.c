@@ -441,22 +441,22 @@ struct syscall_frame
 {
     WORD                  syscall_flags;  /* 000 */
     WORD                  restore_flags;  /* 002 */
-    DWORD                 eflags;         /* 004 */
-    DWORD                 eip;            /* 008 */
-    DWORD                 esp;            /* 00c */
+    UINT                  eflags;         /* 004 */
+    UINT                  eip;            /* 008 */
+    UINT                  esp;            /* 00c */
     WORD                  cs;             /* 010 */
     WORD                  ss;             /* 012 */
     WORD                  ds;             /* 014 */
     WORD                  es;             /* 016 */
     WORD                  fs;             /* 018 */
     WORD                  gs;             /* 01a */
-    DWORD                 eax;            /* 01c */
-    DWORD                 ebx;            /* 020 */
-    DWORD                 ecx;            /* 024 */
-    DWORD                 edx;            /* 028 */
-    DWORD                 edi;            /* 02c */
-    DWORD                 esi;            /* 030 */
-    DWORD                 ebp;            /* 034 */
+    UINT                  eax;            /* 01c */
+    UINT                  ebx;            /* 020 */
+    UINT                  ecx;            /* 024 */
+    UINT                  edx;            /* 028 */
+    UINT                  edi;            /* 02c */
+    UINT                  esi;            /* 030 */
+    UINT                  ebp;            /* 034 */
     SYSTEM_SERVICE_TABLE *syscall_table;  /* 038 */
     struct syscall_frame *prev_frame;     /* 03c */
     union                                 /* 040 */
@@ -474,14 +474,14 @@ C_ASSERT( sizeof(struct syscall_frame) == 0x380 );
 
 struct x86_thread_data
 {
-    DWORD              fs;            /* 1d4 TEB selector */
-    DWORD              gs;            /* 1d8 libc selector; update winebuild if you move this! */
-    DWORD              dr0;           /* 1dc debug registers */
-    DWORD              dr1;           /* 1e0 */
-    DWORD              dr2;           /* 1e4 */
-    DWORD              dr3;           /* 1e8 */
-    DWORD              dr6;           /* 1ec */
-    DWORD              dr7;           /* 1f0 */
+    UINT               fs;            /* 1d4 TEB selector */
+    UINT               gs;            /* 1d8 libc selector; update winebuild if you move this! */
+    UINT               dr0;           /* 1dc debug registers */
+    UINT               dr1;           /* 1e0 */
+    UINT               dr2;           /* 1e4 */
+    UINT               dr3;           /* 1e8 */
+    UINT               dr6;           /* 1ec */
+    UINT               dr7;           /* 1f0 */
     void              *exit_frame;    /* 1f4 exit frame pointer */
     struct syscall_frame *syscall_frame; /* 1f8 frame pointer on syscall entry */
 };
@@ -1136,16 +1136,16 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
     }
 
     if (context->ContextFlags & (CONTEXT_INTEGER & ~CONTEXT_i386))
-        TRACE( "%p: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x\n", handle,
+        TRACE( "%p: eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx\n", handle,
                context->Eax, context->Ebx, context->Ecx, context->Edx, context->Esi, context->Edi );
     if (context->ContextFlags & (CONTEXT_CONTROL & ~CONTEXT_i386))
-        TRACE( "%p: ebp=%08x esp=%08x eip=%08x cs=%04x ss=%04x flags=%08x\n", handle,
+        TRACE( "%p: ebp=%08lx esp=%08lx eip=%08lx cs=%04lx ss=%04lx flags=%08lx\n", handle,
                context->Ebp, context->Esp, context->Eip, context->SegCs, context->SegSs, context->EFlags );
     if (context->ContextFlags & (CONTEXT_SEGMENTS & ~CONTEXT_i386))
-        TRACE( "%p: ds=%04x es=%04x fs=%04x gs=%04x\n", handle,
+        TRACE( "%p: ds=%04lx es=%04lx fs=%04lx gs=%04lx\n", handle,
                context->SegDs, context->SegEs, context->SegFs, context->SegGs );
     if (context->ContextFlags & (CONTEXT_DEBUG_REGISTERS & ~CONTEXT_i386))
-        TRACE( "%p: dr0=%08x dr1=%08x dr2=%08x dr3=%08x dr6=%08x dr7=%08x\n", handle,
+        TRACE( "%p: dr0=%08lx dr1=%08lx dr2=%08lx dr3=%08lx dr6=%08lx dr7=%08lx\n", handle,
                context->Dr0, context->Dr1, context->Dr2, context->Dr3, context->Dr6, context->Dr7 );
 
     return STATUS_SUCCESS;
@@ -1269,7 +1269,7 @@ static inline BOOL check_invalid_gs( ucontext_t *sigcontext, CONTEXT *context )
         instr++;
         continue;
     case 0x65:  /* %gs: */
-        TRACE( "%04x/%04x at %p, fixing up\n", context->SegGs, system_gs, instr );
+        TRACE( "%04lx/%04x at %p, fixing up\n", context->SegGs, system_gs, instr );
         GS_sig(sigcontext) = system_gs;
         return TRUE;
     default:
@@ -1283,37 +1283,37 @@ union atl_thunk
 {
     struct
     {
-        DWORD movl;  /* movl this,4(%esp) */
-        DWORD this;
+        UINT  movl;  /* movl this,4(%esp) */
+        UINT  this;
         BYTE  jmp;   /* jmp func */
         int   func;
     } t1;
     struct
     {
         BYTE  movl;  /* movl this,ecx */
-        DWORD this;
+        UINT  this;
         BYTE  jmp;   /* jmp func */
         int   func;
     } t2;
     struct
     {
         BYTE  movl1; /* movl this,edx */
-        DWORD this;
+        UINT  this;
         BYTE  movl2; /* movl func,ecx */
-        DWORD func;
+        UINT  func;
         WORD  jmp;   /* jmp ecx */
     } t3;
     struct
     {
         BYTE  movl1; /* movl this,ecx */
-        DWORD this;
+        UINT  this;
         BYTE  movl2; /* movl func,eax */
-        DWORD func;
+        UINT  func;
         WORD  jmp;   /* jmp eax */
     } t4;
     struct
     {
-        DWORD inst1; /* pop ecx
+        UINT  inst1; /* pop ecx
                       * pop eax
                       * push ecx
                       * jmp 4(%eax) */
@@ -1777,19 +1777,18 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
                                   EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     struct syscall_frame *frame = x86_thread_data()->syscall_frame;
-    DWORD i, *stack;
+    UINT i, *stack;
 
     if (!is_inside_syscall( sigcontext ) && !ntdll_get_thread_data()->jmp_buf) return FALSE;
 
-    TRACE( "code=%x flags=%x addr=%p ip=%08x tid=%04x\n",
-           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
-           context->Eip, GetCurrentThreadId() );
+    TRACE( "code=%lx flags=%lx addr=%p ip=%08lx\n",
+           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Eip );
     for (i = 0; i < rec->NumberParameters; i++)
         TRACE( " info[%d]=%08lx\n", i, rec->ExceptionInformation[i] );
-    TRACE(" eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x\n",
+    TRACE(" eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx\n",
           context->Eax, context->Ebx, context->Ecx,
           context->Edx, context->Esi, context->Edi );
-    TRACE(" ebp=%08x esp=%08x cs=%04x ds=%04x es=%04x fs=%04x gs=%04x flags=%08x\n",
+    TRACE(" ebp=%08lx esp=%08lx cs=%04lx ds=%04lx es=%04lx fs=%04lx gs=%04lx flags=%08lx\n",
           context->Ebp, context->Esp, context->SegCs, context->SegDs,
           context->SegEs, context->SegFs, context->SegGs, context->EFlags );
 
@@ -1811,10 +1810,10 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
     }
     else
     {
-        TRACE( "returning to user mode ip=%08x ret=%08x\n", frame->eip, rec->ExceptionCode );
-        stack = (DWORD *)frame;
+        TRACE( "returning to user mode ip=%08x ret=%08lx\n", frame->eip, rec->ExceptionCode );
+        stack = (UINT *)frame;
         *(--stack) = rec->ExceptionCode;
-        *(--stack) = (DWORD)frame;
+        *(--stack) = (UINT)frame;
         *(--stack) = 0xdeadbabe;  /* return address */
         ESP_sig(sigcontext) = (DWORD)stack;
         EIP_sig(sigcontext) = (DWORD)__wine_syscall_dispatcher_return;
@@ -2288,7 +2287,7 @@ static void ldt_set_fs( WORD sel, TEB *teb )
 NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len )
 {
     THREAD_DESCRIPTOR_INFORMATION *info = data;
-    NTSTATUS status = STATUS_SUCCESS;
+    unsigned int status = STATUS_SUCCESS;
 
     if (len != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
     if (info->Selector >> 16) return STATUS_UNSUCCESSFUL;

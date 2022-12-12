@@ -189,7 +189,7 @@ static inline HRESULT resize_props(jsdisp_t *This)
     if(This->buf_size != This->prop_cnt)
         return S_FALSE;
 
-    props = heap_realloc(This->props, sizeof(dispex_prop_t)*This->buf_size*2);
+    props = realloc(This->props, sizeof(dispex_prop_t) * This->buf_size * 2);
     if(!props)
         return E_OUTOFMEMORY;
     This->buf_size *= 2;
@@ -220,7 +220,7 @@ static inline dispex_prop_t* alloc_prop(jsdisp_t *This, const WCHAR *name, prop_
         return NULL;
 
     prop = &This->props[This->prop_cnt];
-    prop->name = heap_strdupW(name);
+    prop->name = wcsdup(name);
     if(!prop->name)
         return NULL;
     prop->type = type;
@@ -420,7 +420,7 @@ static HRESULT convert_params(script_ctx_t *ctx, const DISPPARAMS *dp, jsval_t *
     cnt = dp->cArgs - dp->cNamedArgs;
 
     if(cnt > 6) {
-        argv = heap_alloc(cnt * sizeof(*argv));
+        argv = malloc(cnt * sizeof(*argv));
         if(!argv)
             return E_OUTOFMEMORY;
     }else {
@@ -433,7 +433,7 @@ static HRESULT convert_params(script_ctx_t *ctx, const DISPPARAMS *dp, jsval_t *
             while(i--)
                 jsval_release(argv[i]);
             if(argv != buf)
-                heap_free(argv);
+                free(argv);
             return hres;
         }
     }
@@ -462,7 +462,7 @@ static HRESULT prop_get(jsdisp_t *This, dispex_prop_t *prop,  jsval_t *r)
         break;
     case PROP_ACCESSOR:
         if(prop->u.accessor.getter) {
-            hres = jsdisp_call_value(prop->u.accessor.getter, to_disp(This),
+            hres = jsdisp_call_value(prop->u.accessor.getter, jsval_obj(This),
                                      DISPATCH_METHOD, 0, NULL, r);
         }else {
             *r = jsval_undefined();
@@ -529,7 +529,7 @@ static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
             TRACE("no setter\n");
             return S_OK;
         }
-        return jsdisp_call_value(prop->u.accessor.setter, to_disp(This), DISPATCH_METHOD, 1, &val, NULL);
+        return jsdisp_call_value(prop->u.accessor.setter, jsval_obj(This), DISPATCH_METHOD, 1, &val, NULL);
     case PROP_IDX:
         if(!This->builtin_info->idx_put) {
             TRACE("no put_idx\n");
@@ -573,7 +573,7 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
         TRACE("call %s %p\n", debugstr_w(prop->name), get_object(prop->u.val));
 
         return disp_call_value(This->ctx, get_object(prop->u.val),
-                               jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface,
+                               jsval_disp(jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface),
                                flags, argc, argv, r);
     }
     case PROP_ACCESSOR:
@@ -586,7 +586,7 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
 
         if(is_object_instance(val)) {
             hres = disp_call_value(This->ctx, get_object(val),
-                                   jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface,
+                                   jsval_disp(jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface),
                                    flags, argc, argv, r);
         }else {
             FIXME("invoke %s\n", debugstr_jsval(val));
@@ -775,9 +775,9 @@ static ULONG WINAPI ScriptTypeInfo_Release(ITypeInfo *iface)
         for (i = This->num_funcs; i--;)
             release_bytecode(This->funcs[i].code->bytecode);
         IDispatchEx_Release(&This->jsdisp->IDispatchEx_iface);
-        heap_free(This->funcs);
-        heap_free(This->vars);
-        heap_free(This);
+        free(This->funcs);
+        free(This->vars);
+        free(This);
     }
     return ref;
 }
@@ -791,7 +791,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetTypeAttr(ITypeInfo *iface, TYPEATTR **pp
 
     if (!ppTypeAttr) return E_INVALIDARG;
 
-    attr = heap_alloc_zero(sizeof(*attr));
+    attr = calloc(1, sizeof(*attr));
     if (!attr) return E_OUTOFMEMORY;
 
     attr->guid = GUID_JScriptTypeInfo;
@@ -840,7 +840,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetFuncDesc(ITypeInfo *iface, UINT index, F
     func = &This->funcs[index];
 
     /* Store the parameter array after the FUNCDESC structure */
-    desc = heap_alloc_zero(sizeof(*desc) + sizeof(ELEMDESC) * func->code->param_cnt);
+    desc = calloc(1, sizeof(*desc) + sizeof(ELEMDESC) * func->code->param_cnt);
     if (!desc) return E_OUTOFMEMORY;
 
     desc->memid = prop_to_id(This->jsdisp, func->prop);
@@ -868,7 +868,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetVarDesc(ITypeInfo *iface, UINT index, VA
     if (!ppVarDesc) return E_INVALIDARG;
     if (index >= This->num_vars) return TYPE_E_ELEMENTNOTFOUND;
 
-    desc = heap_alloc_zero(sizeof(*desc));
+    desc = calloc(1, sizeof(*desc));
     if (!desc) return E_OUTOFMEMORY;
 
     desc->memid = prop_to_id(This->jsdisp, This->vars[index]);
@@ -1213,7 +1213,7 @@ static void WINAPI ScriptTypeInfo_ReleaseTypeAttr(ITypeInfo *iface, TYPEATTR *pT
 
     TRACE("(%p)->(%p)\n", This, pTypeAttr);
 
-    heap_free(pTypeAttr);
+    free(pTypeAttr);
 }
 
 static void WINAPI ScriptTypeInfo_ReleaseFuncDesc(ITypeInfo *iface, FUNCDESC *pFuncDesc)
@@ -1222,7 +1222,7 @@ static void WINAPI ScriptTypeInfo_ReleaseFuncDesc(ITypeInfo *iface, FUNCDESC *pF
 
     TRACE("(%p)->(%p)\n", This, pFuncDesc);
 
-    heap_free(pFuncDesc);
+    free(pFuncDesc);
 }
 
 static void WINAPI ScriptTypeInfo_ReleaseVarDesc(ITypeInfo *iface, VARDESC *pVarDesc)
@@ -1231,7 +1231,7 @@ static void WINAPI ScriptTypeInfo_ReleaseVarDesc(ITypeInfo *iface, VARDESC *pVar
 
     TRACE("(%p)->(%p)\n", This, pVarDesc);
 
-    heap_free(pVarDesc);
+    free(pVarDesc);
 }
 
 static const ITypeInfoVtbl ScriptTypeInfoVtbl = {
@@ -1464,7 +1464,7 @@ static HRESULT WINAPI DispatchEx_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LC
         else num_vars++;
     }
 
-    if (!(typeinfo = heap_alloc(sizeof(*typeinfo))))
+    if (!(typeinfo = malloc(sizeof(*typeinfo))))
         return E_OUTOFMEMORY;
 
     typeinfo->ITypeInfo_iface.lpVtbl = &ScriptTypeInfoVtbl;
@@ -1474,18 +1474,18 @@ static HRESULT WINAPI DispatchEx_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LC
     typeinfo->num_funcs = num_funcs;
     typeinfo->jsdisp = This;
 
-    typeinfo->funcs = heap_alloc(sizeof(*typeinfo->funcs) * num_funcs);
+    typeinfo->funcs = malloc(sizeof(*typeinfo->funcs) * num_funcs);
     if (!typeinfo->funcs)
     {
-        heap_free(typeinfo);
+        free(typeinfo);
         return E_OUTOFMEMORY;
     }
 
-    typeinfo->vars = heap_alloc(sizeof(*typeinfo->vars) * num_vars);
+    typeinfo->vars = malloc(sizeof(*typeinfo->vars) * num_vars);
     if (!typeinfo->vars)
     {
-        heap_free(typeinfo->funcs);
-        heap_free(typeinfo);
+        free(typeinfo->funcs);
+        free(typeinfo);
         return E_OUTOFMEMORY;
     }
 
@@ -1602,19 +1602,21 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
     case DISPATCH_METHOD:
     case DISPATCH_CONSTRUCT: {
         jsval_t *argv, buf[6], r;
+        IDispatch *passed_this;
         unsigned argc;
 
         hres = convert_params(This->ctx, pdp, buf, &argc, &argv);
         if(FAILED(hres))
             break;
 
+        passed_this = get_this(pdp);
         if(prop)
-            hres = invoke_prop_func(This, get_this(pdp), prop, wFlags, argc, argv, pvarRes ? &r : NULL, pspCaller);
+            hres = invoke_prop_func(This, passed_this, prop, wFlags, argc, argv, pvarRes ? &r : NULL, pspCaller);
         else
-            hres = jsdisp_call_value(This, get_this(pdp), wFlags, argc, argv, pvarRes ? &r : NULL);
+            hres = jsdisp_call_value(This, passed_this ? jsval_disp(passed_this) : jsval_undefined(), wFlags, argc, argv, pvarRes ? &r : NULL);
 
         if(argv != buf)
-            heap_free(argv);
+            free(argv);
         if(SUCCEEDED(hres) && pvarRes) {
             hres = jsval_to_variant(r, pvarRes);
             jsval_release(r);
@@ -1830,7 +1832,7 @@ HRESULT init_dispex(jsdisp_t *dispex, script_ctx_t *ctx, const builtin_info_t *b
     dispex->extensible = TRUE;
     dispex->prop_cnt = 0;
 
-    dispex->props = heap_alloc_zero(sizeof(dispex_prop_t)*(dispex->buf_size=4));
+    dispex->props = calloc(1, sizeof(dispex_prop_t)*(dispex->buf_size=4));
     if(!dispex->props)
         return E_OUTOFMEMORY;
 
@@ -1862,13 +1864,13 @@ HRESULT create_dispex(script_ctx_t *ctx, const builtin_info_t *builtin_info, jsd
     jsdisp_t *ret;
     HRESULT hres;
 
-    ret = heap_alloc_zero(sizeof(jsdisp_t));
+    ret = calloc(1, sizeof(jsdisp_t));
     if(!ret)
         return E_OUTOFMEMORY;
 
     hres = init_dispex(ret, ctx, builtin_info ? builtin_info : &dispex_info, prototype);
     if(FAILED(hres)) {
-        heap_free(ret);
+        free(ret);
         return hres;
     }
 
@@ -1896,9 +1898,9 @@ void jsdisp_free(jsdisp_t *obj)
         default:
             break;
         };
-        heap_free(prop->name);
+        free(prop->name);
     }
-    heap_free(obj->props);
+    free(obj->props);
     script_release(obj->ctx);
     if(obj->prototype)
         jsdisp_release(obj->prototype);
@@ -1906,7 +1908,7 @@ void jsdisp_free(jsdisp_t *obj)
     if(obj->builtin_info->destructor)
         obj->builtin_info->destructor(obj);
     else
-        heap_free(obj);
+        free(obj);
 }
 
 #ifdef TRACE_REFCNT
@@ -1991,14 +1993,14 @@ HRESULT jsdisp_get_id(jsdisp_t *jsdisp, const WCHAR *name, DWORD flags, DISPID *
     return DISP_E_UNKNOWNNAME;
 }
 
-HRESULT jsdisp_call_value(jsdisp_t *jsfunc, IDispatch *jsthis, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
+HRESULT jsdisp_call_value(jsdisp_t *jsfunc, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
 {
     HRESULT hres;
 
     assert(!(flags & ~(DISPATCH_METHOD|DISPATCH_CONSTRUCT|DISPATCH_JSCRIPT_INTERNAL_MASK)));
 
     if(is_class(jsfunc, JSCLASS_FUNCTION)) {
-        hres = Function_invoke(jsfunc, jsthis, flags, argc, argv, r);
+        hres = Function_invoke(jsfunc, vthis, flags, argc, argv, r);
     }else {
         if(!jsfunc->builtin_info->call) {
             WARN("Not a function\n");
@@ -2009,7 +2011,7 @@ HRESULT jsdisp_call_value(jsdisp_t *jsfunc, IDispatch *jsthis, WORD flags, unsig
             return E_UNEXPECTED;
 
         flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
-        hres = jsfunc->builtin_info->call(jsfunc->ctx, jsthis ? jsval_disp(jsthis) : jsval_null(), flags, argc, argv, r);
+        hres = jsfunc->builtin_info->call(jsfunc->ctx, vthis, flags, argc, argv, r);
     }
     return hres;
 }
@@ -2128,7 +2130,7 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, uns
     }
 
     if(dp.cArgs > ARRAY_SIZE(buf)) {
-        dp.rgvarg = heap_alloc(argc*sizeof(VARIANT));
+        dp.rgvarg = malloc(argc * sizeof(VARIANT));
         if(!dp.rgvarg)
             return E_OUTOFMEMORY;
     }else {
@@ -2141,7 +2143,7 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, uns
             while(i--)
                 VariantClear(dp.rgvarg+argc-i-1);
             if(dp.rgvarg != buf)
-                heap_free(dp.rgvarg);
+                free(dp.rgvarg);
             return hres;
         }
     }
@@ -2152,7 +2154,7 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, uns
     for(i=0; i<argc; i++)
         VariantClear(dp.rgvarg+argc-i-1);
     if(dp.rgvarg != buf)
-        heap_free(dp.rgvarg);
+        free(dp.rgvarg);
 
     if(SUCCEEDED(hres) && ret)
         hres = variant_to_jsval(ctx, &retv, ret);
@@ -2187,10 +2189,11 @@ HRESULT disp_call_name(script_ctx_t *ctx, IDispatch *disp, const WCHAR *name, WO
     return disp_call(ctx, disp, id, flags, argc, argv, ret);
 }
 
-HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, WORD flags, unsigned argc, jsval_t *argv,
+HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
     VARIANT buf[6], retv, *args = buf;
+    IDispatch *jsthis;
     jsdisp_t *jsdisp;
     DISPPARAMS dp;
     unsigned i;
@@ -2202,12 +2205,21 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
 
     jsdisp = iface_to_jsdisp(disp);
     if(jsdisp && jsdisp->ctx == ctx) {
-        hres = jsdisp_call_value(jsdisp, jsthis, flags, argc, argv, r);
+        hres = jsdisp_call_value(jsdisp, vthis, flags, argc, argv, r);
         jsdisp_release(jsdisp);
         return hres;
     }
     if(jsdisp)
         jsdisp_release(jsdisp);
+
+    if(is_undefined(vthis))
+        jsthis = NULL;
+    else if(is_object_instance(vthis))
+        jsthis = get_object(vthis);
+    else {
+        FIXME("Unimplemented 'this' passed to host object: %s\n", debugstr_jsval(vthis));
+        return E_NOTIMPL;
+    }
 
     flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
     if(r && argc && flags == DISPATCH_METHOD)
@@ -2223,7 +2235,7 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
         dp.rgdispidNamedArgs = NULL;
     }
 
-    if(dp.cArgs > ARRAY_SIZE(buf) && !(args = heap_alloc(dp.cArgs * sizeof(VARIANT))))
+    if(dp.cArgs > ARRAY_SIZE(buf) && !(args = malloc(dp.cArgs * sizeof(VARIANT))))
         return E_OUTOFMEMORY;
     dp.rgvarg = args;
 
@@ -2243,7 +2255,7 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
     for(i = 0; i < argc; i++)
         VariantClear(dp.rgvarg + dp.cArgs - i - 1);
     if(args != buf)
-        heap_free(args);
+        free(args);
 
     if(FAILED(hres))
         return hres;

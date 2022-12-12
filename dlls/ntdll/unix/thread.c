@@ -62,6 +62,10 @@
 #include <sys/prctl.h>
 #endif
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 #include "ntstatus.h"
@@ -78,7 +82,7 @@ WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 pthread_key_t teb_key = 0;
 
-static int nb_threads = 1;
+static LONG nb_threads = 1;
 
 static inline int get_unix_exit_code( NTSTATUS status )
 {
@@ -1233,7 +1237,8 @@ NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRI
                                 HANDLE process, CLIENT_ID *id, CONTEXT *ctx, INITIAL_TEB *teb,
                                 BOOLEAN suspended )
 {
-    FIXME( "%p %d %p %p %p %p %p %d, stub!\n", handle, access, attr, process, id, ctx, teb, suspended );
+    FIXME( "%p %d %p %p %p %p %p %d, stub!\n",
+           handle, (int)access, attr, process, id, ctx, teb, suspended );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -1255,10 +1260,10 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     DWORD tid = 0;
     int request_pipe[2];
     TEB *teb;
-    NTSTATUS status;
+    unsigned int status;
 
     if (flags & ~supported_flags)
-        FIXME( "Unsupported flags %#x.\n", flags );
+        FIXME( "Unsupported flags %#x.\n", (int)flags );
 
     if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
 #ifndef _WIN64
@@ -1461,7 +1466,7 @@ typedef struct tagTHREADNAME_INFO
  */
 NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     DWORD i;
     obj_handle_t handle = 0;
     client_ptr_t params[EXCEPTION_MAXIMUM_PARAMETERS];
@@ -1520,7 +1525,7 @@ NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_c
             ret = wine_server_call( req );
         }
         SERVER_END_REQ;
-        if (ret >= 0) contexts_from_server( context, server_contexts );
+        if (NT_SUCCESS(ret)) contexts_from_server( context, server_contexts );
     }
 
     pthread_sigmask( SIG_SETMASK, &old_set, NULL );
@@ -1546,7 +1551,7 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
         ERR_(seh)("Process attempted to continue execution after noncontinuable exception.\n");
     else
         ERR_(seh)("Unhandled exception code %x flags %x addr %p\n",
-                  rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
+                  (int)rec->ExceptionCode, (int)rec->ExceptionFlags, rec->ExceptionAddress );
 
     NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
     return STATUS_SUCCESS;
@@ -1568,7 +1573,7 @@ TEB * WINAPI NtCurrentTeb(void)
 NTSTATUS WINAPI NtOpenThread( HANDLE *handle, ACCESS_MASK access,
                               const OBJECT_ATTRIBUTES *attr, const CLIENT_ID *id )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     *handle = 0;
 
@@ -1590,7 +1595,7 @@ NTSTATUS WINAPI NtOpenThread( HANDLE *handle, ACCESS_MASK access,
  */
 NTSTATUS WINAPI NtSuspendThread( HANDLE handle, ULONG *count )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     SERVER_START_REQ( suspend_thread )
     {
@@ -1610,7 +1615,7 @@ NTSTATUS WINAPI NtSuspendThread( HANDLE handle, ULONG *count )
  */
 NTSTATUS WINAPI NtResumeThread( HANDLE handle, ULONG *count )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     SERVER_START_REQ( resume_thread )
     {
@@ -1650,7 +1655,7 @@ NTSTATUS WINAPI NtAlertThread( HANDLE handle )
  */
 NTSTATUS WINAPI NtTerminateThread( HANDLE handle, LONG exit_code )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     BOOL self;
 
     SERVER_START_REQ( terminate_thread )
@@ -1677,7 +1682,7 @@ NTSTATUS WINAPI NtTerminateThread( HANDLE handle, LONG exit_code )
 NTSTATUS WINAPI NtQueueApcThread( HANDLE handle, PNTAPCFUNC func, ULONG_PTR arg1,
                                   ULONG_PTR arg2, ULONG_PTR arg3 )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     SERVER_START_REQ( queue_apc )
     {
@@ -1705,7 +1710,7 @@ NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USH
 {
     context_t server_contexts[2];
     unsigned int count = 0;
-    NTSTATUS ret;
+    unsigned int ret;
 
     context_to_server( &server_contexts[count++], native_machine, context, machine );
     if (machine != native_machine)
@@ -1729,7 +1734,7 @@ NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USH
  */
 NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT machine )
 {
-    NTSTATUS ret;
+    unsigned int ret;
     HANDLE context_handle;
     context_t server_contexts[2];
     unsigned int count;
@@ -1871,7 +1876,7 @@ BOOL get_thread_times(int unix_pid, int unix_tid, LARGE_INTEGER *kernel_time, LA
 static void set_native_thread_name( HANDLE handle, const UNICODE_STRING *name )
 {
 #ifdef linux
-    NTSTATUS status;
+    unsigned int status;
     char path[64], nameA[64];
     int unix_pid, unix_tid, len, fd;
 
@@ -1904,6 +1909,40 @@ static void set_native_thread_name( HANDLE handle, const UNICODE_STRING *name )
         write( fd, nameA, len );
         close( fd );
     }
+#elif defined(__APPLE__)
+    /* pthread_setname_np() silently fails if the name is longer than 63 characters + null terminator */
+    char nameA[64];
+    NTSTATUS status;
+    int unix_pid, unix_tid, len, current_tid;
+
+    SERVER_START_REQ( get_thread_times )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        status = wine_server_call( req );
+        if (status == STATUS_SUCCESS)
+        {
+            unix_pid = reply->unix_pid;
+            unix_tid = reply->unix_tid;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (status != STATUS_SUCCESS || unix_pid == -1 || unix_tid == -1)
+        return;
+
+    current_tid = mach_thread_self();
+    mach_port_deallocate(mach_task_self(), current_tid);
+
+    if (unix_tid != current_tid)
+    {
+        static int once;
+        if (!once++) FIXME("setting other thread name not supported\n");
+        return;
+    }
+
+    len = ntdll_wcstoumbs( name->Buffer, name->Length / sizeof(WCHAR), nameA, sizeof(nameA) - 1, FALSE );
+    nameA[len] = '\0';
+    pthread_setname_np(nameA);
 #else
     static int once;
     if (!once++) FIXME("not implemented on this platform\n");
@@ -1934,9 +1973,9 @@ static BOOL is_process_wow64( const CLIENT_ID *id )
 NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
                                           void *data, ULONG length, ULONG *ret_len )
 {
-    NTSTATUS status;
+    unsigned int status;
 
-    TRACE("(%p,%d,%p,%x,%p)\n", handle, class, data, length, ret_len);
+    TRACE("(%p,%d,%p,%x,%p)\n", handle, class, data, (int)length, ret_len);
 
     switch (class)
     {
@@ -2166,6 +2205,17 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         if (ret_len) *ret_len = sizeof(BOOLEAN);
         return STATUS_SUCCESS;
 
+    case ThreadPriorityBoost:
+    {
+        DWORD *value = data;
+
+        if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (ret_len) *ret_len = sizeof(ULONG);
+        *value = 0;
+        return STATUS_SUCCESS;
+    }
+
+    case ThreadIdealProcessor:
     case ThreadEnableAlignmentFaultFixup:
         return STATUS_INVALID_INFO_CLASS;
 
@@ -2175,8 +2225,6 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadEventPair_Reusable:
     case ThreadZeroTlsCell:
     case ThreadPerformanceCount:
-    case ThreadIdealProcessor:
-    case ThreadPriorityBoost:
     case ThreadSetTlsArrayAddress:
     default:
         FIXME( "info class %d not supported yet\n", class );
@@ -2191,9 +2239,9 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
 NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
                                         const void *data, ULONG length )
 {
-    NTSTATUS status;
+    unsigned int status;
 
-    TRACE("(%p,%d,%p,%x)\n", handle, class, data, length);
+    TRACE("(%p,%d,%p,%x)\n", handle, class, data, (int)length);
 
     switch (class)
     {
@@ -2325,7 +2373,7 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         if (handle == GetCurrentThread() || (!status && (HandleToULong(tbi.ClientId.UniqueThread) == GetCurrentThreadId())))
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_us(&info->ThreadName) );
         else if (!status)
-            WARN_(threadname)( "Thread ID %04x renamed to %s\n", HandleToULong( tbi.ClientId.UniqueThread ), debugstr_us(&info->ThreadName) );
+            WARN_(threadname)( "Thread ID %04x renamed to %s\n", (int)HandleToULong( tbi.ClientId.UniqueThread ), debugstr_us(&info->ThreadName) );
         else
             WARN_(threadname)( "Thread handle %p renamed to %s\n", handle, debugstr_us(&info->ThreadName) );
 
@@ -2368,6 +2416,20 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         FIXME( "ThreadPowerThrottling stub!\n" );
         return STATUS_SUCCESS;
 
+    case ThreadIdealProcessor:
+    {
+        const ULONG *number = data;
+
+        if (length != sizeof(*number)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (*number > MAXIMUM_PROCESSORS) return STATUS_INVALID_PARAMETER;
+        FIXME( "ThreadIdealProcessor stub!\n" );
+        return STATUS_SUCCESS;
+    }
+
+    case ThreadPriorityBoost:
+        WARN("Unimplemented class ThreadPriorityBoost.\n");
+        return STATUS_SUCCESS;
+
     case ThreadBasicInformation:
     case ThreadTimes:
     case ThreadPriority:
@@ -2375,8 +2437,6 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadEventPair_Reusable:
     case ThreadPerformanceCount:
     case ThreadAmILastThread:
-    case ThreadIdealProcessor:
-    case ThreadPriorityBoost:
     case ThreadSetTlsArrayAddress:
     case ThreadIsIoPending:
     default:
@@ -2425,7 +2485,7 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
                 {
                     if (thread_mask != processor_mask)
                         FIXME( "need multicore support (%d processors)\n",
-                               peb->NumberOfProcessors );
+                               (int)peb->NumberOfProcessors );
                     return processor;
                 }
             }
@@ -2443,10 +2503,10 @@ NTSTATUS WINAPI NtGetNextThread( HANDLE process, HANDLE thread, ACCESS_MASK acce
                                  ULONG flags, HANDLE *handle )
 {
     HANDLE ret_handle = 0;
-    NTSTATUS ret;
+    unsigned int ret;
 
     TRACE( "process %p, thread %p, access %#x, attributes %#x, flags %#x, handle %p.\n",
-            process, thread, access, attributes, flags, handle );
+            process, thread, (int)access, (int)attributes, (int)flags, handle );
 
     SERVER_START_REQ( get_next_thread )
     {

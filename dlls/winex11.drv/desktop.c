@@ -217,7 +217,8 @@ static BOOL X11DRV_desktop_get_current_mode( ULONG_PTR id, DEVMODEW *mode )
 static LONG X11DRV_desktop_set_current_mode( ULONG_PTR id, const DEVMODEW *mode )
 {
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
-        WARN("Cannot change screen color depth from %dbits to %dbits!\n", screen_bpp, mode->dmBitsPerPel);
+        WARN("Cannot change screen color depth from %dbits to %dbits!\n",
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     desktop_width = mode->dmPelsWidth;
     desktop_height = mode->dmPelsHeight;
@@ -470,8 +471,10 @@ void X11DRV_resize_desktop(void)
                         virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
     ungrab_clipping_window();
-    send_message_timeout( HWND_BROADCAST, WM_X11DRV_DESKTOP_RESIZED, old_virtual_rect.left,
-                          old_virtual_rect.top, SMTO_ABORTIFHUNG, 2000, FALSE );
+
+    if (old_virtual_rect.left != virtual_rect.left || old_virtual_rect.top != virtual_rect.top)
+        send_message_timeout( HWND_BROADCAST, WM_X11DRV_DESKTOP_RESIZED, old_virtual_rect.left,
+                              old_virtual_rect.top, SMTO_ABORTIFHUNG, 2000, FALSE );
 
     /* forward clip_fullscreen_window request to the foreground window */
     send_notify_message( NtUserGetForegroundWindow(), WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );

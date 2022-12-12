@@ -47,7 +47,8 @@ alias_map[] =
     { L"process", L"Win32_Process" },
     { L"baseboard", L"Win32_BaseBoard" },
     { L"diskdrive", L"Win32_DiskDrive" },
-    { L"memorychip", L"Win32_PhysicalMemory" }
+    { L"memorychip", L"Win32_PhysicalMemory" },
+    { L"nicconfig", L"Win32_NetworkAdapterConfiguration" },
 };
 
 static const WCHAR *find_class( const WCHAR *alias )
@@ -165,13 +166,65 @@ static HRESULT process_property_list( IWbemClassObject *obj, const WCHAR *propli
     return hr;
 }
 
+static void convert_to_bstr( VARIANT *v )
+{
+    BSTR out = NULL;
+    VARTYPE vt;
+
+    if (SUCCEEDED(VariantChangeType( v, v, 0, VT_BSTR ))) return;
+    vt = V_VT(v);
+    if (vt == (VT_ARRAY | VT_BSTR))
+    {
+        unsigned int i, count, len;
+        BSTR *strings;
+        WCHAR *ptr;
+
+        if (FAILED(SafeArrayAccessData( V_ARRAY(v), (void **)&strings )))
+        {
+            WINE_ERR( "Could not access array.\n" );
+            goto done;
+        }
+        count = V_ARRAY(v)->rgsabound->cElements;
+        len = 0;
+        for (i = 0; i < count; ++i)
+            len += wcslen( strings[i] );
+        len += count * 2 + 2;
+        if (count) len += 2 * (count - 1);
+        out = SysAllocStringLen( NULL, len );
+        ptr = out;
+        *ptr++ = '{';
+        for (i = 0; i < count; ++i)
+        {
+            if (i)
+            {
+                memcpy( ptr, L", ", 2 * sizeof(*ptr) );
+                ptr += 2;
+            }
+            *ptr++ = '\"';
+            len = wcslen( strings[i] );
+            memcpy( ptr, strings[i], len * sizeof(*ptr) );
+            ptr += len;
+            *ptr++ = '\"';
+        }
+        *ptr++ = '}';
+        *ptr = 0;
+        SafeArrayUnaccessData( V_ARRAY(v) );
+    }
+done:
+    VariantClear( v );
+    V_VT(v) = VT_BSTR;
+    V_BSTR(v) = out ? out : SysAllocString( L"" );
+    if (vt != VT_NULL && vt != VT_EMPTY && !out)
+        WINE_FIXME( "Could not convert variant, vt %u.\n", vt );
+}
+
 static int query_prop( const WCHAR *class, const WCHAR *propnames )
 {
     HRESULT hr;
     IWbemLocator *locator = NULL;
     IWbemServices *services = NULL;
     IEnumWbemClassObject *result = NULL;
-    LONG flags = WBEM_FLAG_RETURN_IMMEDIATELY | WBEM_FLAG_FORWARD_ONLY;
+    LONG flags = WBEM_FLAG_RETURN_IMMEDIATELY;
     BSTR path = NULL, wql = NULL, query = NULL, name, str = NULL;
     WCHAR *proplist = NULL;
     int len, ret = -1;
@@ -224,9 +277,10 @@ static int query_prop( const WCHAR *class, const WCHAR *propnames )
         IEnumWbemClassObject_Next( result, WBEM_INFINITE, 1, &obj, &count );
         if (!count) break;
 
+        IWbemClassObject_BeginEnumeration( obj, 0 );
         while (IWbemClassObject_Next( obj, 0, &name, &v, NULL, NULL ) == S_OK)
         {
-            VariantChangeType( &v, &v, 0, VT_BSTR );
+            convert_to_bstr( &v );
             width = max( lstrlenW( V_BSTR( &v ) ), width );
             VariantClear( &v );
             SysFreeString( name );
@@ -241,6 +295,7 @@ static int query_prop( const WCHAR *class, const WCHAR *propnames )
     IEnumWbemClassObject_Next( result, WBEM_INFINITE, 1, &obj, &count );
     if (count)
     {
+        IWbemClassObject_BeginEnumeration( obj, 0 );
         while (IWbemClassObject_Next( obj, 0, &name, NULL, NULL, NULL ) == S_OK)
         {
             output_text( name, width );
@@ -256,10 +311,10 @@ static int query_prop( const WCHAR *class, const WCHAR *propnames )
     {
         IEnumWbemClassObject_Next( result, WBEM_INFINITE, 1, &obj, &count );
         if (!count) break;
-
+        IWbemClassObject_BeginEnumeration( obj, 0 );
         while (IWbemClassObject_Next( obj, 0, NULL, &v, NULL, NULL ) == S_OK)
         {
-            VariantChangeType( &v, &v, 0, VT_BSTR );
+            convert_to_bstr( &v );
             output_text( V_BSTR( &v ), width );
             VariantClear( &v );
         }
